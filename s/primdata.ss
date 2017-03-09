@@ -1500,6 +1500,7 @@
   (record? [sig [(ptr) (ptr rtd) -> (boolean)]] [flags pure mifoldable discard cp02])
   (record-constructor [sig [(sub-ptr) -> (procedure)]] [flags cp02]) ; accepts rtd or rcd
   (record-constructor-descriptor? [sig [(ptr) -> (boolean)]] [flags pure unrestricted mifoldable discard cp02])
+  (record-equal+hash [sig [(ptr) -> (ptr ...)] [(ptr ptr ptr) -> (void)]] [flags])
   (record-reader [sig [(sub-ptr) -> (ptr)] [(sub-ptr sub-ptr) -> (void)]] [flags])
   (record-writer [sig [(rtd) -> (maybe-procedure)] [(rtd maybe-procedure) -> (void)]] [flags])
   (register-signal-handler [sig [(sint procedure) -> (void)]] [flags])

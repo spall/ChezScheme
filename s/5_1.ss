@@ -108,6 +108,22 @@
                               (set-cdr! ry (fx+ ny nx))
                               #f))))))))))
 
+  (define (get-common-record-equal x y)
+    (let ([x-rtd (#3%record-rtd x)])
+      (call-with-values (lambda () (record-equal+hash x-rtd))
+        (case-lambda
+          [() #f]
+          [(x-equal x-hash x-e+h-rtd) 
+           (and x-equal
+                (let ([y-rtd (#3%record-rtd y)])
+                  (or (eq? x-rtd y-rtd)
+                      (call-with-values (lambda () (record-equal+hash y-rtd))
+                        (case-lambda
+                          [() #f]
+                          [(y-equal y-hash y-e+h-rtd)
+                           (eq? x-e+h-rtd y-e+h-rtd)]))))
+                x-equal)]))))
+               
   (define (interleave? x y k)
     (let ([ht (make-eq-hashtable)])
       (define (e? x y k)
@@ -160,6 +176,21 @@
              (if (union-find ht x y)
                  0
                  (e? (unbox x) (unbox y) (fx- k 1))))]
+          [($record? x)
+           (and ($record? y)
+                (let ([rec-equal? (get-common-record-equal x y)])
+                  (and rec-equal?
+                       (if (union-find ht x y)
+                           0
+                           (let ([next-k k])
+                             (and (rec-equal? x y
+                                              (lambda (x1 y1)
+                                                (let ([k (e? x1 y1 next-k)])
+                                                  (and k
+                                                       (begin
+                                                         (set! next-k k)
+                                                         #t)))))
+                                  next-k))))))]
           [else (and (eqv? x y) k)]))
       (define (fast? x y k)
         (let ([k (fx- k 1)])
@@ -198,6 +229,19 @@
                         (and (fx= (fxvector-ref x i) (fxvector-ref y i))
                              (f (fx1- i))))))]
             [(box? x) (and (box? y) (e? (unbox x) (unbox y) k))]
+            [($record? x)
+             (and ($record? y)
+                  (let ([rec-equal? (get-common-record-equal x y)])
+                    (and rec-equal?
+                         (let ([next-k k])
+                           (and (rec-equal? x y
+                                            (lambda (x1 y1)
+                                              (let ([k (e? x1 y1 next-k)])
+                                                (and k
+                                                     (begin
+                                                       (set! next-k k)
+                                                       #t)))))
+                                next-k)))))]
             [else (and (eqv? x y) k)])))
       (and (e? x y k) #t)))
 
@@ -246,6 +290,21 @@
          (if (fx<= k 0)
              k
              (precheck? (unbox x) (unbox y) (fx- k 1))))]
+      [($record? x)
+       (and ($record? y)
+            (let ([rec-equal? (get-common-record-equal x y)])
+              (and rec-equal?
+                   (if (fx<= k 0)
+                       k
+                       (let ([next-k k])
+                         (and (rec-equal? x y
+                                          (lambda (x1 y1)
+                                            (let ([k (precheck? x1 y1 (fx- next-k 1))])
+                                              (and k
+                                                   (begin
+                                                     (set! next-k k)
+                                                     #t)))))
+                              next-k))))))]
       [else (and (eqv? x y) k)]))
 
   (let ([k (precheck? x y k0)])

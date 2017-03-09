@@ -2210,7 +2210,7 @@ Otherwise, it is a gensym whose ``pretty'' name
 \scheme{define-record} or \scheme{make-record-type}.
 
 The default printing of records of a given type may be overridden
-with \var{record-writer}.
+with \scheme{record-writer}.
 
 The default syntax may be used as input to the reader as well, as long
 as the corresponding record type has already been defined in the Scheme
@@ -2579,7 +2579,7 @@ contexts where they are recognized as auxiliary keywords.
 
 \noindent
 \var{name} must name a record type defined by \scheme{define-record}
-of \scheme{define-record-type}.
+or \scheme{define-record-type}.
 
 This form is equivalent to the Revised$^6$ Report
 \scheme{record-type-descriptor} form.
@@ -2793,6 +2793,93 @@ name of the record type as returned by \scheme{record-type-name}.
 
 % not documented:
 %   extended version with base-rtd, parent, name, fields, interfaces, and extras
+
+%----------------------------------------------------------------------------
+\entryheader
+\formdef{record-equal+hash}{\categoryprocedure}{(record-equal+hash \var{rtd})}
+\returns zero values or two procedures and a record-type descriptor
+\formdef{record-equal+hash}{\categoryprocedure}{(record-equal+hash \var{rtd} \var{equal-proc} \var{hash-proc})}
+\returns unspecified
+\listlibraries
+\endentryheader
+
+\noindent
+\var{rtd} must be a record-type descriptor, and \var{equal-proc} and
+\var{hash-proc} must be both \scheme{#f} or both procedures.
+
+When passed only one argument, \scheme{record-equal+hash} returns
+either zero values or three values. It returns zero values when no
+equality and hashing customizations are associated to \var{rtd} or any
+of its ancestors. Otherwise, the equality and hashing procedures are
+returned, along with a record-type descriptor that is either \var{rtd}
+or its closest ancestor that has customizing procedures.
+
+When passed three arguments, \scheme{record-equal+hash} establishes a
+new association between \var{rtd} and \var{equal-proc} plus
+\var{hash-proc} so that the procedures will be used by \scheme{equal?}
+and \scheme{equal-hash}:
+
+\begin{itemize}
+
+\item An \scheme{equal?} comparison uses \var{equal-proc} when
+comparing a record instance of \var{rtd} to another record instance
+that has the same association (i.e., also an instance of \var{rtd} and
+without a more specific association from a descendant record type).
+\var{equal-proc} is passed three arguments: the two record values plus
+an \var{eql?} procedure that is like \scheme{equal?} for recursive
+comparsion of values within the two records. Using the provided
+\var{eql?} for recursive comparisons supports equality between values
+that contain reference cycles.
+
+The rule for applying \var{equal-proc} means that when a child record
+type inherits an equality customization from a parent record type,
+\scheme{equal?} comparisons will use the \var{equal-proc} for
+comparisons that involve either two instances of the child, two
+instances of the parent, or one instance of the child and one instance
+of the parent in either order.
+
+\item A \scheme{equal-hash} calculation uses \var{hash-proc} to
+compute a hash code for a record instance of \var{rtd}. The procedure
+is passed two arguments: the record value plus a \var{hash} procedure
+that is like \scheme{equal-hash} for recursively hasing values within
+the record. Using the provided \var{hash} for recursive hashing
+supports values that contain reference cycles.
+
+\end{itemize}
+
+When passed \var{equal-proc} and \var{hash-proc} as \scheme{#f},
+\scheme{record-equal+hash} removes any association between \var{rtd}
+and a pair of procedures for \scheme{equal?} and \scheme{equal-hash}.
+In that case, \var{rtd} reverts to inheriting procedures associated to
+an ancestor, if any.
+
+\schemedisplay
+(define-record marble (color quality))
+
+(record-equal+hash (type-descriptor marble)) ;=> (values)
+(equal? (make-marble 'blue 'medium) (make-marble 'blue 'medium)) ;=> #f
+(equal? (make-marble 'blue 'medium) (make-marble 'blue 'high)) ;=> #f
+
+; Treat marbles as equal when they have the same color
+(record-equal+hash (type-descriptor marble)
+  (lambda (m1 m2 eql?)
+    (eql? (marble-color m1) (marble-color m2)))
+  (lambda (m hash)
+    (hash (marble-color m))))
+
+(equal? (make-marble 'blue 'medium) (make-marble 'blue 'high)) ;=> #t
+(equal? (make-marble 'red 'high) (make-marble 'blue 'high)) ;=> #f
+
+(define ht (make-hashtable equal-hash equal?))
+(hashtable-set! ht (make-marble 'blue 'medium) "glass")
+(hashtable-ref ht (make-marble 'blue 'high) #f) ;=> "glass"
+
+(define-record shooter marble (size))
+
+(equal? (make-marble 'blue 'medium) (make-shooter 'blue 'large 17)) ;=> #t
+(equal? (make-shooter 'blue 'large 17) (make-marble 'blue 'medium)) ;=> #t
+(hashtable-ref ht (make-shooter 'blue 'high 17) #f) ;=> "glass"
+\endschemedisplay
 
 %----------------------------------------------------------------------------
 \entryheader

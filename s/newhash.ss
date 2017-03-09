@@ -914,6 +914,25 @@ Documentation notes:
               [(bytevector? x) (values (update hc (bytevector-hash x)) i)]
               [(boolean? x) (values (update hc (if x 336200167 307585980)) i)]
               [(char? x) (values (update hc (char->integer x)) i)]
+              [(and ($record? x)
+                    (call-with-values (lambda () (record-equal+hash (#3%record-rtd x)))
+                      (case-lambda
+                        [() #f]
+                        [(rec-equal? rec-hash rtd) rec-hash])))
+               => (lambda (rec-hash)
+                    (let ([new-i i])
+                      (let ([sub-hc (rec-hash
+                                     x
+                                     (lambda (v)
+                                       (if (fx<= new-i 0)
+                                           0
+                                           (let-values ([(sub-hc sub-i) (f v 0 i)])
+                                             (set! new-i sub-i)
+                                             sub-hc))))])
+                        (let ([hc (update hc (if (fixnum? sub-hc)
+                                                 sub-hc
+                                                 (modulo (abs sub-hc) (greatest-fixnum))))])
+                          (values hc new-i)))))]
               [else (values (update hc 120634730) i)])))
         (let-values ([(hc i) (f x 523658599 64)])
           (hcabs hc)))))
@@ -1023,4 +1042,99 @@ Documentation notes:
         (ht-size-set! h 0)
         (unless (fx= n minlen)
           (ht-vec-set! h ($make-eqhash-vector minlen))))))
+  
+  (let ()
+    ;; An equal+hash mapping contains a procedures plus the rtd where
+    ;; the procedures were installed. It also has a weak table of uids
+    ;; for child rtds that have inherited the setting, in case the
+    ;; rtd's setting changes.
+    (define-record-type equal+hash
+      (fields equal hash rtd (mutable inheritors))
+      (nongenerative)
+      (sealed #t))
+
+    ;; Gets an `equal+hash` record for the given rtd, finding
+    ;; it from a parent rtd and caching if necessary:
+    (define (get-equal+hash rtd)
+      (let* ([uid (record-type-uid rtd)]
+             [v ($sgetprop uid 'record-equal+hash #f)]) ; need with-tc-mutex?
+        (cond
+         [(equal+hash? v) v]
+         [else
+          (let ([parent-rtd (record-type-parent rtd)])
+            (cond
+             [(not parent-rtd)
+              ;; Cache an empty `equal+hash` record:
+              (let ([e+h (make-equal+hash #f #f rtd #f)])
+                (with-tc-mutex
+                  ;; Double-check to avoid a race:
+                  (let ([other-e+h ($sgetprop uid 'record-equal+hash #f)])
+                    (or other-e+h
+                        (begin
+                          ($sputprop uid 'record-equal+hash e+h)
+                          e+h)))))]
+             [else
+              ;; Cache parent's value, and register as an inheritor:
+              (let ([e+h (get-equal+hash parent-rtd)])
+                (unless (equal+hash-inheritors e+h)
+                  (equal+hash-inheritors-set! e+h (make-weak-eq-hashtable)))
+                (hashtable-set! (equal+hash-inheritors e+h) uid #t)
+                (with-tc-mutex
+                  ;; We don't check for a race here, because that wouldn't
+                  ;; improve thread safety; as long as there's no race on
+                  ;; installation and use of equality and hash procedure, then
+                  ;; the only race possible here is re-installing the same
+                  ;; inherited record
+                  ($sputprop uid 'record-equal+hash e+h))
+                e+h)]))])))
+
+    (set-who! record-equal+hash
+          (case-lambda
+            [(rtd)
+             (unless (record-type-descriptor? rtd)
+               ($oops who "~s is not a record-type descriptor" rtd))
+             (let ([e+h (get-equal+hash rtd)])
+               (if (equal+hash-equal e+h)
+                   (values (equal+hash-equal e+h)
+                           (equal+hash-hash e+h)
+                           (equal+hash-rtd e+h))
+                   (values)))]
+            [(rtd equal hash)
+             (unless (record-type-descriptor? rtd)
+               ($oops who "~s is not a record-type descriptor" rtd))
+             (when equal
+               (unless (procedure? equal)
+                 ($oops who "invalid equality procedure ~s" equal))
+               (unless hash
+                 ($oops who "no hashing procedure provided with equality procedure")))
+             (when hash
+               (unless (procedure? hash)
+                 ($oops who "invalid hashing procedure ~s" hash))
+               (unless equal
+                 ($oops who "no equality procedure provided with hashing procedure")))
+             (let* ([uid (record-type-uid rtd)]
+                    [old-e+h ($sgetprop uid 'record-equal+hash #f)]) ; need with-tc-mutex?
+               (when (and old-e+h
+                          (equal+hash-inheritors old-e+h))
+                 ;; Remove the old record from anywhere that it's inherited,
+                 ;; and a later lookup will re-inherit:
+                 (let ([vec (hashtable-keys (equal+hash-inheritors old-e+h))])
+                   (let clear-loop ([i (vector-length vec)])
+                     (unless (fx= i 0) 
+                       (let* ([i (fx- i 1)]
+                              [i-uid (vector-ref vec i)])
+                         (with-tc-mutex
+                          (when (eq? old-e+h ($sgetprop i-uid 'record-equal+hash #f))
+                            ($sremprop i-uid 'record-equal+hash)))
+                         (clear-loop i))))))
+               (cond
+                [equal
+                 ;; Install new functions:
+                 (with-tc-mutex
+                  ($sputprop uid 'record-equal+hash (make-equal+hash equal hash rtd #f)))]
+                [else
+                 ;; Remove any mapping:
+                 (with-tc-mutex
+                  ($sremprop uid 'record-equal+hash))]))])))
+
 )

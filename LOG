@@ -350,3 +350,7 @@
   by the System V ABI.
      x86_64.ss,
      foreign.ms
+- added record-equal+hash to enable per-type customization of the
+  behavior of equal? and equal-hash for a record value
+     5_1.ss, newhash.ss, primdata.ss, root-experr*,
+     objects.stex

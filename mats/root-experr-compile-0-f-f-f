@@ -7206,6 +7206,11 @@ record.mo:Expected error in mat foreign-data: "foreign-set!: invalid value 17 fo
 record.mo:Expected error in mat foreign-data: "foreign-set!: invalid value 17 for foreign type single-float".
 record.mo:Expected error in mat foreign-data: "foreign-set!: invalid value 17 for foreign type double".
 record.mo:Expected error in mat foreign-data: "foreign-set!: invalid value 17 for foreign type double-float".
+record.mo:Expected error in mat record-equal+hash: "record-equal+hash: 7 is not a record-type descriptor".
+record.mo:Expected error in mat record-equal+hash: "record-equal+hash: invalid hashing procedure 7".
+record.mo:Expected error in mat record-equal+hash: "record-equal+hash: invalid equality procedure 7".
+record.mo:Expected error in mat record-equal+hash: "record-equal+hash: no hashing procedure provided with equality procedure".
+record.mo:Expected error in mat record-equal+hash: "record-equal+hash: no equality procedure provided with hashing procedure".
 record.mo:Expected error in mat record21: "duplicate field names in record definition (define-record foo (x x))".
 record.mo:Expected error in mat record21: "duplicate field names in record definition (define-record foo (x (mutable x)))".
 record.mo:Expected error in mat record21: "duplicate field names in record definition (define-record foo (x) ((x 3)))".

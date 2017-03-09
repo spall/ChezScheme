@@ -2883,6 +2883,148 @@
            (equal? (format "~s" x) "#0=(#0# . 4)"))))
 )
 
+(mat record-equal+hash
+  (begin
+    (define (equiv? v1 v2)
+      (and (equal? v1 v2)
+           (= (equal-hash v1) (equal-hash v2))
+           (let ([ht (make-hashtable equal-hash equal?)])
+             (hashtable-set! ht v1 "yes")
+             (equal? "yes" (hashtable-ref ht v2 "no")))))
+    
+    (define (not-equiv? v1 v2)
+      (and (not (equal? v1 v2))
+           (let ([ht (make-hashtable equal-hash equal?)])
+             (hashtable-set! ht v1 "yes")
+             (equal? "no" (hashtable-ref ht v2 "no")))))
+
+    (define-record-type E+H$a
+      (fields (mutable x)
+              (immutable y)))
+
+    (define-record-type E+H$a+
+      (parent E+H$a)
+      (fields (mutable z)))
+
+    (define-record-type E+H$b
+      (fields (immutable x)
+              (mutable y))
+      (opaque #t))
+
+    (define-record-type E+H$b+
+      (parent E+H$b)
+      (fields (mutable z))
+      (opaque #t))
+
+    (define (E+H$a-equal? a1 a2 eql?)
+      (eql? (E+H$a-x a1) (E+H$a-x a2)))
+    (define (E+H$a-hash a hc)
+      (hc (E+H$a-x a)))
+
+    (define (E+H$b-equal? b1 b2 eql?)
+      (eql? (E+H$b-y b1) (E+H$b-y b2)))
+    (define (E+H$b-hash b hc)
+      (hc (E+H$b-y b)))
+
+    (define cyclic-E+H$a1 (make-E+H$a 1 2))
+    (E+H$a-x-set! cyclic-E+H$a1 cyclic-E+H$a1)
+    (define cyclic-E+H$a2 (make-E+H$a 1 2))
+    (E+H$a-x-set! cyclic-E+H$a2 cyclic-E+H$a2)
+
+    (define cyclic-E+H$b+1 (make-E+H$b+ 1 2 3))
+    (define cyclic-E+H$b+2 (make-E+H$b+ 1 2 3))
+    (E+H$b-y-set! cyclic-E+H$b+1 (list 1 2 3 (box cyclic-E+H$b+2)))
+    (E+H$b-y-set! cyclic-E+H$b+2 (list 1 2 3 (box cyclic-E+H$b+1)))
+
+    #t)
+
+  (not-equiv? (make-E+H$a 1 2) (make-E+H$a 1 2))
+  (not-equiv? (make-E+H$b 1 2) (make-E+H$b 1 2))
+
+  (equal? (call-with-values (lambda () (record-equal+hash (record-type-descriptor E+H$a)))
+            list)
+          '())
+  (equal? (call-with-values (lambda () (record-equal+hash (record-type-descriptor E+H$a+)))
+            list)
+          '())
+  (equal? (call-with-values (lambda () (record-equal+hash (record-type-descriptor E+H$b+)))
+            list)
+          '())
+  (equal? (call-with-values (lambda () (record-equal+hash (record-type-descriptor E+H$b)))
+            list)
+          '())
+
+  (begin
+    (record-equal+hash (record-type-descriptor E+H$a) E+H$a-equal? E+H$a-hash)
+    #t)
+
+  (equal? (call-with-values (lambda () (record-equal+hash (record-type-descriptor E+H$a)))
+            list)
+          (list E+H$a-equal? E+H$a-hash (record-type-descriptor E+H$a)))
+  (equal? (call-with-values (lambda () (record-equal+hash (record-type-descriptor E+H$a+)))
+           list)
+          (list E+H$a-equal? E+H$a-hash (record-type-descriptor E+H$a)))
+  
+  (equiv? (make-E+H$a 1 2) (make-E+H$a 1 2))
+  (equiv? (make-E+H$a 1 2) (make-E+H$a 1 3))
+  
+  (equiv? (make-E+H$a 1 2) (make-E+H$a+ 1 3 5))
+  (equiv? (make-E+H$a+ 1 3 5) (make-E+H$a 1 2))
+  
+  (not-equiv? (make-E+H$a+ 2 3 5) (make-E+H$a 1 2))
+  (not-equiv? (make-E+H$a+ 2 3 5) (make-E+H$a+ 1 2 4))
+
+  (not (equiv? (make-E+H$a 1 2) (make-E+H$b 1 2)))
+
+  (not-equiv? (make-E+H$b 1 2) (make-E+H$b 1 2))
+  (not-equiv? (make-E+H$b+ 1 2 3) (make-E+H$b+ 1 2 3))
+  (equal? (call-with-values (lambda () (record-equal+hash (record-type-descriptor E+H$b+)))
+            list)
+          '())
+  (equal? (call-with-values (lambda () (record-equal+hash (record-type-descriptor E+H$b)))
+            list)
+          '())
+
+  (begin
+    (record-equal+hash (record-type-descriptor E+H$b+) E+H$b-equal? E+H$b-hash)
+    #t)
+
+  (not-equiv? (make-E+H$b 1 2) (make-E+H$b 1 2))
+  (equiv? (make-E+H$b+ 0 2 4) (make-E+H$b+ 1 2 3))
+
+  (equiv? cyclic-E+H$a1 cyclic-E+H$a2)
+  (equiv? cyclic-E+H$a1 (make-E+H$a cyclic-E+H$a2 3))
+
+  (equiv? cyclic-E+H$b+1 cyclic-E+H$b+2)
+
+  (begin
+    (record-equal+hash (record-type-descriptor E+H$a+) E+H$a-equal? E+H$a-hash)
+    #t)
+
+  (equiv? (make-E+H$a+ 1 2 4) (make-E+H$a+ 1 3 5))
+  (not-equiv? (make-E+H$a+ 1 3 5) (make-E+H$a 1 2))
+  (not-equiv? (make-E+H$a 1 2) (make-E+H$a+ 1 3 5))
+
+  (begin
+    (record-equal+hash (record-type-descriptor E+H$a+) #f #f)
+    #t)
+
+  (equiv? (make-E+H$a+ 1 3 5) (make-E+H$a 1 2))
+  (equiv? (make-E+H$a 1 2) (make-E+H$a+ 1 3 5))
+  (equiv? (make-E+H$a+ 1 2 4) (make-E+H$a+ 1 3 5))
+
+  (error?
+   (record-equal+hash 7))
+  (error?
+   (record-equal+hash (record-type-descriptor E+H$a+) values 7))
+  (error?
+   (record-equal+hash (record-type-descriptor E+H$a+) 7 values))
+  (error?
+   (record-equal+hash (record-type-descriptor E+H$a+) values #f))
+  (error?
+   (record-equal+hash (record-type-descriptor E+H$a+) #f values))
+)
+
 (mat record19
  ; test ellipses in init expressions
   (equal?
