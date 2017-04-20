@@ -49,6 +49,9 @@ static void sweep_code_object PROTO((ptr tc, ptr co));
 static void record_dirty_segment PROTO((IGEN from_g, IGEN to_g, seginfo *si));
 static void sweep_dirty PROTO((void));
 static void resweep_dirty_weak_pairs PROTO((void));
+static void add_ephemeron_to_pending PROTO((ptr p));
+static void check_pending_ephemerons PROTO(());
+static void clear_pending_ephemerons PROTO(());
 
 /* MAXPTR is used to pad the sorted_locked_object vector.  The pad value must be greater than any heap address */
 #define MAXPTR ((ptr)-1)
@@ -332,6 +335,14 @@ static ptr copy(pp, pps) ptr pp; ISPC pps; {
           }
           BOXTYPE(p) = (iptr)tf;
           INITBOXREF(p) = Sunbox(pp);
+      } else if ((iptr)tf == type_ephemeron) {
+#ifdef ENABLE_OBJECT_COUNTS
+          S_G.countof[tg][countof_ephemeron] += 1;
+#endif /* ENABLE_OBJECT_COUNTS */
+          find_room(space_ephemeron, tg, type_typed_object, size_ephemeron, p);
+          EPHEMERONTYPE(p) = (iptr)tf;
+          INITEPHEMERONKEY(p) = EPHEMERONKEY(pp);
+          INITEPHEMERONVAL(p) = EPHEMERONVAL(pp);
       } else if ((iptr)tf == type_ratnum) {
         /* not recursive: place in space_data and relocate fields immediately */
 #ifdef ENABLE_OBJECT_COUNTS
@@ -533,7 +544,8 @@ static void sweep(ptr tc, ptr p, IBOOL sweep_pure) {
   ptr tf; ITYPE t;
 
   if ((t = TYPEBITS(p)) == type_pair) {
-    if ((SPACE(p) & ~(space_locked | space_old)) != space_weakpair) {
+    ISPC S = (SPACE(p) & ~(space_locked | space_old));
+    if (S != space_weakpair) {
       relocate(&INITCAR(p))
     }
     relocate(&INITCDR(p))
@@ -565,6 +577,8 @@ static void sweep(ptr tc, ptr p, IBOOL sweep_pure) {
     }
   } else if (TYPEP(tf, mask_box, type_box)) {
     relocate(&INITBOXREF(p))
+  } else if ((iptr)tf == type_ephemeron) {
+    add_ephemeron_to_pending(p);
   } else if ((iptr)tf == type_ratnum) {
     if (sweep_pure) {
       relocate(&RATNUM(p))
@@ -959,6 +973,9 @@ void GCENTRY(ptr tc, IGEN mcg, IGEN tg) {
     resweep_dirty_weak_pairs();
     resweep_weak_pairs(tg);
 
+   /* still-pending ephemerons all go to bwp */
+    clear_pending_ephemerons();
+
    /* forward car fields of locked and unlocked older weak pairs */
     for (g = mcg + 1; g <= static_generation; INCRGEN(g)) {
       for (ls = S_G.locked_objects[g]; ls != Snil; ls = Scdr(ls)) {
@@ -1262,6 +1279,12 @@ static void sweep_generation(tc, g) ptr tc; IGEN g; {
         pp += 1;
     })
 
+    sweep_space(space_ephemeron, {
+        p = TYPE((ptr)pp, type_typed_object);
+        add_ephemeron_to_pending(p);
+        pp += size_ephemeron / sizeof(ptr);
+    })
+      
     sweep_space(space_pure, {
         relocate_help(pp, p)
         p = *(pp += 1);
@@ -1292,6 +1315,9 @@ static void sweep_generation(tc, g) ptr tc; IGEN g; {
         pp = (ptr *)((iptr)pp +
                size_record_inst(UNFIX(RECORDDESCSIZE(RECORDINSTTYPE(p)))));
     })
+
+    if (!change)
+      check_pending_ephemerons();
   } while (change);
 }
 
@@ -1323,6 +1349,8 @@ static iptr size_object(p) ptr p; {
         return size_fxvector(Sfxvector_length(p));
     } else if (TYPEP(tf, mask_box, type_box)) {
         return size_box;
+    } else if ((iptr)tf == type_ephemeron) {
+        return size_ephemeron;
     } else if ((iptr)tf == type_ratnum) {
         return size_ratnum;
     } else if ((iptr)tf == type_exactnum) {
@@ -1963,5 +1991,48 @@ static void resweep_dirty_weak_pairs() {
       }
     }
     record_dirty_segment(from_g, min_youngest, dirty_si);
+  }
+}
+
+static ptr pending_ephemerons = NULL;
+
+static void add_ephemeron_to_pending(ptr p) {
+  EPHEMERONNEXT(p) = pending_ephemerons;
+  pending_ephemerons = p;
+}
+
+static void check_pending_ephemerons() {
+  ptr pe = pending_ephemerons, next_pe, p;
+  seginfo *si;
+
+  pending_ephemerons = NULL;
+  while (pe != NULL) {
+    next_pe = EPHEMERONNEXT(pe);
+
+    p = EPHEMERONKEY(pe);
+    if (!IMMEDIATE(p) && (si = MaybeSegInfo(ptr_get_segment(p))) != NULL && si->space & space_old && !locked(p)) {
+      if (FWDMARKER(p) == forward_marker && TYPEBITS(p) != type_flonum) {
+        INITEPHEMERONKEY(pe) = FWDADDRESS(p);
+        relocate(&INITEPHEMERONVAL(pe))
+      } else {
+        /* Not reached, so far; keep as pending */
+        EPHEMERONNEXT(pe) = pending_ephemerons;
+        pending_ephemerons = pe;
+      }
+    } else {
+      relocate(&INITEPHEMERONVAL(pe))
+    }
+    
+    pe = next_pe;
+  }
+}
+
+static void clear_pending_ephemerons() {
+  ptr pe = pending_ephemerons;
+  pending_ephemerons = NULL;
+  while (pe != NULL) {
+    EPHEMERONKEY(pe) = Sbwp_object;
+    EPHEMERONVAL(pe) = Sbwp_object;
+    pe = EPHEMERONNEXT(pe);
   }
 }

@@ -781,6 +781,16 @@
         (definit INITBOXREF box ref)
         (defset SETBOXREF box ref)
 
+        (defref EPHEMERONTYPE ephemeron type)
+        (defref EPHEMERONKEY ephemeron key)
+        (definit INITEPHEMERONKEY ephemeron key)
+        (defref EPHEMERONVAL ephemeron val)
+        (definit INITEPHEMERONVAL ephemeron val)
+        (defref EPHEMERONNEXT ephemeron next)
+        (definit INITEPHEMERONNEXT ephemeron next)
+        (defref EPHEMERONTRIGGERNEXT ephemeron trigger-next)
+        (definit INITEPHEMERONTRIGGERNEXT ephemeron trigger-next)
+
         (defref TLCTYPE tlc type)
         (defref TLCKEYVAL tlc keyval)
         (defref TLCHT tlc ht)

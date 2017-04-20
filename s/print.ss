@@ -682,6 +682,7 @@ floating point returns with (1 0 -1 ...).
           [($inexactnum?) (wrinexactnum x r d? p)]
           [($exactnum?) (wrexactnum x r d? p)]
           [(box?) (wrbox x r lev len d? env p)]
+          [(ephemeron?) (display-string "#<ephemeron>" p)]
           [(procedure?)
            (if ($continuation? x)
                (wrcontinuation x p)

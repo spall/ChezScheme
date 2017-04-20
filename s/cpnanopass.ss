@@ -4655,6 +4655,7 @@
           (typed-object-pred box? mask-box type-box)
           (typed-object-pred mutable-box? mask-mutable-box type-mutable-box)
           (typed-object-pred immutable-box? mask-mutable-box type-immutable-box)
+          (typed-object-pred ephemeron? mask-ephemeron type-ephemeron)
           (typed-object-pred bytevector? mask-bytevector type-bytevector)
           (typed-object-pred mutable-bytevector? mask-mutable-bytevector type-mutable-bytevector)
           (typed-object-pred immutable-bytevector? mask-mutable-bytevector type-immutable-bytevector)
@@ -4755,6 +4756,15 @@
                (%seq
                  (set! ,(%mref ,t ,(constant box-type-disp)) ,(%constant type-immutable-box))
                  (set! ,(%mref ,t ,(constant box-ref-disp)) ,e)
+                 ,t)))])
+        (define-inline 2 make-ephemeron
+          [(k v)
+           (bind #f (k v)
+             (bind #t ([t (%constant-alloc type-typed-object (constant size-ephemeron))])
+               (%seq
+                 (set! ,(%mref ,t ,(constant ephemeron-type-disp)) ,(%constant type-ephemeron))
+                 (set! ,(%mref ,t ,(constant ephemeron-key-disp)) ,k)
+                 (set! ,(%mref ,t ,(constant ephemeron-val-disp)) ,v)
                  ,t)))])
         (define-inline 3 $make-tlc
           [(e-ht e-keyval e-next)
@@ -4913,6 +4923,8 @@
                (define-inline 3 prim
                  [(e) (%mref ,e ,(constant disp))])]))
           (inline-accessor unbox box-ref-disp)
+          (inline-accessor ephemeron-key ephemeron-key-disp)
+          (inline-accessor ephemeron-value ephemeron-val-disp)
           (inline-accessor $symbol-name symbol-name-disp)
           (inline-accessor $symbol-property-list symbol-plist-disp)
           (inline-accessor $system-property-list symbol-splist-disp)
@@ -4945,6 +4957,18 @@
              `(if ,(%typed-object-check mask-box type-box ,e)
                   ,(%mref ,e ,(constant box-ref-disp))
                   ,(build-libcall #t src sexpr unbox e)))])
+        (define-inline 2 ephemeron-key
+          [(e)
+           (bind #t (e)
+             `(if ,(%typed-object-check mask-ephemeron type-ephemeron ,e)
+                  ,(%mref ,e ,(constant ephemeron-key-disp))
+                  ,(build-libcall #t src sexpr ephemeron-key e)))])
+        (define-inline 2 ephemeron-value
+          [(e)
+           (bind #t (e)
+             `(if ,(%typed-object-check mask-ephemeron type-ephemeron ,e)
+                  ,(%mref ,e ,(constant ephemeron-val-disp))
+                  ,(build-libcall #t src sexpr ephemeron-value e)))])
         (let ()
           (define-syntax def-len
             (syntax-rules ()

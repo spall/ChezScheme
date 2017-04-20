@@ -1146,6 +1146,8 @@
   (lambda (b) 
     (#3%immutable-box? b)))
 
+(define make-ephemeron (lambda (k v) (#2%make-ephemeron k v)))
+
 (define pair? (lambda (x) (pair? x)))
 
 (define box? (lambda (x) (box? x)))
@@ -1181,6 +1183,11 @@
 (define input-port? (lambda (p) (input-port? p)))
 
 (define output-port? (lambda (p) (output-port? p)))
+
+(define ephemeron? (lambda (x) (ephemeron? x)))
+
+(define ephemeron-key (lambda (x) (#2%ephemeron-key x)))
+(define ephemeron-value (lambda (x) (#2%ephemeron-value x)))
 
 (define-who port-eof?
   (lambda (input-port)

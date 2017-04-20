@@ -416,6 +416,12 @@
 (define-library-entry (set-box! b v)
   ($oops 'set-box! "~s is not a mutable box" b))
 
+(define-library-entry (ephemeron-key x)
+  ($oops 'ephemeron-key "~s is not an ephemeron" x))
+
+(define-library-entry (ephemeron-value x)
+  ($oops 'ephemeron-value "~s is not an ephemeron" x))
+
 (let ()
 (define (fxnonfixnum1 who x)
   ($oops who "~s is not a fixnum" x))

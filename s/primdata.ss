@@ -1241,6 +1241,9 @@
   (environment? [sig [(ptr) -> (boolean)]] [flags pure unrestricted mifoldable discard])
   (environment-mutable? [sig [(environment) -> (boolean)]] [flags pure mifoldable discard])
   (environment-symbols [sig [(environment) -> (list)]] [flags true])
+  (ephemeron? [sig [(ptr) -> (boolean)]] [flags pure unrestricted mifoldable discard])
+  (ephemeron-key [sig [(ptr) -> (ptr)]] [flags mifoldable discard])
+  (ephemeron-value [sig [(ptr) -> (ptr)]] [flags mifoldable discard])
   (errorf [sig [(who string sub-ptr ...) -> (bottom)]] [flags abort-op]) ; second arg is format string
   (eq-hashtable? [sig [(ptr) -> (boolean)]] [flags pure unrestricted mifoldable discard])
   (eq-hashtable-cell [sig [(eq-hashtable ptr ptr) -> ((ptr . ptr))]] [flags true])
@@ -1404,6 +1407,7 @@
   (make-condition [feature pthreads] [sig [() -> (condition-object)]] [flags pure unrestricted alloc])
   (make-continuation-condition [sig [(ptr) -> (condition)]] [flags pure unrestricted mifoldable discard])
   (make-cost-center [sig [() -> (cost-center)]] [flags unrestricted alloc])
+  (make-ephemeron [sig [(ptr ptr) -> (ptr)]] [flags unrestricted alloc])
   (make-engine [sig [(procedure) -> (engine)]] [flags pure alloc])
   (make-format-condition [sig [() -> (condition)]] [flags pure unrestricted mifoldable discard])
   (make-fxvector [sig [(length) (length fixnum) -> (fxvector)]] [flags alloc])
