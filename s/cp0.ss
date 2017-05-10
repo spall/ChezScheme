@@ -153,12 +153,22 @@
     (define empty-fxvector-rec `(quote #vfx()))
 
     ;;; environments
-    (module (empty-env with-extended-env lookup)
+    (module (empty-env with-extended-env lookup extend-env-with-predicate lookup-predicate)
       (define empty-env '())
 
       (define-record-type env
         (nongenerative)
-        (fields old-ids new-ids next))
+        (fields next))
+      
+      (define-record-type binding-env
+        (parent env)
+        (nongenerative)
+        (fields old-ids new-ids))
+      
+      (define-record-type predicate-env
+        (parent env)
+        (nongenerative)
+        (fields id predicate))
 
       (define-syntax with-extended-env
         (syntax-rules ()
@@ -192,7 +202,7 @@
                                                 (operand-name-set! opnd (prelex-name old-id)))
                                               opnd))))
                                    rnew-ids))))])
-            (values (make-env (list->vector old-ids) (list->vector new-ids) old-env) new-ids))))
+            (values (make-binding-env old-env (list->vector old-ids) (list->vector new-ids)) new-ids))))
       
       (define deinitialize-ids!
         (lambda (ids)
@@ -205,21 +215,74 @@
       (define lookup
         (lambda (id env)
           (let loop1 ([env env])
-            (if (eqv? env empty-env)
-                id
-                (let ([old-rib (env-old-ids env)] [new-rib (env-new-ids env)])
-                  (let ([n (vector-length old-rib)])
-                    (let loop2 ([i 0])
-                      (if (fx= i n)
-                          (loop1 (env-next env))
-                          (if (eq? (vector-ref old-rib i) id)
-                              (vector-ref new-rib i)
-                              (let ([i (fx+ i 1)])
-                                (if (fx= i n)
-                                    (loop1 (env-next env))
-                                    (if (eq? (vector-ref old-rib i) id)
-                                        (vector-ref new-rib i)
-                                        (loop2 (fx+ i 1)))))))))))))))
+            (cond
+             [(eqv? env empty-env)
+              id]
+             [(binding-env? env)
+              (let ([old-rib (binding-env-old-ids env)] [new-rib (binding-env-new-ids env)])
+                (let ([n (vector-length old-rib)])
+                  (let loop2 ([i 0])
+                    (if (fx= i n)
+                        (loop1 (env-next env))
+                        (if (eq? (vector-ref old-rib i) id)
+                            (vector-ref new-rib i)
+                            (let ([i (fx+ i 1)])
+                              (if (fx= i n)
+                                  (loop1 (env-next env))
+                                  (if (eq? (vector-ref old-rib i) id)
+                                      (vector-ref new-rib i)
+                                      (loop2 (fx+ i 1))))))))))]
+             [else
+              (loop1 (env-next env))]))))
+
+      (define extend-env-with-predicate
+        (lambda (id predicate env)
+          (make-predicate-env env id predicate)))
+
+      (define lookup-predicate
+        (lambda (x env)
+          (let ([id (lookup x env)])
+            (and (not (prelex-was-assigned id))
+                 (let loop ([env env])
+                   (cond
+                    [(eq? env empty-env)
+                     #f]
+                    [(predicate-env? env)
+                     (if (eq? (predicate-env-id env) id)
+                         (predicate-env-predicate env)
+                         (loop (env-next env)))]
+                    [else
+                     (loop (env-next env))])))))))
+
+    (define (primitive-predicate? name)
+      (memq name '(null? pair? vector? box? record?
+                         integer? number?
+                         string? bytevector?)))
+    
+    (define (register-predicate e env)
+      (define (maybe-set-predicate x pred)
+        (let ([id (lookup x env)])
+          (cond
+           [(not (prelex-was-assigned id))
+            (extend-env-with-predicate id pred env)]
+           [else env])))
+      (nanopass-case (Lsrc Expr) e
+        [(call ,preinfo ,pr (ref ,maybe-src ,x))
+         (guard (primitive-predicate? (primref-name pr)))
+         (maybe-set-predicate x (primref-name pr))]
+        [(call ,preinfo ,pr (ref ,maybe-src ,x) ,e)
+         (guard (memq (primref-name pr) '(record? '$sealed-record?)))
+         (maybe-set-predicate x (resolve-predicate-rtd e env))]
+        [else env]))
+
+    (define (resolve-predicate-rtd e env)
+      (nanopass-case (Lsrc Expr) e
+        [(quote ,d) d]
+        [(ref ,maybe-src1 ,x)
+         (lookup x env)]
+        [(record-type ,rtd ,e)
+         (resolve-predicate-rtd e env)]
+        [else #f]))
 
     (define cp0-make-temp ; returns an unassigned temporary
       (lambda (multiply-referenced?)
@@ -4450,7 +4513,7 @@
           (make-seq ctxt e1 (cp0 (if d e2 e3) ctxt env sc wd name moi))]
          [else
           (let ((noappctxt (if (app? ctxt) 'value ctxt)))
-            (let ([e2 (cp0 e2 noappctxt env sc wd name moi)]
+            (let ([e2 (cp0 e2 noappctxt (register-predicate e1 env) sc wd name moi)]
                   [e3 (cp0 e3 noappctxt env sc wd name moi)])
               (make-if ctxt sc e1 e2 e3)))])]
       [(set! ,maybe-src ,x ,e)
@@ -4497,7 +4560,19 @@
                                 xids xargs)])))]
                [else (values e args)])))
          (let-values ([(e args) (lift-let e e*)])
-           (cp0-call preinfo e (build-operands args env wd moi) ctxt env sc wd name moi)))]
+           (let ([e (cp0-call preinfo e (build-operands args env wd moi) ctxt env sc wd name moi)])
+             (nanopass-case (Lsrc Expr) e
+               [(call ,preinfo ,pr (ref ,maybe-src ,x))
+                (guard (eq? (primref-name pr) (lookup-predicate x env)))
+                ;; Eliminate test that will always pass due to enclosing test
+                true-rec]
+               [(call ,preinfo ,pr (ref ,maybe-src ,x) ,e)
+                (guard (and (memq (primref-name pr) '(record? '$sealed-record?))
+                            (let ([pred (lookup-predicate x env)])
+                              (and pred (eq? pred (resolve-predicate-rtd e env))))))
+                ;; Eliminate test that will always pass due to enclosing test
+                true-rec]
+               [else e]))))]
       [(case-lambda ,preinfo ,cl* ...)
        (when (symbol? name)
          (preinfo-lambda-name-set! preinfo
