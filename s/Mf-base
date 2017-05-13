@@ -114,7 +114,7 @@ patchobj = patch.patch cpnanopass.patch cprep.patch cpcheck.patch\
 basesrc =\
  library.ss prims.ss mathprims.ss record.ss 5_1.ss 5_2.ss 5_3.ss\
  strnum.ss bytevector.ss 5_4.ss 5_6.ss 5_7.ss\
- event.ss 4.ss front.ss foreign.ss 6.ss print.ss newhash.ss\
+ event.ss 4.ss front.ss foreign.ss 6.ss print.ss newhash.ss hamt.ss \
  format.ss date.ss 7.ss cafe.ss trace.ss engine.ss\
  interpret.ss cprep.ss cpcheck.ss cp0.ss cpvalid.ss cpletrec.ss inspect.ss\
  enum.ss io.ss read.ss primvars.ss syntax.ss costctr.ss expeditor.ss\

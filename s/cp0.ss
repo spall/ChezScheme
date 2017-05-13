@@ -154,11 +154,12 @@
 
     ;;; environments
     (module (empty-env with-extended-env lookup)
-      (define empty-env '())
+      (define empty-env ($hamt-empty))
 
-      (define-record-type env
-        (nongenerative)
-        (fields old-ids new-ids next))
+      (define (id-hash x)
+        (cond
+         [(symbol? x) (symbol-hash x)]
+         [else (symbol-hash (prelex-uname x))]))
 
       (define-syntax with-extended-env
         (syntax-rules ()
@@ -170,29 +171,29 @@
 
       (define extend-env
         (lambda (old-env old-ids opnds)
-          (let ([new-ids (let loop ([old-ids old-ids] [opnds opnds] [rnew-ids '()])
-                           (if (null? old-ids)
-                               (reverse rnew-ids)
-                               (loop
-                                 (cdr old-ids) 
-                                 (and opnds (cdr opnds))
-                                 (cons
-                                   (let ([old-id (car old-ids)])
-                                     (make-prelex
-                                       (prelex-name old-id)
-                                       (let ([flags (prelex-flags old-id)])
-                                         (fxlogor
-                                           (fxlogand flags (constant prelex-sticky-mask))
-                                           (fxsll (fxlogand flags (constant prelex-is-mask))
-                                             (constant prelex-was-flags-offset))))
-                                       (prelex-source old-id)
-                                       (and opnds
-                                            (let ([opnd (car opnds)])
-                                              (when (operand? opnd)
-                                                (operand-name-set! opnd (prelex-name old-id)))
-                                              opnd))))
-                                   rnew-ids))))])
-            (values (make-env (list->vector old-ids) (list->vector new-ids) old-env) new-ids))))
+          (let loop ([old-ids old-ids] [opnds opnds] [rnew-ids '()] [new-env old-env])
+            (if (null? old-ids)
+                (values new-env (reverse rnew-ids))
+                (let* ([old-id (car old-ids)]
+                       [new-id 
+                        (make-prelex
+                         (prelex-name old-id)
+                         (let ([flags (prelex-flags old-id)])
+                           (fxlogor
+                            (fxlogand flags (constant prelex-sticky-mask))
+                            (fxsll (fxlogand flags (constant prelex-is-mask))
+                                   (constant prelex-was-flags-offset))))
+                         (prelex-source old-id)
+                         (and opnds
+                              (let ([opnd (car opnds)])
+                                (when (operand? opnd)
+                                  (operand-name-set! opnd (prelex-name old-id)))
+                                opnd)))])
+                  (loop
+                   (cdr old-ids) 
+                   (and opnds (cdr opnds))
+                   (cons new-id rnew-ids)
+                   ($hamt-set new-env old-id id-hash eq? new-id)))))))
       
       (define deinitialize-ids!
         (lambda (ids)
@@ -204,22 +205,7 @@
 
       (define lookup
         (lambda (id env)
-          (let loop1 ([env env])
-            (if (eqv? env empty-env)
-                id
-                (let ([old-rib (env-old-ids env)] [new-rib (env-new-ids env)])
-                  (let ([n (vector-length old-rib)])
-                    (let loop2 ([i 0])
-                      (if (fx= i n)
-                          (loop1 (env-next env))
-                          (if (eq? (vector-ref old-rib i) id)
-                              (vector-ref new-rib i)
-                              (let ([i (fx+ i 1)])
-                                (if (fx= i n)
-                                    (loop1 (env-next env))
-                                    (if (eq? (vector-ref old-rib i) id)
-                                        (vector-ref new-rib i)
-                                        (loop2 (fx+ i 1)))))))))))))))
+          ($hamt-ref env id id-hash eq? id))))
 
     (define cp0-make-temp ; returns an unassigned temporary
       (lambda (multiply-referenced?)
