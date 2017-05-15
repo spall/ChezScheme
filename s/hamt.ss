@@ -1,5 +1,11 @@
 "hamt"
-;; Based on the "hamt" package by Jon Zeppieri
+;; Based on an implementation by Jon Zeppieri
+
+;; Exports:
+;;  ($hamt-empty) => hamt
+;;  ($hamt-ref hamt key key-hash-proc key=? default-val) => val or default-val
+;;  ($hamt-set hamt key key-hash-proc key=? val) => hamt
+;;  ($hamt-remove hamt key key-hash-proc key=?) => hamt
 
 (let ()
   (define-record-type bnode

@@ -159,7 +159,7 @@
       (define (id-hash x)
         (cond
          [(symbol? x) (symbol-hash x)]
-         [else (prelex-index x)]))
+         [else (symbol-hash (prelex-name x))]))
 
       (define-syntax with-extended-env
         (syntax-rules ()

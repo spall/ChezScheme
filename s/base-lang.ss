@@ -18,7 +18,7 @@
          sorry! make-preinfo preinfo? preinfo-lambda? preinfo-sexpr preinfo-sexpr-set! preinfo-src
          make-preinfo-lambda preinfo-lambda-name preinfo-lambda-name-set! preinfo-lambda-flags preinfo-lambda-libspec
          prelex? make-prelex prelex-name prelex-name-set! prelex-flags prelex-flags-set!
-         prelex-source prelex-operand prelex-operand-set! prelex-uname prelex-index make-prelex*
+         prelex-source prelex-operand prelex-operand-set! prelex-uname make-prelex*
          target-fixnum? target-bignum?)
 
   (module (lookup-primref primref? primref-name primref-flags primref-arity primref-level)
@@ -78,17 +78,15 @@
            prelex-flags prelex-flags-set!
            prelex-source
            prelex-operand prelex-operand-set!
-           prelex-uname prelex-index)
-    (define counter 0)
+           prelex-uname)
     (define-record-type prelex
-      (nongenerative #{prelex l1ng2awjurjhipdxgazzxv-0})
+      (nongenerative #{prelex grpmhtzqa9bflxfggfu6pp-0})
       (sealed #t)
-      (fields (mutable name) (mutable flags) source (mutable operand) (mutable $uname) index)
+      (fields (mutable name) (mutable flags) source (mutable operand) (mutable $uname))
       (protocol
         (lambda (new)
           (lambda (name flags source operand)
-            (set! counter (fx+ 1 counter))
-            (new name flags source operand #f counter)))))
+            (new name flags source operand #f)))))
     (define prelex-uname
       (lambda (id)
         (or (prelex-$uname id)
