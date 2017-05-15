@@ -1965,6 +1965,7 @@
   ($guard [flags])
   ($hamt-empty [flags])
   ($hamt-ref [flags])
+  ($hamt-remove [flags])
   ($hamt-set [flags])
   ($hand-coded [flags])
   ($hashtable-report [flags true])
