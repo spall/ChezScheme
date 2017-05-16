@@ -18,7 +18,7 @@
          sorry! make-preinfo preinfo? preinfo-lambda? preinfo-sexpr preinfo-sexpr-set! preinfo-src
          make-preinfo-lambda preinfo-lambda-name preinfo-lambda-name-set! preinfo-lambda-flags preinfo-lambda-libspec
          prelex? make-prelex prelex-name prelex-name-set! prelex-flags prelex-flags-set!
-         prelex-source prelex-operand prelex-operand-set! prelex-uname make-prelex*
+         prelex-source prelex-operand prelex-operand-set! prelex-uname prelex-counter make-prelex*
          target-fixnum? target-bignum?)
 
   (module (lookup-primref primref? primref-name primref-flags primref-arity primref-level)
@@ -73,13 +73,13 @@
            (constant-name #'?level (datum name))]
           [(k ?level ?name) #'($lookup-primref ?level ?name)]))))
   
-  (module (prelex? make-prelex
-           prelex-name prelex-name-set!
-           prelex-flags prelex-flags-set!
-           prelex-source
-           prelex-operand prelex-operand-set!
-           prelex-uname)
-    (define-record-type prelex
+  (module (old-prelex? make-old-prelex
+           old-prelex-name old-prelex-name-set!
+           old-prelex-flags old-prelex-flags-set!
+           old-prelex-source
+           old-prelex-operand old-prelex-operand-set!
+           old-prelex-uname)
+    (define-record-type old-prelex
       (nongenerative #{prelex grpmhtzqa9bflxfggfu6pp-0})
       (sealed #t)
       (fields (mutable name) (mutable flags) source (mutable operand) (mutable $uname))
@@ -87,6 +87,106 @@
         (lambda (new)
           (lambda (name flags source operand)
             (new name flags source operand #f)))))
+    (define old-prelex-uname
+      (lambda (id)
+        (or (old-prelex-$uname id)
+            (let ([uname (gensym (symbol->string (old-prelex-name id)))])
+              (with-tc-mutex
+                (or (old-prelex-$uname id)
+                    (begin (old-prelex-$uname-set! id uname) uname)))))))
+    (record-writer (record-type-descriptor old-prelex)
+      (lambda (x p wr)
+        (fprintf p "~s" (old-prelex-name x)))))
+  
+  (module (new-prelex? make-new-prelex
+           new-prelex-name new-prelex-name-set!
+           new-prelex-flags new-prelex-flags-set!
+           new-prelex-source
+           new-prelex-operand new-prelex-operand-set!
+           new-prelex-uname
+           new-prelex-counter)
+    (define-record-type new-prelex
+      (nongenerative #{new-prelex my8fpg3cekjjh9zytnixui-0})
+      (sealed #t)
+      (fields (mutable name) (mutable flags) source (mutable operand) (mutable $uname) (mutable $counter))
+      (protocol
+        (lambda (new)
+          (lambda (name flags source operand)
+            (new name flags source operand #f #f)))))
+    (define new-prelex-uname
+      (lambda (id)
+        (or (new-prelex-$uname id)
+            (let ([uname (gensym (symbol->string (new-prelex-name id)))])
+              (with-tc-mutex
+                (or (new-prelex-$uname id)
+                    (begin (new-prelex-$uname-set! id uname) uname)))))))
+    (define counter 0)
+    (define new-prelex-counter
+      (lambda (id)
+        (or (new-prelex-$counter id)
+            (with-tc-mutex
+             (or (new-prelex-$counter id)
+                 (let ([c counter])
+                   (set! counter (fx1+ counter))
+                   (new-prelex-$counter-set! id c)
+                   c))))))
+    (record-writer (record-type-descriptor new-prelex)
+      (lambda (x p wr)
+        (fprintf p "~s" (new-prelex-name x)))))
+
+  (module (prelex? make-prelex
+           prelex-name prelex-name-set!
+           prelex-flags prelex-flags-set!
+           prelex-source
+           prelex-operand prelex-operand-set!
+           prelex-uname
+           prelex-counter)
+      (define (prelex? p) (or (new-prelex? p) (old-prelex? p)))
+    (define make-prelex make-new-prelex)
+    (define (prelex-name p) (if (new-prelex? p)
+                                (new-prelex-name p)
+                                (old-prelex-name p)))
+    (define (prelex-name-set! p v) (if (new-prelex? p)
+                                       (new-prelex-name-set! p v)
+                                       (old-prelex-name-set! p v)))
+    (define (prelex-flags p) (if (new-prelex? p)
+                                (new-prelex-flags p)
+                                (old-prelex-flags p)))
+    (define (prelex-flags-set! p v) (if (new-prelex? p)
+                                       (new-prelex-flags-set! p v)
+                                       (old-prelex-flags-set! p v)))
+    (define (prelex-source p) (if (new-prelex? p)
+                                  (new-prelex-source p)
+                                  (old-prelex-source p)))
+    (define (prelex-operand p) (if (new-prelex? p)
+                                (new-prelex-operand p)
+                                (old-prelex-operand p)))
+    (define (prelex-operand-set! p v) (if (new-prelex? p)
+                                       (new-prelex-operand-set! p v)
+                                       (old-prelex-operand-set! p v)))
+    (define (prelex-uname p) (if (new-prelex? p)
+                                 (new-prelex-uname p)
+                                 (old-prelex-uname p)))
+    (define (prelex-counter p) (if (new-prelex? p)
+                                   (new-prelex-counter p)
+                                   (symbol-hash (old-prelex-uname p)))))
+
+  #;
+  (module (prelex? make-prelex
+           prelex-name prelex-name-set!
+           prelex-flags prelex-flags-set!
+           prelex-source
+           prelex-operand prelex-operand-set!
+           prelex-uname
+           prelex-counter)
+    (define-record-type prelex
+      (nongenerative #{prelex my8fpg3cekjjh9zytnixui-0})
+      (sealed #t)
+      (fields (mutable name) (mutable flags) source (mutable operand) (mutable $uname) (mutable $counter))
+      (protocol
+        (lambda (new)
+          (lambda (name flags source operand)
+            (new name flags source operand #f #f)))))
     (define prelex-uname
       (lambda (id)
         (or (prelex-$uname id)
@@ -94,6 +194,16 @@
               (with-tc-mutex
                 (or (prelex-$uname id)
                     (begin (prelex-$uname-set! id uname) uname)))))))
+    (define counter 0)
+    (define prelex-counter
+      (lambda (id)
+        (or (prelex-$counter id)
+            (with-tc-mutex
+             (or (prelex-$counter id)
+                 (let ([c counter])
+                   (set! counter (fx1+ counter))
+                   (prelex-$counter-set! id c)
+                   c))))))
     (record-writer (record-type-descriptor prelex)
       (lambda (x p wr)
         (fprintf p "~s" (prelex-name x)))))
