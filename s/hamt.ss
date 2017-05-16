@@ -192,17 +192,13 @@
            [(not (eq? v *nothing*))
             (cond
              [(key= key k)
-              (if (eq? v val)
-                  bnode
-                  (node-replace-at-index bnode idx key val))]
+              (node-replace-at-index bnode idx key val)]
              [else
               (let ([child (make-node k v key val keyhash key= key->hash (down shift))])
                 (node-replace-at-index bnode idx child *nothing*))])]
            [else
             (let ([new-child (node-set k key val keyhash key= key->hash (down shift))])
-              (if (eq? new-child k)
-                  bnode
-                  (node-replace-at-index bnode idx new-child *nothing*)))]))]
+              (node-replace-at-index bnode idx new-child *nothing*))]))]
        [else
         (node-insert-at-index bnode (fxior bitmap (fxsll 1 bit)) idx key val)])))
 

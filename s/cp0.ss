@@ -156,10 +156,17 @@
     (module (empty-env with-extended-env lookup)
       (define empty-env ($hamt-empty))
 
-      (define (id-hash x)
-        (cond
-         [(symbol? x) (symbol-hash x)]
-         [else (symbol-hash (prelex-name x))]))
+      (define counter 0)
+      
+      (define (id-hash id)
+        (let ([uid (prelex-uname x)])
+          (with-tc-mutex
+           (let ([n ($sgetprop uid 'eqcounter #f)])
+             (or n
+                 (let ([n counter])
+                   (set! counter (fx1+ counter))
+                   ($sputprop uid 'eqcounter n)
+                   n))))))
 
       (define-syntax with-extended-env
         (syntax-rules ()
