@@ -223,6 +223,7 @@
 
     ;; type information
     (module (ty-new no-ty
+                    never-returns never-returns?
                     ty-types
                     ty-delta-intersect ty-delta-union* ty-delta-union
                     ty-add!
@@ -230,9 +231,14 @@
                     ty-types-get-predicate)
       (define-record-type ty
         (nongenerative)
-        (fields (mutable content) (mutable delta)))
+        (fields (mutable content) ; 'never-returns or hamt: id -> type
+                (mutable delta))) ; 'never-returns or hamt: id -> type
 
       (define no-ty #f)
+
+      (define never-returns 'never-returns)
+      (define (never-returns? v)
+        (eq? v never-returns))
 
       (define (ty-types ty)
         (and ty (ty-content ty)))
@@ -244,6 +250,8 @@
 
       (define (delta-intersect d1 d2)
         (cond
+         [(never-returns? d1) d2]
+         [(never-returns? d2) d1]
          [(fx< ($hamt-count d2) ($hamt-count d1))
           (delta-intersect d2 d1)]
          [($hamt-empty? d1) d1]
@@ -261,6 +269,8 @@
       
       (define (delta-union d1 d2)
         (cond
+         [(never-returns? d1) d1]
+         [(never-returns? d2) d2]
          [(fx< ($hamt-count d2) ($hamt-count d1))
           (delta-union d2 d1)]
          [($hamt-empty? d1) d2]
@@ -287,17 +297,25 @@
 
       (define (ty-add-predicate! ty id pred)
         (when ty
-          (ty-content-set! ty ($hamt-set (ty-content ty) id id-hash eq? pred))
-          (ty-delta-set! ty ($hamt-set (ty-delta ty) id id-hash eq? pred))))
+          (unless (never-returns? (ty-content ty))
+            (ty-content-set! ty ($hamt-set (ty-content ty) id id-hash eq? pred)))
+          (unless (never-returns? (ty-delta ty))
+            (ty-delta-set! ty ($hamt-set (ty-delta ty) id id-hash eq? pred)))))
 
       (define (ty-add! ty d)
         (when ty
-          ($hamt-fold d (void)
-                      (lambda (key val v)
-                        (ty-add-predicate! ty key val)))))
+          (cond
+           [(never-returns? d)
+            (ty-content-set! ty never-returns)
+            (ty-delta-set! ty never-returns)]
+           [else
+            ($hamt-fold d (void)
+                        (lambda (key val v)
+                          (ty-add-predicate! ty key val)))])))
 
       (define (ty-types-get-predicate id types)
         (and types
+             (not (never-returns? types))
              ($hamt-ref types id id-hash eq? #f)))
 
       (define (id-hash id)
@@ -314,28 +332,42 @@
         (vector-ref . [vector? number?])
         (vector-set! . [vector? number? #f])))
 
+    (define primitives-that-never-return
+      '($record-oops error raise))
+
+    (define (maybe-set-predicate x env ty pred)
+      (let ([id (lookup x env)])
+        (when (not (prelex-was-assigned id))
+          (ty-add-predicate! ty id pred))))
+
+    (define (register-branch-predicate e env ty)
+      (when (and ty (not (never-returns? (ty-types ty))))
+        (nanopass-case (Lsrc Expr) e
+          [(call ,preinfo ,pr (ref ,maybe-src ,x))
+           (guard (primitive-predicate? (primref-name pr)))
+           (maybe-set-predicate x env ty (primref-name pr))]
+          [(call ,preinfo ,pr (ref ,maybe-src ,x) ,e)
+           (guard (memq (primref-name pr) '(record? '$sealed-record?)))
+           (maybe-set-predicate x env ty (resolve-predicate-rtd e env))]
+          [else (void)])))
+
     (define (register-implied-predicates e env ty)
-      (define (maybe-set-predicate x pred)
-        (let ([id (lookup x env)])
-          (when (not (prelex-was-assigned id))
-            (ty-add-predicate! ty id pred))))
-      (nanopass-case (Lsrc Expr) e
-        [(call ,preinfo ,pr (ref ,maybe-src ,x))
-         (guard (primitive-predicate? (primref-name pr)))
-         (maybe-set-predicate x (primref-name pr))]
-        [(call ,preinfo ,pr (ref ,maybe-src ,x) ,e)
-         (guard (memq (primref-name pr) '(record? '$sealed-record?)))
-         (maybe-set-predicate x (resolve-predicate-rtd e env))]
-        [(call ,preinfo ,pr ,e* ...)
-         (let ([a (assq primitive-implications (primref-name pr))])
-           (when (and a (= (length (cdr a)) (length e)))
-             (for-each (lambda (pred e)
-                         (nanopass-case (Lsrc Expr) e
-                           [(ref ,maybe-src ,x)
-                            (maybe-set-predicate x pred)]
-                           [else (void)]))
-                       e* (cdr a))))]
-        [else (void)]))
+      (when (and ty (not (never-returns? (ty-types ty))))
+        (nanopass-case (Lsrc Expr) e
+          [(call ,preinfo ,pr ,e* ...)
+           (cond
+            [(assq (primref-name pr) primitive-implications)
+             => (lambda (a)
+                  (when (and a (= (length (cdr a)) (length e*)))
+                    (for-each (lambda (pred e)
+                                (nanopass-case (Lsrc Expr) e
+                                  [(ref ,maybe-src ,x)
+                                   (maybe-set-predicate x env ty pred)]
+                                  [else (void)]))
+                              (cdr a) e*)))]
+            [(memq (primref-name pr) primitives-that-never-return)
+             (ty-add! ty never-returns)])]
+          [else (void)])))
 
     (define (resolve-predicate-rtd e env)
       (nanopass-case (Lsrc Expr) e
@@ -4586,12 +4618,13 @@
           (make-seq ctxt e1 (cp0 (if d e2 e3) ctxt env ty sc wd name moi))]
          [else
           (let ((noappctxt (if (app? ctxt) 'value ctxt)))
-            (let* ([then-ty (ty-new ty)]
-                   [else-ty (ty-new ty)]
-                   [e2 (cp0 e2 noappctxt env then-ty sc wd name moi)]
-                   [e3 (cp0 e3 noappctxt env else-ty sc wd name moi)])
-              (ty-add! ty (ty-delta-intersect then-ty else-ty))
-              (make-if ctxt sc e1 e2 e3)))])]
+            (let ([then-ty (ty-new ty)]
+                  [else-ty (ty-new ty)])
+              (register-branch-predicate e1 env then-ty)
+              (let ([e2 (cp0 e2 noappctxt env then-ty sc wd name moi)]
+                    [e3 (cp0 e3 noappctxt env else-ty sc wd name moi)])
+                (ty-add! ty (ty-delta-intersect then-ty else-ty))
+                (make-if ctxt sc e1 e2 e3))))])]
       [(set! ,maybe-src ,x ,e)
        (let ((new-id (lookup x env)))
          (if (prelex-was-referenced new-id)
@@ -4771,8 +4804,7 @@
        (context-case ctxt
          [(effect) (cp0 e 'effect env ty sc wd name moi)]
          [else
-          (let* ([copy-ty (ty-new ty)]
-                 [e (cp0 e 'value env ty sc wd name moi)])
+          (let* ([e (cp0 e 'value env ty sc wd name moi)])
             (or (nanopass-case (Lsrc Expr) (result-exp e)
                   [(quote ,d)
                    (and (record? d rtd)
@@ -4798,7 +4830,7 @@
                                  [,pr (all-set? (prim-mask proc) (primref-flags pr))]
                                  [else #f])
                                ; recur to cp0 to get inlining, folding, etc.
-                               (cp0 e ctxt env copy-ty sc wd name moi))))]
+                               (cp0 e ctxt env no-ty sc wd name moi))))]
                   [else #f])
                 (begin (bump sc 1) `(record-ref ,rtd ,type ,index ,e))))])]
       [(record-set! ,rtd ,type ,index ,e1 ,e2)
@@ -4812,8 +4844,8 @@
       [(record-cd ,rcd ,rtd-expr ,e) (cp0 e ctxt env ty sc wd name moi)]
       [(immutable-list (,e* ...) ,e)
        (let ([ty* (map (lambda (e) (ty-new ty)) e*)])
-         (let ([e* (map (lambda (e ty) (cp0 e* 'value env ty sc wd #f moi)) e* ty*)]
-               [e (cp0 e ctxt ty env sc wd name moi)])
+         (let ([e* (map (lambda (e ty) (cp0 e 'value env ty sc wd #f moi)) e* ty*)]
+               [e (cp0 e ctxt env ty sc wd name moi)])
            (ty-add! ty (ty-delta-union* ty*))
            `(immutable-list (,e*  ...) ,e)))]
       [(moi) (if moi `(quote ,moi) ir)]
