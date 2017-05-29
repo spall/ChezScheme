@@ -259,7 +259,7 @@
   (cond
     [(eq? ip (console-input-port)) ($lexical-error who msg args ip ir?)]
     [(not fp) ($lexical-error who "~? on ~s" (list msg args ip) ip ir?)]
-    [sfd ($lexical-error who msg args ip (make-source sfd bfp fp) start? ir?)]
+    [sfd ($lexical-error who msg args ip ($make-source-object sfd bfp fp) start? ir?)]
     [else ($lexical-error who "~? at char ~a of ~s" (list msg args (if start? bfp fp) ip) ip ir?)]))
 
 (xdefine (rd-eof-error s)
@@ -1132,7 +1132,7 @@
   (xmvlet ((x stripped) (xcall rd-help type value))
     (xvalues
       (if (and a? (not (procedure? x))) ; don't annotate code
-          (make-annotation x (make-source sfd bfp fp) stripped)
+          (make-annotation x ($make-source-object sfd bfp fp) stripped)
           x)
       stripped)))
 
@@ -1615,8 +1615,14 @@
 (set! $locate-source
   (lambda (sfd fp)
     (cond
+      [(file-position? fp)
+       ;; No need to search for anything
+       (values (source-file-descriptor-name sfd)
+               (file-position-line fp)
+               (file-position-column fp))]
       [($open-source-file sfd) =>
        (lambda (ip)
+         ;; Search for line and column within the file
          (let loop ([fp fp] [line 1] [char 1])
            (if (= fp 0)
                (begin

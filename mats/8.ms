@@ -10714,6 +10714,18 @@
     (define sfd (make-source-file-descriptor "foo" ip #t))
     #t)
   (not (= (bytevector-length bv) (string-length str)))
+  (error? ; 'two is not an exact integer
+    (make-file-position-object 'two 1 3))
+  (error? ; 'two is not an exact integer
+    (make-file-position-object 1 'two 3))
+  (error? ; 'two is not an exact integer
+    (make-file-position-object 1 3 'two))
+  (error? ; -1 is not nonnegative
+    (make-file-position-object -1 2 3))
+  (error? ; 0 is not positive
+    (make-file-position-object 1 0 3))
+  (error? ; 0 is not positive
+    (make-file-position-object 1 2 0))
   (error? ; sfd is not an sfd
     (make-source-object 'sfd 2 3))
   (error? ; two is not an exact integer
@@ -10726,20 +10738,38 @@
     (make-source-object sfd -7 -3))
   (error? ; bfp -7 is not between 0 and efp 3
     (make-source-object sfd -7 3))
+  (error? ; bfp 3 in file position is not between 0 and efp 2
+    (make-source-object sfd (make-file-position-object 3 1 2) 2))
+  (error? ; bfp 3 in file position is not between 0 and efp 2 in file position
+    (make-source-object sfd (make-file-position-object 3 1 2) (make-file-position-object 2 1 2)))
+  (error? ; bfp 3 is not between 0 and efp 2 in file position
+    (make-source-object sfd 3 (make-file-position-object 2 1 2)))
+  (error? ; bfp line is not between 0 and efp line
+    (make-source-object sfd (make-file-position-object 3 2 2) (make-file-position-object 3 1 2)))
+  (error? ; bfp column is not between 0 and efp line
+    (make-source-object sfd (make-file-position-object 3 1 3) (make-file-position-object 3 1 2)))
   (begin
     (define source (make-source-object sfd 2 3))
+    (define line-two (make-file-position-object 3 2 1))
+    (define source-at-line-two (make-source-object sfd line-two 5))
     #t)
   (error? ; source is not a source object
     (make-annotation #f 'source #f))
   (begin
     (define a (make-annotation '(if 3) source '(if I were a rich man)))
+    (define a-at-line-two (make-annotation '(if 3) source-at-line-two '(if I were a rich man)))
     (define x (datum->syntax #'* a))
     #t)
   (source-file-descriptor? sfd)
   (not (source-file-descriptor? source))
   (source-object? source)
+  (source-object? source-at-line-two)
   (not (source-object? sfd))
   (not (source-object? a))
+  (file-position-object? line-two)
+  (not (file-position-object? sfd))
+  (source-object? (make-source-object sfd (make-file-position-object 3 2 1) (make-file-position-object 3 2 1)))
+  (source-object? (make-source-object sfd (make-file-position-object 3 2 5) (make-file-position-object 6 3 1)))
   (annotation? a)
   (not (annotation? source))
   (error? ; #<source> is not an sfd
@@ -10752,6 +10782,12 @@
     (source-object-bfp a))
   (error? ; 3 is not a source object
     (source-object-efp 3))
+  (error? ; 3 is not a file position
+    (file-position-object-position 3))
+  (error? ; 3 is not a file position
+    (file-position-object-line 3))
+  (error? ; 3 is not a file position
+    (file-position-object-column 3))
   (error? ; 3 is not an annotation
     (annotation-expression 3))
   (error? ; #<source> is not an annotation
@@ -10777,6 +10813,10 @@
   (eq? (source-object-sfd source) sfd)
   (eq? (source-object-bfp source) 2)
   (eq? (source-object-efp source) 3)
+  (eq? (source-object-bfp source-at-line-two) line-two)
+  (eq? (file-position-object-position line-two) 3)
+  (eq? (file-position-object-line line-two) 2)
+  (eq? (file-position-object-column line-two) 1)
   (equal? (annotation-expression a) '(if 3))
   (eq? (annotation-source a) source)
   (equal? (annotation-stripped a) '(if I were a rich man))
@@ -10802,12 +10842,20 @@
   (not (syntax->annotation #f))
   (error? ; invalid syntax (if I were a rich man) at char 2 of foo
     (expand a))
+  (error? ; invalid syntax (if I were a rich man) at line 2, char 1 of foo
+    (expand a-at-line-two))
   (error? ; invalid syntax (if I were a rich man) at char 2 of foo
     (eval a))
+  (error? ; invalid syntax (if I were a rich man) at char 2, char 1 of foo
+    (eval a-at-line-two))
   (error? ; invalid syntax (if I were a rich man) at char 2 of foo
     (eval '(let () (define-syntax foo (lambda (z) (datum->syntax #'* a))) foo)))
+  (error? ; invalid syntax (if I were a rich man) at line 2, char 1 of foo
+    (eval '(let () (define-syntax foo (lambda (z) (datum->syntax #'* a-at-line-two))) foo)))
   (error? ; invalid syntax (if I were a rich man) at char 2 of foo
     (eval '(let () (define-syntax foo (lambda (z) (datum->syntax #'* (make-annotation '(if 3) source '(if I were a rich man) (annotation-options debug profile))))) foo)))
+  (error? ; invalid syntax (if I were a rich man) at line 2, char 1 of foo
+    (eval '(let () (define-syntax foo (lambda (z) (datum->syntax #'* (make-annotation '(if 3) source-at-line-two '(if I were a rich man) (annotation-options debug profile))))) foo)))
   (error? ; invalid syntax (if I were a rich man) at char 2 of foo
     (eval '(let () (define-syntax foo (lambda (z) (datum->syntax #'* (make-annotation '(if 3) source '(if I were a rich man) (annotation-options debug))))) foo)))
   (error? ; invalid syntax (if I were a rich man)
@@ -10816,6 +10864,8 @@
     (eval '(let () (define-syntax foo (lambda (z) (datum->syntax #'* (make-annotation '(if 3) source '(if I were a rich man) (annotation-options))))) foo)))
   (error? ; invalid argument count in call (f) at char 2 of foo
     (eval '(let () (define-syntax foo (lambda (z) (datum->syntax #'* `(let ([f (lambda (x) x)]) ,(make-annotation '(f) source '(f) (annotation-options debug profile)))))) foo)))
+  (error? ; invalid argument count in call (f) at line 2, char 1 of foo
+    (eval '(let () (define-syntax foo (lambda (z) (datum->syntax #'* `(let ([f (lambda (x) x)]) ,(make-annotation '(f) source-at-line-two '(f) (annotation-options debug profile)))))) foo)))
   (error? ; invalid argument count in call (f) at char 2 of foo
     (eval '(let () (define-syntax foo (lambda (z) (datum->syntax #'* `(let ([f (lambda (x) x)]) ,(make-annotation '(f) source '(f) (annotation-options debug)))))) foo)))
   (error? ; invalid argument count in call (f)
@@ -10939,7 +10989,104 @@
                        (call-with-values (lambda () (locate-source (source-object-sfd source) (source-object-efp source))) vector)))])
           (load "testfile.ss"))))
     '(#("testfile.ss" 2 12) . #("testfile.ss" 2 13)))
+
+  (error?
+   (current-locate-source 7))
+  (error?
+   (current-locate-source "string"))
+  (error? ; invalid syntax (if I were a rich man) at line 200, char 17 of foo
+   (parameterize ([current-locate-source
+                   (lambda (sfd pos)
+                     (values (source-file-descriptor-path sfd) 200 17))])
+     (expand a)))
  )
+
+(mat annotations-via-recorded-lines
+  (error?
+   (current-make-source-object 7))
+  (error?
+   (current-make-source-object "string"))
+  (begin
+    (define sfd-with-lines
+      (let ((op (open-output-file "testfile.ss" 'replace)))
+        (display "apple\n  banana\ncoconut" op)
+        (close-port op)
+        (let* ([ip (open-file-input-port "testfile.ss")]
+               [sfd (make-source-file-descriptor "testfile.ss" ip)])
+          (close-port ip)
+          sfd)))
+    (define input-string-with-lines "Apple\n  Banana\nCoconut\nMore")
+    (define input-port-with-lines (open-string-input-port input-string-with-lines))
+    (define input-port-with-line-pos 0)
+    (define (make-make-source-object/get-lines expected-sfd)
+      (lambda (sfd bfp efp)
+        (if (eq? sfd expected-sfd)
+            ;; Gather line and column now:
+            (let-values ([(path line col) (locate-source sfd bfp)])
+              (make-source-object sfd (make-file-position-object bfp line col) efp))
+            (error 'recording-make-source-object "reading some other file?"))))
+    (define (read-with-lines)
+      (parameterize ([current-make-source-object (make-make-source-object/get-lines sfd-with-lines)])
+        (let-values ([(v pos) (get-datum/annotations input-port-with-lines sfd-with-lines input-port-with-line-pos)])
+          (set! input-port-with-line-pos pos)
+          v)))
+    #t)
+  (begin
+    (define line-one (read-with-lines))
+    (annotation? line-one))
+  (equal? (annotation-stripped line-one) 'Apple)
+  (file-position-object? (source-object-bfp (annotation-source line-one)))
+  (equal? (file-position-object-position (source-object-bfp (annotation-source line-one))) 0)
+  (equal? (file-position-object-line (source-object-bfp (annotation-source line-one))) 1)
+  (equal? (file-position-object-column (source-object-bfp (annotation-source line-one))) 1)
+  (begin
+    (define line-two (read-with-lines))
+    (annotation? line-two))
+  (equal? (file-position-object-position (source-object-bfp (annotation-source line-two))) 8)
+  (equal? (file-position-object-line (source-object-bfp (annotation-source line-two))) 2)
+  (equal? (file-position-object-column (source-object-bfp (annotation-source line-two))) 3)
+  (begin
+    (define line-three (read-with-lines))
+    (annotation? line-three))
+  (equal? (file-position-object-position (source-object-bfp (annotation-source line-three))) 15)
+  (equal? (file-position-object-line (source-object-bfp (annotation-source line-three))) 3)
+  (equal? (file-position-object-column (source-object-bfp (annotation-source line-three))) 1)
+  (annotation? (read-with-lines)) ; 'More
+  (eof-object? (read-with-lines))
+
+  ;; Make sure lines are calculated right with input that is longer than
+  ;; the file buffer size:
+  (begin
+    (define input-string-with-lines (string-append
+                                     "\""
+                                     (make-string (* 2 (file-buffer-size)) #\a)
+                                     "\""
+                                     "\nend"))
+    
+    (define input-port-with-lines (open-string-input-port input-string-with-lines))
+    (define sfd-with-lines
+      (let ((op (open-output-file "testfile.ss" 'replace)))
+        (display input-string-with-lines op)
+        (close-port op)
+        (let* ([ip (open-file-input-port "testfile.ss")]
+               [sfd (make-source-file-descriptor "testfile.ss" ip)])
+          (close-port ip)
+          sfd)))
+    (define input-port-with-line-pos 0)
+    (define (read-with-lines)
+      (parameterize ([current-make-source-object (make-make-source-object/get-lines sfd-with-lines)])
+        (let-values ([(v pos) (get-datum/annotations input-port-with-lines sfd-with-lines input-port-with-line-pos)])
+          (set! input-port-with-line-pos pos)
+          v)))
+    (define line-one (read-with-lines))
+    (annotation? line-one))
+  (string? (annotation-stripped line-one))
+  (begin
+    (define line-two (read-with-lines))
+    (annotation? line-two))
+  (equal? (file-position-object-line (source-object-bfp (annotation-source line-two))) 2)
+  (equal? (file-position-object-column (source-object-bfp (annotation-source line-two))) 1)
+  )
 
 (mat include
   (error? ; invalid syntax

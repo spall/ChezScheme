@@ -42,7 +42,7 @@ TODO:
             (let ([sfd (source-sfd src)]
                   [fp (if start? (source-bfp src) (source-efp src))])
               (call-with-values
-                (lambda () ($locate-source sfd fp))
+                (lambda () ((current-locate-source) sfd fp))
                 (case-lambda
                   [()
                    (fprintf op "~a~a char ~a of ~a" prefix

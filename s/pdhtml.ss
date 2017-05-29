@@ -154,6 +154,11 @@
         (lambda (fdata bfp efp count)
           (new fdata bfp efp count #f #f #f)))))
 
+  (define (position-only fd)
+    (if (file-position? fd)
+        (file-position-position fd)
+        fd))
+
   (define (gather-filedata who warn? dumpit*)
    ; returns list of fdata records, each holding a list of entries
    ; the entries are sorted based on their (unique) bfps
@@ -191,11 +196,11 @@
         (lambda (dumpit)
           (let ([source (car dumpit)])
             (assert (source? source))
-            (let ([bfp (source-bfp source)])
+            (let ([bfp (position-only (source-bfp source))])
               (when (>= bfp 0) ; weed out block-profiling entries, whose bfps are negative
                 (let ([fdata (open-source (source-sfd source))])
                   (filedata-entry*-set! fdata
-                    (cons (make-entrydata fdata bfp (source-efp source) (cdr dumpit))
+                    (cons (make-entrydata fdata bfp (position-only (source-efp source)) (cdr dumpit))
                       (filedata-entry* fdata))))))))
         dumpit*)
       (let ([fdatav (hashtable-values fdata-ht)])
@@ -284,6 +289,10 @@
       (nongenerative #{profilit iw9f7z5ovg4jjetsvw5m0-2})
       (sealed #t)
       (fields sfd bfp efp weight))
+    (define (position-only fd)
+      (if (file-position? fd)
+          (file-position-position fd)
+          fd))
     (define make-profile-database
       (lambda ()
         (make-hashtable
@@ -325,7 +334,7 @@
                      (lambda (dumpit)
                        (let ([source (car dumpit)] [count (cdr dumpit)])
                          (fasl-write
-                           (make-profilit (source-sfd source) (source-bfp source) (source-efp source)
+                           (make-profilit (source-sfd source) (position-only (source-bfp source)) (position-only (source-efp source))
                              ; compute weight as % of max count
                              (fl/ (inexact count) max-count))
                            op)))
@@ -402,10 +411,10 @@
                              (update-sfd! (hashtable-cell profile-database sfd #f) sfd)
                              ht)))) =>
                (lambda (ht)
-                 (let ([alist (hashtable-ref ht (source-object-bfp src) '())])
+                 (let ([alist (hashtable-ref ht (position-only (source-object-bfp src)) '())])
                    (cond
                      [(assv (source-object-efp src) alist) => cadr]
-                     [(and (fxnegative? (source-object-bfp src)) (not (null? alist)))
+                     [(and (fxnegative? (position-only (source-object-bfp src))) (not (null? alist)))
                       ($oops #f "block-profiling info is out-of-date for ~s"
                         (source-file-descriptor-name (source-object-sfd src)))]
                      ; no info for given bfp, efp...assume dead code and return 0

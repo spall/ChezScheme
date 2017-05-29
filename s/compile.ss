@@ -577,7 +577,7 @@
                          (when (and (annotation? x0) (fxlogtest (annotation-flags x0) (constant annotation-debug)))
                            (let ((s (annotation-source x0)))
                              (call-with-values
-                               (lambda () ($locate-source (source-sfd s) (source-bfp s)))
+                               (lambda () ((current-locate-source) (source-sfd s) (source-bfp s)))
                                (case-lambda
                                  [() (void)]
                                  [(path line char) (printf " on line ~s" line)]))))))))
@@ -1656,7 +1656,7 @@
     (when (compile-file-message) (printf "compiling ~a with output to ~a\n" in out))
     (let ([ip ($open-file-input-port who in)])
       (on-reset (close-port ip)
-        (let ([sfd ($source-file-descriptor in ip)])
+        (let ([sfd ($source-file-descriptor in ip #t)])
          ; whack existing ip so close-port calls close the text port
           (set! ip (transcoded-port ip (current-transcoder)))
           (when r6rs? ($set-port-flags! ip (constant port-flag-r6rs)))

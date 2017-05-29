@@ -529,3 +529,10 @@
     bytevector.ms, root-experr*
 - fixed typo in S_abnormal_exit
     schsig.c
+- added file-position objects, a current-locate-source parameter to
+  control looking up line and columns information, and a
+  'source-object message for code and continuation inspectors
+    read.ss, syntax.ss, 7.ss, compile.ss, cpnanopass.ss, pdhtml.ss,
+    inspect.ss, primdata.ss, prims.ss, cmacros.ss, types.ss,
+    8.ms, root-experr*,
+    syntax.stex, debug.stex, system.stex, release_notes.stex

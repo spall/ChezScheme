@@ -30,9 +30,14 @@
   (nongenerative #{source bc9ao7qsvpf38krv-a})
   (sealed #t))
 
+(define-record-type file-position
+  (fields (immutable position) (immutable line) (immutable column))
+  (nongenerative #{file-position df3uc8mjv6oxmj850jas6w-0})
+  (sealed #t))
+
 (define-record-type source-file-descriptor
   (fields (immutable name) (immutable length) (immutable crc))
-  (nongenerative #{source-file-descriptor bdbv4s3hk5ja7rql-a})
+  (nongenerative #{source-file-descriptor d5gmygl97k737yzc7cqc0d-0})
   (sealed #t))
 
 (define-record-type syntax-object

@@ -112,6 +112,21 @@ The new primitive procedures \scheme{bytevector-compress} and
 compression functionality that is used for files with the
 \scheme{compressed} option.
 
+\subsection{File-position objects (9.4.1)}
+
+File-position objects can be used in place of file-position integers
+for functions such as \scheme{make-source-object}. A file-position
+object combines a file position (which is relative to the start of the
+file) with a line number and column number within the line.
+File-position objects take more space, but they allow reporting of line and column
+information even if a source file is later modified or becomes unavailable.
+The value of the \scheme{current-make-source-object} parameter is used by the
+reader to construct source objects for programs, and the parameter can be
+modified to collect line and column information eagerly. The value of the
+\scheme{current-locate-source} parameter is used for error reporting,
+instead of calling \scheme{locate-source} directly, so that just-in-time
+source-location lookup can be adjusted, too.
+
 \subsection{High-precision clock time in Windows 8 and up (9.4.1)}
 
 When running on Windows 8 and up, Chez Scheme uses the high-precision
