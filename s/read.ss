@@ -259,7 +259,7 @@
   (cond
     [(eq? ip (console-input-port)) ($lexical-error who msg args ip ir?)]
     [(not fp) ($lexical-error who "~? on ~s" (list msg args ip) ip ir?)]
-    [sfd ($lexical-error who msg args ip (make-source sfd bfp fp) start? ir?)]
+    [sfd ($lexical-error who msg args ip ($make-source-object sfd bfp fp) start? ir?)]
     [else ($lexical-error who "~? at char ~a of ~s" (list msg args (if start? bfp fp) ip) ip ir?)]))
 
 (xdefine (rd-eof-error s)
@@ -1013,7 +1013,9 @@
         [(eof) #t]
         [(atomic) (eof-object? value)]
         [else #f])
-      (values value fp)
+      (begin
+        (when sfd (source-file-descriptor-lines-done! sfd))
+        (values value fp))
       (if (and (or (eq? type 'rparen) (eq? type 'rbrack))
                (eq? ip (console-input-port)))
           (call-with-token rd-top-level)
@@ -1132,7 +1134,7 @@
   (xmvlet ((x stripped) (xcall rd-help type value))
     (xvalues
       (if (and a? (not (procedure? x))) ; don't annotate code
-          (make-annotation x (make-source sfd bfp fp) stripped)
+          (make-annotation x ($make-source-object sfd bfp fp) stripped)
           x)
       stripped)))
 
@@ -1615,8 +1617,14 @@
 (set! $locate-source
   (lambda (sfd fp)
     (cond
+      [(file-position? fp)
+       ;; No need to search for anything
+       (values (source-file-descriptor-name sfd)
+               (file-position-line fp)
+               (file-position-column fp))]
       [($open-source-file sfd) =>
        (lambda (ip)
+         ;; Search for line and column within the file
          (let loop ([fp fp] [line 1] [char 1])
            (if (= fp 0)
                (begin
@@ -1675,25 +1683,46 @@
                             (fxlogxor crc (bytevector-u8-ref s i))
                             #xff)))))))))
     (define go/reset
-      (lambda (ifn ip)
-        (let ([pos (port-position ip)])
-          (set-port-position! ip 0)
-          (let ([sfd (go ifn ip)])
-            (set-port-position! ip pos)
-            sfd))))
-    (define go
+      (lambda (go ifn ip reset?)
+        (if reset?
+            (let ([pos (port-position ip)])
+              (set-port-position! ip 0)
+              (let ([sfd (go ifn ip)])
+                (set-port-position! ip pos)
+                sfd))
+            (go ifn ip))))
+    (define go-crc
       (lambda (ifn ip)
         (let ((buflen (file-buffer-size)))
           (define buf (make-bytevector buflen))
           (let loop ((len 0) (crc #xffff))
             (let ((n (get-bytevector-n! ip buf 0 buflen)))
               (if (eof-object? n)
-                  (make-source-file-descriptor ifn len crc)
+                  (make-source-file-descriptor ifn len crc #f)
                   (loop (+ len n) (crc16 crc buf n))))))))
+    (define go-crc+lines
+      (lambda (ifn ip)
+        (let ((buflen (file-buffer-size)))
+          (define buf (make-bytevector buflen))
+          (let loop ((len 0) (crc #xffff) (pos 1) (line 1) (column 0) (lines (list (cons 0 1))))
+            (let ((n (get-bytevector-n! ip buf 0 buflen)))
+              (if (eof-object? n)
+                  (let ([lines (list->vector (reverse lines))])
+                    (make-source-file-descriptor ifn len crc lines))
+                  (let bloop ((i 0) (pos 0) (line line) (column column) (lines lines))
+                    (cond
+                     [(fx= i n) (loop (fx+ n len) (crc16 crc buf n) pos line column lines)]
+                     [(= (bytevector-u8-ref buf i) (char->integer #\newline))
+                      (let ([pos (fx+ pos 1)]
+                            [line (fx+ line 1)])
+                        (bloop (fx+ i 1) pos line 0 (cons (cons pos line) lines)))]
+                     [else
+                      (bloop (fx+ i 1) (fx+ pos 1) line (fx+ column 1) lines)]))))))))
     (case-lambda
-      [(ifn ip) (go/reset ifn ip)]
-      [(ifn ip reset?)
-       (if reset? (go/reset ifn ip) (go ifn ip))])))
+      [(ifn ip) (go/reset go-crc ifn ip #t)]
+      [(ifn ip reset?) (go/reset go-crc ifn ip reset?)]
+      [(ifn ip reset? record-lines?)
+       (go/reset (if record-lines? go-crc+lines go-crc) ifn ip reset?)])))
 
 (set! char-name
   (let ()

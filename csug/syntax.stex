@@ -1561,15 +1561,24 @@ locations to be profiled.
 Source objects are also values of a type distinct from other types and
 also have three components: a \emph{source-file descriptor} (sfd),
 a beginning file position (bfp), and an ending file position (efp).
-The sfd identifies the file from which an expression is read and the
-bfp identify the range of character positions occupied by the object
-in the file, with the bfp being inclusive and the efp being exclusive.
+The sfd identifies the file from which an expression is read, and the
+bfp and ebp identify the range of character positions occupied by the object
+in the file, with the bfp being inclusive and the efp being exclusive and
+both counting from 0.
+A beginning or ending file position can be either an integer or a file-position object
+taht is created with
+\index{\scheme{make-file-position-object}}\scheme{make-file-position-object},
+where a file-position object holds a line (counting from 1) and column (counting from 1)
+in addition to a character position that is relative to the start of the file.
+File-position objects take more space, but they allow reporting of line and column
+information even if a source file is later modified or becomes unavailable.
 A source object can be created via
 \index{\scheme{make-source-object}}\scheme{make-source-object}, which
 takes three arguments corresponding to these components.
 The first argument must be a source-file descriptor, the second and
-third must be nonnegative exact integers, and the second must not be
-greater than the third.
+third object each must be a nonnegative exact integer or a file-position objects,
+and the position components of the second argument must not be greater than the
+position components of the third argument.
 
 \index{source-file descriptors}%
 Source-file descriptors are also values of a type distinct
@@ -1606,15 +1615,22 @@ and described in more detail later in this section.
 
 (make-source-object \var{sfd} \var{uint} \var{uint}) ;-> \var{source-object}
 (source-object? \var{obj}) ;-> \var{boolean}
-(source-object-bfp \var{source-object}) ;-> \var{uint}
-(source-object-efp \var{source-object}) ;-> \var{uint}
+(source-object-bfp \var{source-object}) ;-> \var{uint or file-position-object}
+(source-object-efp \var{source-object}) ;-> \var{uint or file-position-object}
 (source-object-sfd \var{source-object}) ;-> \var{sfd}
 
 (make-source-file-descriptor \var{string} \var{binary-input-port}) ;-> \var{sfd}
 (make-source-file-descriptor \var{string} \var{binary-input-port} \var{reset?}) ;-> \var{sfd}
+(make-source-file-descriptor \var{string} \var{binary-input-port} \var{reset?} \var{record-lines?}) ;-> \var{sfd}
 (source-file-descriptor? \var{obj}) ;-> \var{boolean}
 (source-file-descriptor-checksum \var{sfd}) ;-> \var{obj}
 (source-file-descriptor-path \var{sfd}) ;-> \var{obj}
+
+(make-file-position-object \var{uint} \var{uint} \var{uint}) ;-> \var{file-position-object}
+(file-position-object? \var{obj}) ;-> \var{boolean}
+(file-position-object-position \var{file-position-object}) ;-> \var{uint}
+(file-position-object-line \var{file-position-object}) ;-> \var{non-zero uint}
+(file-position-object-column \var{file-position-object}) ;-> \var{non-zero uint}
 \endschemedisplay
 
 A program might open a source file with
@@ -1739,8 +1755,19 @@ marked \scheme{profile} are used for profiling.
 \endentryheader
 
 \var{sfd} must be a source-file descriptor.
-\var{bfp} and \var{efp} must be exact nonnegative integers, and \var{bfp}
-should not be greater than \var{efp}.
+\var{bfp} and \var{efp} each must be either an exact nonnegative integer
+or a file-position object, where the position represented by \var{bfp}
+should not be greater than \var{efp}. If \var{bfp} and\var{efp} are
+both file-position objects, then the line of \var{bfp}
+should not be greater than the line of \var{efp}, and if the lines are the
+same, then then column of \var{bfp}
+should not be greater than the column of \var{efp}.
+
+If \var{bfp} is an integer and \var{sfd} records a position-to-line
+mapping (as configured by a true value for the \var{record-lines?}
+argument to \scheme{make-source-file-descriptor}), then the \var{bfp}
+is converted to a file-position object using \var{sfd}'s
+position-to-line mapping.
 
 %----------------------------------------------------------------------------
 \entryheader
@@ -1774,6 +1801,7 @@ should not be greater than \var{efp}.
 \entryheader
 \formdef{make-source-file-descriptor}{\categoryprocedure}{(make-source-file-descriptor \var{string} \var{binary-input-port})}
 \formdef{make-source-file-descriptor}{\categoryprocedure}{(make-source-file-descriptor \var{string} \var{binary-input-port} \var{reset?})}
+\formdef{make-source-file-descriptor}{\categoryprocedure}{(make-source-file-descriptor \var{string} \var{binary-input-port} \var{reset?} \var{record-lines?})}
 \returns a source-file descriptor
 \listlibraries
 \endentryheader
@@ -1784,6 +1812,16 @@ this procedure must read all of the data from
 If \var{reset?} is present and \scheme{#t}, the port is reset to its
 original position, as if via \scheme{port-position}.
 Otherwise, it is left pointing at end-of-file.
+
+If \var{record-lines?} if present and \scheme{#t}, then while reading
+\var{binary-input-port}, a position-to-line mapping is recorded and kept
+as part of the result source-file descriptor. This mapping is consulted
+by \scheme{make-source-object} when an integer is provided as the bfp,
+and the bfp is then converted to a file-position object containing a line
+and column as well as the provided bfp. Calling \scheme{scource-file-descriptor-lines-done!}
+drops the position-to-line mapping; note that \scheme{get-datum/annotations}
+calls \scheme{scource-file-descriptor-lines-done!} on the scource-file descriptor that
+it is given when it encounters an end-of-file.
 
 %----------------------------------------------------------------------------
 \entryheader
@@ -1810,6 +1848,17 @@ Otherwise, it is left pointing at end-of-file.
 
 %----------------------------------------------------------------------------
 \entryheader
+\formdef{source-file-descriptor-lines-done!}{\categoryprocedure}{(source-file-descriptor-line-done! \var{sfd})}
+\returns inspecified
+\listlibraries
+\endentryheader
+
+Clears the position-to-line mapping recorded in \var{sfd}, if any, as created
+by calling \scheme{make-source-file-descriptor} with a \scheme{#t} value for
+its \var{record-lines?} argument.
+
+%----------------------------------------------------------------------------
+\entryheader
 \formdef{source-file-descriptor}{\categoryprocedure}{(source-file-descriptor \var{path} \var{checksum})}
 \returns a new source-file-descriptor
 \listlibraries
@@ -1818,6 +1867,45 @@ Otherwise, it is left pointing at end-of-file.
 \var{path} must be a string, and \var{checksum} must be an exact nonnegative integer.
 This procedure can be used to construct custom source-file descriptors or to reconstitute
 source-file descriptors from the \var{path} and \var{checksum} components.
+
+%----------------------------------------------------------------------------
+\entryheader
+\formdef{make-file-position-object}{\categoryprocedure}{(make-file-position-object \var{position} \var{line} \var{column})}
+\returns a file-position-object
+\listlibraries
+\endentryheader
+
+\var{position} must be an exact nonnegative integer,
+\var{line} must be an exact positive integer,
+and \var{column} must be an exact positive integer.
+
+%----------------------------------------------------------------------------
+\entryheader
+\formdef{file-position-object?}{\categoryprocedure}{(file-position-object? \var{obj})}
+\returns \scheme{#t} if \var{obj} is a file-position object, otherwise \scheme{#f}
+\listlibraries
+\endentryheader
+
+%----------------------------------------------------------------------------
+\entryheader
+\formdef{file-position-object-position}{\categoryprocedure}{(file-position-object-bfp \var{file-position-object})}
+\returns the position component of \var{file-position-object}
+\listlibraries
+\endentryheader
+
+%----------------------------------------------------------------------------
+\entryheader
+\formdef{file-position-object-line}{\categoryprocedure}{(file-position-object-efp \var{file-position-object})}
+\returns the line component of \var{file-position-object}
+\listlibraries
+\endentryheader
+
+%----------------------------------------------------------------------------
+\entryheader
+\formdef{file-position-object-column}{\categoryprocedure}{(file-position-object-sfd \var{file-position-object})}
+\returns the column component of \var{file-position-object}
+\listlibraries
+\endentryheader
 
 %----------------------------------------------------------------------------
 \entryheader
@@ -1864,6 +1952,10 @@ This protocol is necessary to handle files containing multiple-byte
 characters, since file positions do not necessarily correspond
 to character positions.
 
+When an end-of-file is encountered in \var{textual-input-port}, then
+\scheme{get-datum/annotations} calls
+\scheme{source-file-descriptor-lines-done!} on \var{sfd}.
+
 %----------------------------------------------------------------------------
 \entryheader
 \formdef{open-source-file}{\categoryprocedure}{(open-source-file \var{sfd})}
@@ -1887,17 +1979,22 @@ checksum recorded in \var{sfd}.
 \listlibraries
 \endentryheader
 
-\var{sfd} must be a source-file descriptor, and \var{pos} must be an
-exact nonnegative integer.
+\var{sfd} must be a source-file descriptor, and \var{pos} must be either an
+exact nonnegative integer or a file-position object.
 
-This procedure attempts to locate and open the source file identified
-by \var{sfd}.
+If \var{pos} is an integer,
+then \scheme{locate-source} attempts to locate and open the source file
+identified by \var{sfd}.
 If successful, it returns three values: a string \var{path}, an exact
-nonnegative integer \var{line}, and an exact nonnegative integer \var{char}
-representing the absolute pathname, line, and character position within
+positive integer \var{line}, and an exact positive integer \var{column}
+representing the absolute pathname, line, and column within
 the line represented by the specified source-file descriptor and file
 position.
 If unsuccessful, it returns zero values.
 It can fail even if a file with the correct name exists in one of
 the source directories when the file's checksum does not match the
 checksum recorded in \var{sfd}.
+
+If \var{pos} is a file-position object, then three values are
+returned---\var{path}, \var{line}, and \var{column}---without reading
+the file or comparing its checksum to the one recorded in \var{sfd}.

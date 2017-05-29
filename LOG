@@ -462,3 +462,10 @@
     prims.ss, primdata.ss, newhash.ss, fasl.ss, mkheader.ss
     cmacro.ss, prim5.c, fasl.c, gc.c, gcwrapper.c, types.h,
     4.ms, hash.ms, objects.stex, smgmt.stex, csug.bib
+- added file-position objects, a record-source-lines-and-columns
+  parameter to record line and column in a source object, and
+  a 'source-object message for code and continuation inspectors
+    read.ss, syntax.ss, 7.ss, compile.ss, cpnanopass.ss, pdhtml.ss,
+    inspect.ss, primdata.ss, prims.ss, cmacros.ss, types.ss,
+    8.ms, root-experr*,
+    syntax.stex, debug.stex, system.stex, release_notes.stex

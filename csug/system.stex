@@ -1110,6 +1110,7 @@ cp0-outer-unroll-limit
 generate-inspector-information
 compile-profile
 generate-interrupt-trap
+record-source-lines-and-columns
 enable-cross-library-optimization
 \endschemedisplay
 
@@ -2392,6 +2393,20 @@ For example, if:
 \noindent
 is included in a file, generation of inspector information will be
 disabled only for the remainder of that particular file.
+
+%----------------------------------------------------------------------------
+\entryheader\label{desc:record-source-lines-and-columns}
+\formdef{record-source-lines-and-columns}{\categorythreadparameter}{record-source-lines-and-columns}
+\listlibraries
+\endentryheader
+
+\noindent When this parameter is set to a true value (not the
+default), line and column information are recorded with source
+information, as opposed to recording just file positions and
+re-reading the file to turn positions into lines and columns.
+Recording lines and columns takes more space in memory and in compiled
+files, but it allows reporting of line and column information even if
+a source file is later modified or becomes unavailable.
 
 %----------------------------------------------------------------------------
 \entryheader

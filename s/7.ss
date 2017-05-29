@@ -240,7 +240,7 @@
                   ($oops who "missing header for compiled file ~s" fn))
                 (unless ksrc ($oops who "~a is not a compiled file" fn))
                 (unless (eqv? fp 0) (set-port-position! ip 0))
-                (let ([sfd ($source-file-descriptor fn ip (eqv? fp 0))])
+                (let ([sfd ($source-file-descriptor fn ip (eqv? fp 0) (record-source-lines-and-columns))])
                   (unless (eqv? fp 0) (set-port-position! ip fp))
                   ; whack ip so on-reset close-port call above closes the text port
                   (set! ip (transcoded-port ip (current-transcoder)))

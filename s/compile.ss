@@ -558,6 +558,7 @@
                    [cp0-score-limit (cp0-score-limit)]
                    [cp0-outer-unroll-limit (cp0-outer-unroll-limit)]
                    [generate-inspector-information (generate-inspector-information)]
+                   [record-source-lines-and-columns (record-source-lines-and-columns)]
                    [$compile-profile ($compile-profile)]
                    [generate-interrupt-trap (generate-interrupt-trap)]
                    [$optimize-closures ($optimize-closures)]
@@ -1467,7 +1468,7 @@
                               (unless (eof-object? n)
                                 (put-bytevector op buf 0 n)
                                 (loop)))))
-                        (let ([sfd ($source-file-descriptor infn ip)])
+                        (let ([sfd ($source-file-descriptor infn ip #t (record-source-lines-and-columns))])
                          ; whack ip so close-port calls close the text port
                           (set! ip (transcoded-port ip (current-transcoder)))
                           (compile-file-help op #f #f machine sfd ($make-read ip sfd 0) outfn))))
@@ -1619,7 +1620,7 @@
     (when (compile-file-message) (printf "compiling ~a with output to ~a~@[ (host output to ~a)~]\n" in out hostout))
     (let ([ip ($open-file-input-port who in)])
       (on-reset (close-port ip)
-        (let ([sfd ($source-file-descriptor in ip)])
+        (let ([sfd ($source-file-descriptor in ip #t (record-source-lines-and-columns))])
           ; whack existing ip so close-port calls close the text port
           (set! ip (transcoded-port ip (current-transcoder)))
           (when r6rs? ($set-port-flags! ip (constant port-flag-r6rs)))
@@ -1656,7 +1657,7 @@
     (when (compile-file-message) (printf "compiling ~a with output to ~a\n" in out))
     (let ([ip ($open-file-input-port who in)])
       (on-reset (close-port ip)
-        (let ([sfd ($source-file-descriptor in ip)])
+        (let ([sfd ($source-file-descriptor in ip #t (record-source-lines-and-columns))])
          ; whack existing ip so close-port calls close the text port
           (set! ip (transcoded-port ip (current-transcoder)))
           (when r6rs? ($set-port-flags! ip (constant port-flag-r6rs)))

@@ -5269,6 +5269,7 @@
           (define-tc-parameter current-error-port current-error)
           (define-tc-parameter generate-inspector-information generate-inspector-information)
           (define-tc-parameter generate-profile-forms generate-profile-forms)
+          (define-tc-parameter record-source-lines-and-columns record-source-lines-and-columns)
           (define-tc-parameter $compile-profile compile-profile)
           (define-tc-parameter optimize-level optimize-level)
           (define-tc-parameter subset-mode subset-mode)

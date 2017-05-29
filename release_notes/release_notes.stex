@@ -97,6 +97,20 @@ For example, the arity mask for a two-argument procedure such as
 while the arity mask for a procedure that accepts one or more arguments,
 such as \var{list*}, is $-2$ (all but bit 0 set).
 
+\subsection{File-position objects (9.4.1)}
+
+File-position objects can be used in place of file-position integers
+for functions such as \scheme{make-source-object}. A file-position
+object combines a file position (which is relative to the start of the
+file) with a line number and column number within the line.
+File-position objects take more space, but they allow reporting of line and column
+information even if a source file is later modified or becomes unavailable.
+File-position objects also help avoid multiple reads of a source file that contains
+\scheme{define-values} or \scheme{let-values} forms, where macro expansion
+generates an error message containing the source line and column.
+A \scheme{record-source-lines-and-columns} parameter enables line and column
+recording for programs compiled with \scheme{compile-file} or run with \scheme{load}.
+
 \subsection{High-precision clock time in Windows 8 and up (9.4.1)}
 
 When running on Windows 8 and up, Chez Scheme uses the high-precision

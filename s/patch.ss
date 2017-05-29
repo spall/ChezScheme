@@ -15,6 +15,8 @@
 
 (printf "loading ~s cross compiler~%" (constant machine-type-name))
 
+(define record-source-lines-and-columns (make-parameter #f))
+
 ; (current-expand (lambda args (apply sc-expand args)))
 ; (current-eval (lambda args (apply interpret args)))
 

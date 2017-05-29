@@ -1362,6 +1362,7 @@
    [ptr compile-profile]
    [ptr generate-inspector-information]
    [ptr generate-profile-forms]
+   [ptr record-source-lines-and-columns]
    [ptr optimize-level]
    [ptr subset-mode]
    [ptr suppress-primitive-inlining]

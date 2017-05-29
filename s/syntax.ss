@@ -9637,7 +9637,10 @@
                  annotation make-annotation annotation? annotation-expression annotation-source annotation-stripped annotation-flags
                  make-source-file-descriptor source-file-descriptor source-file-descriptor? source-file-descriptor-name
                  source-file-descriptor-length source-file-descriptor-crc
+                 source-file-descriptor-line-table source-file-descriptor-line-table-set!
                  syntax-object? syntax-object-expression
+                 make-file-position file-position file-position?
+                 file-position-position file-position-line file-position-column
                  )
     (include "types.ss"))
   (import (prefix types %))
@@ -9647,15 +9650,29 @@
   (let ()
     (define prsource
       (lambda (x p)
-        (fprintf p "~a[~s:~s]"
+        (let ([format-position
+               (lambda (fp)
+                 (if (%file-position? fp)
+                     (format "~a=~a.~a"
+                             (%file-position-position fp)
+                             (%file-position-line fp)
+                             (%file-position-column fp))
+                     fp))])
+        (fprintf p "~a[~a:~a]"
           (%source-file-descriptor-name (%source-sfd x))
-          (%source-bfp x)
-          (%source-efp x))))
+          (format-position (%source-bfp x))
+          (format-position (%source-efp x))))))
     (record-writer (type-descriptor %source)
       (lambda (x p wr)
         (display-string "#<source " p)
         (prsource x p)
         (display-string ">" p)))
+    (record-writer (type-descriptor %file-position)
+      (lambda (x p wr)
+        (fprintf p "#<file-position ~a=~a.~a>"
+          (%file-position-position x)
+          (%file-position-line x)
+          (%file-position-column x))))
     (record-writer (type-descriptor %annotation)
       (lambda (x p wr)
         (display-string "#<annotation " p)
@@ -9663,17 +9680,51 @@
         (display-string " " p)
         (wr (%annotation-stripped x) p)
         (display-string ">" p))))
+  (set-who! $make-source-object
+    (let ()
+      (define (binary-search-for-position table bfp)
+        (let loop ([lo 0] [hi (vector-length table)])
+          (let* ([mid (fxsra (fx+ lo hi) 1)]
+                 [pos+line (vector-ref table mid)])
+            (cond
+             [(fx= (fx+ 1 lo) hi) pos+line]
+             [(< bfp (car pos+line)) (loop lo mid)]
+             [else (loop mid hi)]))))
+      (lambda (sfd bfp efp)
+        (cond
+         [(and (not (%file-position? bfp))
+               (%source-file-descriptor-line-table sfd))
+          ;; Use sfd's table that maps positions to lines (and infer column)
+          (let ([p (binary-search-for-position (%source-file-descriptor-line-table sfd) bfp)])
+            (%make-source sfd (%make-file-position bfp (cdr p) (+ 1 (- bfp (car p)))) efp))]
+         [else
+          (%make-source sfd bfp efp)]))))
   (set-who! make-source-object
-    (lambda (sfd bfp efp)
-      (unless (%source-file-descriptor? sfd)
-        ($oops who "~s is not a source file descriptor" sfd))
-      (unless (if (fixnum? bfp) (fx>= bfp 0) (and (bignum? bfp) ($bigpositive? bfp)))
-        ($oops who "~s is not an exact nonnegative integer" bfp))
-      (unless (if (fixnum? efp) (fx>= efp 0) (and (bignum? efp) ($bigpositive? efp)))
-        ($oops who "~s is not an exact nonnegative integer" efp))
-      (unless (<= bfp efp)
-        ($oops who "ending file position ~s is less than beginning file position ~s" efp bfp))
-      (%make-source sfd bfp efp)))
+    (let ()
+      (lambda (sfd bfp efp)
+        (unless (%source-file-descriptor? sfd)
+          ($oops who "~s is not a source file descriptor" sfd))
+        (unless (or (%file-position? bfp)
+                    (if (fixnum? bfp) (fx>= bfp 0) (and (bignum? bfp) ($bigpositive? bfp))))
+          ($oops who "~s is not an exact nonnegative integer or file-position object" bfp))
+        (unless (or (%file-position? efp)
+                    (if (fixnum? efp) (fx>= efp 0) (and (bignum? efp) ($bigpositive? efp))))
+          ($oops who "~s is not an exact nonnegative integer or file-position object" efp))
+        (let ([bfp-pos (if (%file-position? bfp) (%file-position-position bfp) bfp)]
+              [efp-pos (if (%file-position? efp) (%file-position-position efp) efp)])
+          (unless (<= bfp-pos efp-pos)
+            ($oops who "ending file position ~s is less than beginning file position ~s" efp-pos bfp-pos)))
+        (when (and (%file-position? bfp) (%file-position? efp))
+          (let ([bfp-line (%file-position-line bfp)]
+                [efp-line (%file-position-line efp)])
+            (unless (<= bfp-line efp-line)
+              ($oops who "ending file line ~s is less than beginning file line ~s" efp-line bfp-line))
+            (when (= bfp-line efp-line)
+              (let ([bfp-column (%file-position-column bfp)]
+                    [efp-column (%file-position-column efp)])
+              (unless (<= bfp-column efp-column)
+                ($oops who "ending file column ~s is less than beginning file column ~s" bfp-column efp-column))))))
+        ($make-source-object sfd bfp efp))))
   (set-who! source-object?
     (lambda (x)
       (%source? x)))
@@ -9732,24 +9783,57 @@
             (if (fxlogtest flags (constant annotation-profile))
                 (annotation-options profile)
                 (annotation-options))))))
+  (set-who! make-file-position-object
+    (lambda (position line column)
+      (unless (if (fixnum? position) (fx>= position 0) (and (bignum? position) ($bigpositive? position)))
+        ($oops who "~s is not an exact nonnegative integer" position))
+      (unless (if (fixnum? line) (fx> line 0) (and (bignum? line) ($bigpositive? line)))
+        ($oops who "~s is not an exact positive integer" line))
+      (unless (if (fixnum? column) (fx> column 0) (and (bignum? column) ($bigpositive? column)))
+        ($oops who "~s is not an exact positive integer" column))
+      (%make-file-position position line column)))
+  (set-who! file-position-object?
+    (lambda (x)
+      (%file-position? x)))
+  (set-who! file-position-object-position
+    (lambda (fp)
+      (unless (%file-position? fp)
+        ($oops who "~s is not a file-position object" fp))
+      (%file-position-position fp)))
+  (set-who! file-position-object-line
+    (lambda (fp)
+      (unless (%file-position? fp)
+        ($oops who "~s is not a file-position object" fp))
+      (%file-position-line fp)))
+  (set-who! file-position-object-column
+    (lambda (fp)
+      (unless (%file-position? fp)
+        ($oops who "~s is not a file-position object" fp))
+      (%file-position-column fp)))
   (set-who! make-source-file-descriptor
     (rec make-source-file-descriptor
       (case-lambda
-        [(ifn bip) (make-source-file-descriptor ifn bip #f)]
-        [(ifn bip reset?)
+        [(ifn bip) (make-source-file-descriptor ifn bip #f #f)]
+        [(ifn bip reset?) (make-source-file-descriptor ifn bip reset? #f)]
+        [(ifn bip reset? record-lines?)
          (unless (string? ifn) ($oops who "~s is not a string" ifn))
          (unless (and (input-port? bip) (binary-port? bip))
            ($oops who "~s is not a binary input port" bip))
          (when reset?
            (unless (and (port-has-port-position? bip) (port-has-set-port-position!? bip))
              ($oops who "~s does not support port-position and set-port-position!" bip)))
-         ($source-file-descriptor ifn bip reset?)])))
+         ($source-file-descriptor ifn bip reset? record-lines?)])))
+  (set-who! source-file-descriptor-lines-done!
+    (lambda (x)
+      (unless (%source-file-descriptor? x) ($oops who "~s is not a source-file descriptor" x))
+      (when (%source-file-descriptor-line-table x)
+        (%source-file-descriptor-line-table-set! x #f))))
   (set-who! source-file-descriptor
     (lambda (path checksum)
       (unless (string? path) ($oops who "~s is not a string" path))
       (unless (if (fixnum? checksum) (fx>= checksum 0) (and (bignum? checksum) ($bigpositive? checksum)))
         ($oops who "~s is not an exact nonnegative integer" checksum))
-      (%make-source-file-descriptor path (ash checksum -16) (logand checksum #xffff))))
+      (%make-source-file-descriptor path (ash checksum -16) (logand checksum #xffff) #f)))
   (set-who! source-file-descriptor?
     (lambda (x)
       (%source-file-descriptor? x)))
@@ -9770,7 +9854,9 @@
   (set-who! locate-source
     (lambda (sfd fp)
       (unless (%source-file-descriptor? sfd) ($oops who "~s is not a source-file descriptor" sfd))
-      (unless (if (fixnum? fp) (fx>= fp 0) (and (bignum? fp) ($bigpositive? fp))) ($oops who "~s is not an exact nonnegative integer" fp))
+      (unless (or (%file-position? fp)
+                  (if (fixnum? fp) (fx>= fp 0) (and (bignum? fp) ($bigpositive? fp))))
+        ($oops who "~s is not an exact nonnegative integer or file-position object" fp))
       ($locate-source sfd fp)))
   (set-who! syntax->annotation
     (lambda (x)
