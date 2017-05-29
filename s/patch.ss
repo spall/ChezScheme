@@ -15,6 +15,8 @@
 
 (printf "loading ~s cross compiler~%" (constant machine-type-name))
 
+(define current-locate-source (make-parameter locate-source))
+
 ; (current-expand (lambda args (apply sc-expand args)))
 ; (current-eval (lambda args (apply interpret args)))
 

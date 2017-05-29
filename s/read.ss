@@ -259,7 +259,7 @@
   (cond
     [(eq? ip (console-input-port)) ($lexical-error who msg args ip ir?)]
     [(not fp) ($lexical-error who "~? on ~s" (list msg args ip) ip ir?)]
-    [sfd ($lexical-error who msg args ip (make-source sfd bfp fp) start? ir?)]
+    [sfd ($lexical-error who msg args ip ($make-source-object sfd bfp fp) start? ir?)]
     [else ($lexical-error who "~? at char ~a of ~s" (list msg args (if start? bfp fp) ip) ip ir?)]))
 
 (xdefine (rd-eof-error s)
@@ -1132,7 +1132,7 @@
   (xmvlet ((x stripped) (xcall rd-help type value))
     (xvalues
       (if (and a? (not (procedure? x))) ; don't annotate code
-          (make-annotation x (make-source sfd bfp fp) stripped)
+          (make-annotation x ($make-source-object sfd bfp fp) stripped)
           x)
       stripped)))
 
@@ -1612,20 +1612,58 @@
                     (and (not (string=? rest name))
                          (pathloop rest))))))))))
 
-(set! $locate-source
-  (lambda (sfd fp)
-    (cond
-      [($open-source-file sfd) =>
-       (lambda (ip)
-         (let loop ([fp fp] [line 1] [char 1])
-           (if (= fp 0)
-               (begin
-                 (close-input-port ip)
-                 (values (port-name ip) line char))
-               (if (eqv? (read-char ip) #\newline)
-                   (loop (- fp 1) (fx+ line 1) 1)
-                   (loop (- fp 1) line (fx+ char 1))))))]
-      [else (values)])))
+(let ([source-lines-cache (make-weak-eq-hashtable)])
+
+  (set! $locate-source
+    (lambda (sfd fp use-cache?)
+      (define (binary-search table name)
+        (let loop ([lo 0] [hi (vector-length table)])
+          (let* ([mid (fxsra (fx+ lo hi) 1)]
+                 [pos (vector-ref table mid)])
+            (cond
+             [(fx= (fx+ 1 lo) hi)
+              (values name
+                      hi
+                      (fx+ 1 (fx- fp pos)))]
+             [(< fp pos) (loop lo mid)]
+             [else (loop mid hi)]))))
+      (cond
+       [(file-position? fp)
+        ;; No need to search for anything
+        (values (source-file-descriptor-name sfd)
+                (file-position-line fp)
+                (file-position-column fp))]
+       [(and use-cache?
+             (with-tc-mutex (hashtable-ref source-lines-cache sfd #f))) =>
+        (lambda (name+table)
+          (binary-search (cdr name+table) (car name+table)))]
+       [($open-source-file sfd) =>
+        (lambda (ip)
+          (define name (port-name ip))
+          (define table
+            ;; Make a vector for the position (counting from zero)
+            ;; that starts each line (= vector index + 1)
+            (let loop ([fp 0] [accum '(0)])
+              (let ([ch (read-char ip)])
+                (cond
+                 [(eof-object? ch)
+                  (close-input-port ip)
+                  (list->vector (reverse accum))]
+                 [(eqv? ch #\newline)
+                  (let ([fp (fx+ fp 1)])
+                    (loop fp (cons fp accum)))]
+                 [else
+                  (loop (fx+ fp 1) accum)]))))
+          (when use-cache?
+            (with-tc-mutex
+             (hashtable-set! source-lines-cache sfd (cons name table))))
+          (binary-search table name))]
+       [else (values)])))
+
+  (set! $clear-source-lines-cache
+   ; called from single-threaded docollect
+    (lambda ()
+      (hashtable-clear! source-lines-cache))))
 
 (set! $source-file-descriptor
   (let ()
