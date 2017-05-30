@@ -1818,9 +1818,9 @@ If \var{record-lines?} if present and \scheme{#t}, then while reading
 as part of the result source-file descriptor. This mapping is consulted
 by \scheme{make-source-object} when an integer is provided as the bfp,
 and the bfp is then converted to a file-position object containing a line
-and column as well as the provided bfp. Calling \scheme{scource-file-descriptor-lines-done!}
+and column as well as the provided bfp. Calling \scheme{source-file-descriptor-lines-done!}
 drops the position-to-line mapping; note that \scheme{get-datum/annotations}
-calls \scheme{scource-file-descriptor-lines-done!} on the scource-file descriptor that
+calls \scheme{source-file-descriptor-lines-done!} on the source-file descriptor that
 it is given when it encounters an end-of-file.
 
 %----------------------------------------------------------------------------
