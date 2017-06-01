@@ -7502,7 +7502,7 @@
         (with-source-path 'include fn
           (lambda (fn)
             (let* ([p ($open-file-input-port 'include fn)]
-                   [sfd ($source-file-descriptor fn p)]
+                   [sfd ($source-file-descriptor fn p #t (record-source-lines-and-columns))]
                    [p (transcoded-port p (current-transcoder))])
               (let ([do-read ($make-read p sfd 0)])
                 (let f ()
