@@ -1704,12 +1704,12 @@
       (lambda (ifn ip)
         (let ((buflen (file-buffer-size)))
           (define buf (make-bytevector buflen))
-          (let loop ((len 0) (crc #xffff) (pos 1) (line 1) (column 0) (lines (list (cons 0 1))))
+          (let loop ((len 0) (crc #xffff) (pos 0) (line 1) (column 0) (lines (list (cons 0 1))))
             (let ((n (get-bytevector-n! ip buf 0 buflen)))
               (if (eof-object? n)
                   (let ([lines (list->vector (reverse lines))])
                     (make-source-file-descriptor ifn len crc lines))
-                  (let bloop ((i 0) (pos 0) (line line) (column column) (lines lines))
+                  (let bloop ((i 0) (pos pos) (line line) (column column) (lines lines))
                     (cond
                      [(fx= i n) (loop (fx+ n len) (crc16 crc buf n) pos line column lines)]
                      [(= (bytevector-u8-ref buf i) (char->integer #\newline))

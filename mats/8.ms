@@ -11037,7 +11037,35 @@
     (source-file-descriptor-lines-done! sfd-with-lines)
     #t)
   (error? ; not a source file descriptor
-    (source-file-descriptor-lines-done! 'bad)))
+   (source-file-descriptor-lines-done! 'bad))
+
+  ;; Make sure lines are calculated right with input that is longer than
+  ;; the file buffer size:
+  (begin
+    (define input-string-with-lines (string-append
+                                     "\""
+                                     (make-string (* 2 (file-buffer-size)) #\a)
+                                     "\""
+                                     "\nend"))
+    (define input-port-with-lines (open-string-input-port input-string-with-lines))
+    (define sfd-with-lines
+      (make-source-file-descriptor "testfile.ss"
+                                   (open-bytevector-input-port (string->utf8 input-string-with-lines))
+                                   #f
+                                   #t)) ; => record lines
+    (define input-port-with-line-pos 0)
+    (define (read-with-lines)
+      (let-values ([(v pos) (get-datum/annotations input-port-with-lines sfd-with-lines input-port-with-line-pos)])
+        (set! input-port-with-line-pos pos)
+        v))
+    (define line-one (read-with-lines))
+    (annotation? line-one))
+  (string? (annotation-stripped line-one))
+  (begin
+    (define line-two (read-with-lines))
+    (annotation? line-two))
+  (equal? (file-position-object-line (source-object-bfp (annotation-source line-two))) 2)
+  (equal? (file-position-object-column (source-object-bfp (annotation-source line-two))) 1))
 
 (mat include
   (error? ; invalid syntax
