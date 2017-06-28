@@ -1723,6 +1723,7 @@
   ($check-heap-errors [flags])
   ($clear-dynamic-closure-counts [flags])  ; added for closure instrumentation
   ($clear-pass-stats [flags])
+  ($clear-source-lines-cache [flags])
   ($close-files [flags])
   ($close-resurrected-files [flags])
   ($close-resurrected-mutexes&conditions [feature pthreads] [flags])

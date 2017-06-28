@@ -530,8 +530,11 @@
 - fixed typo in S_abnormal_exit
     schsig.c
 - added file-position objects, a current-locate-source parameter to
-  control looking up line and columns information, and a
-  'source-object message for code and continuation inspectors
+  control looking up line and columns information, a
+  current-make-source-object parameter to control loation recording,
+  and a 'source-object message for code and continuation inspectors;
+  also, add a cache for locate-source to avoid re-reading files to
+  get line information
     read.ss, syntax.ss, 7.ss, compile.ss, cpnanopass.ss, pdhtml.ss,
     inspect.ss, primdata.ss, prims.ss, cmacros.ss, types.ss,
     8.ms, root-experr*,

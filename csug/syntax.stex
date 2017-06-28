@@ -1968,17 +1968,19 @@ checksum recorded in \var{sfd}.
 exact nonnegative integer or a file-position object.
 
 If \var{pos} is an integer,
-then \scheme{locate-source} attempts to locate and open the source file
-identified by \var{sfd}.
-If successful, it returns three values: a string \var{path}, an exact
+then \scheme{locate-source} either uses cached information from a previous
+request for \var{sfd} or attempts to locate and open the source file
+identified by \var{sfd} to obtain line and column information.
+If successful, \scheme{locate-source} returns three values: a string \var{path}, an exact
 positive integer \var{line}, and an exact positive integer \var{column}
 representing the absolute pathname, line, and column within
 the line represented by the specified source-file descriptor and file
 position.
 If unsuccessful, it returns zero values.
-It can fail even if a file with the correct name exists in one of
+A \scheme{locate-source} call can fail even if a file with the correct name exists in one of
 the source directories when the file's checksum does not match the
-checksum recorded in \var{sfd}.
+checksum recorded in \var{sfd} and when no line information is currently
+cached for \var{sfd}.
 
 If \var{pos} is a file-position object, then three values are
 returned---\var{path}, \var{line}, and \var{column}---without reading

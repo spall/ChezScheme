@@ -1612,26 +1612,56 @@
                     (and (not (string=? rest name))
                          (pathloop rest))))))))))
 
-(set! $locate-source
-  (lambda (sfd fp)
-    (cond
-      [(file-position? fp)
-       ;; No need to search for anything
-       (values (source-file-descriptor-name sfd)
-               (file-position-line fp)
-               (file-position-column fp))]
-      [($open-source-file sfd) =>
-       (lambda (ip)
-         ;; Search for line and column within the file
-         (let loop ([fp fp] [line 1] [char 1])
-           (if (= fp 0)
-               (begin
-                 (close-input-port ip)
-                 (values (port-name ip) line char))
-               (if (eqv? (read-char ip) #\newline)
-                   (loop (- fp 1) (fx+ line 1) 1)
-                   (loop (- fp 1) line (fx+ char 1))))))]
-      [else (values)])))
+(let ([source-lines-cache (make-weak-eq-hashtable)])
+
+  (set! $locate-source
+    (lambda (sfd fp)
+      (define (binary-search table name)
+        (let loop ([lo 0] [hi (vector-length table)])
+          (let* ([mid (fxsra (fx+ lo hi) 1)]
+                 [pos+line (vector-ref table mid)])
+            (cond
+             [(fx= (fx+ 1 lo) hi)
+              (values name
+                      (cdr pos+line)
+                      (fx+ 1 (fx- fp (car pos+line))))]
+             [(< fp (car pos+line)) (loop lo mid)]
+             [else (loop mid hi)]))))
+      (cond
+       [(file-position? fp)
+        ;; No need to search for anything
+        (values (source-file-descriptor-name sfd)
+                (file-position-line fp)
+                (file-position-column fp))]
+       [(with-tc-mutex (hashtable-ref source-lines-cache sfd #f)) =>
+        (lambda (name+table)
+          (binary-search (cdr name+table) (car name+table)))]
+       [($open-source-file sfd) =>
+        (lambda (ip)
+          (define name (port-name ip))
+          (define table
+            ;; Make a vector of pos+line
+            (let loop ([fp 0] [line 1] [accum '((0 . 1))])
+              (let ([ch (read-char ip)])
+                (cond
+                 [(eof-object? ch)
+                  (close-input-port ip)
+                  (list->vector (reverse accum))]
+                 [(eqv? ch #\newline)
+                  (let ([fp (fx+ fp 1)]
+                        [line (fx+ line 1)])
+                    (loop fp line (cons (cons fp line) accum)))]
+                 [else
+                  (loop (fx+ fp 1) line accum)]))))
+          (with-tc-mutex
+           (hashtable-set! source-lines-cache sfd (cons name table)))
+          (binary-search table name))]
+       [else (values)])))
+
+  (set! $clear-source-lines-cache
+   ; called from single-threaded docollect
+    (lambda ()
+      (hashtable-clear! source-lines-cache))))
 
 (set! $source-file-descriptor
   (let ()

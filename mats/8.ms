@@ -11088,6 +11088,74 @@
   (equal? (file-position-object-column (source-object-bfp (annotation-source line-two))) 1)
   )
 
+(mat locate-source-caching
+  (begin
+   (define (make-expr n)
+     `(let ()
+        ,@(let loop ([i n])
+            (if (zero? i)
+                '(#t)
+                (cons
+                 `(let-values ([(x y z) (values 1 2 3)]) x)
+                 (loop (sub1 i)))))))
+
+   (define (time-expr n)
+     (with-output-to-file "testfile.ss"
+       (lambda ()
+         (pretty-print (make-expr n)))
+       'truncate)
+     (let ([start (current-time)])
+       (load "testfile.ss")
+       (let ([delta (time-difference (current-time) start)])
+         (+ (time-second delta)
+            (* 1e-9 (time-nanosecond delta))))))
+
+   (let loop ([tries 3])
+     (when (zero? tries)
+       (error 'source-cache-test "loading lots of `let-values` forms seems to take too long"))
+     (or (> (* 20 (time-expr 100))
+            (time-expr 1000))
+         (loop (sub1 tries)))))
+
+  (begin
+    (define sfd-to-cache
+      (let ((op (open-output-file "testfile.ss" 'replace)))
+        (display "apple\n  banana\ncoconut" op)
+        (close-port op)
+        (let* ([ip (open-file-input-port "testfile.ss")]
+               [sfd (make-source-file-descriptor "testfile.ss" ip)])
+          (close-port ip)
+          sfd)))
+
+    (equal? (call-with-values
+             (lambda () (locate-source sfd-to-cache 8))
+             (case-lambda
+              [(name line col) (list line col)]))
+            '(2 3)))
+
+  (begin
+    (let ((op (open-output-file "testfile.ss" 'replace)))
+      (display "1\n2\n3\n4\n5\n6789" op)
+      (close-port op))
+    ;; Cache may report the old source line,
+    ;; or uncached should report no line:
+    (equal? (call-with-values
+             (lambda () (locate-source sfd-to-cache 8))
+             (case-lambda
+              [() '(2 3)] ; report no line same as expected cache
+              [(name line col) (list line col)]))
+            '(2 3)))
+
+  (begin
+    (collect (collect-maximum-generation))
+    ;; After collecting the maximum generation, the
+    ;; cached information shoould definitely be gone:
+    (equal? (call-with-values
+             (lambda () (locate-source sfd-to-cache 8))
+             (lambda () 'gone))
+            'gone))
+  )
+
 (mat include
   (error? ; invalid syntax
     (expand '(include spam)))
