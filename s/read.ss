@@ -1613,6 +1613,10 @@
                          (pathloop rest))))))))))
 
 (let ([source-lines-cache (make-weak-eq-hashtable)])
+  (define-record-type cached-lines
+    (fields table name current-directory source-directories library-directories)
+    (nongenerative)
+    (sealed #t))
 
   (set! $locate-source
     (lambda (sfd fp)
@@ -1634,8 +1638,19 @@
                 (file-position-line fp)
                 (file-position-column fp))]
        [(with-tc-mutex (hashtable-ref source-lines-cache sfd #f)) =>
-        (lambda (name+table)
-          (binary-search (cdr name+table) (car name+table)))]
+        (lambda (cl)
+          ;; Make sure that parameters that would affect the search have the
+          ;; same value as when the entry was cached. Using `eq?` for lists
+          ;; is an over-strong test, but good enough for caching:
+          (cond
+           [(and (equal? (cached-lines-current-directory cl) (current-directory))
+                 (eq? (cached-lines-source-directories cl) (source-directories))
+                 (eq? (cached-lines-library-directories cl) (library-directories)))
+            (binary-search (cached-lines-table cl) (cached-lines-name cl))]
+           [else
+            ;; delete the cache entry and try again
+            (with-tc-mutex (hashtable-delete! source-lines-cache sfd))
+            ($locate-source sfd fp)]))]
        [($open-source-file sfd) =>
         (lambda (ip)
           (define name (port-name ip))
@@ -1654,7 +1669,8 @@
                  [else
                   (loop (fx+ fp 1) line accum)]))))
           (with-tc-mutex
-           (hashtable-set! source-lines-cache sfd (cons name table)))
+           (let ([cl (make-cached-lines table name (current-directory) (source-directories) (library-directories))])
+             (hashtable-set! source-lines-cache sfd cl)))
           (binary-search table name))]
        [else (values)])))
 
