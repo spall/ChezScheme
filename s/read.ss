@@ -1619,13 +1619,13 @@
       (define (binary-search table name)
         (let loop ([lo 0] [hi (vector-length table)])
           (let* ([mid (fxsra (fx+ lo hi) 1)]
-                 [pos+line (vector-ref table mid)])
+                 [pos (vector-ref table mid)])
             (cond
              [(fx= (fx+ 1 lo) hi)
               (values name
-                      (cdr pos+line)
-                      (fx+ 1 (fx- fp (car pos+line))))]
-             [(< fp (car pos+line)) (loop lo mid)]
+                      hi
+                      (fx+ 1 (fx- fp pos)))]
+             [(< fp pos) (loop lo mid)]
              [else (loop mid hi)]))))
       (cond
        [(file-position? fp)
@@ -1641,19 +1641,19 @@
         (lambda (ip)
           (define name (port-name ip))
           (define table
-            ;; Make a vector of pos+line
-            (let loop ([fp 0] [line 1] [accum '((0 . 1))])
+            ;; Make a vector for the position (counting from zero)
+            ;; that starts each line (= vector index + 1)
+            (let loop ([fp 0] [accum '(0)])
               (let ([ch (read-char ip)])
                 (cond
                  [(eof-object? ch)
                   (close-input-port ip)
                   (list->vector (reverse accum))]
                  [(eqv? ch #\newline)
-                  (let ([fp (fx+ fp 1)]
-                        [line (fx+ line 1)])
-                    (loop fp line (cons (cons fp line) accum)))]
+                  (let ([fp (fx+ fp 1)])
+                    (loop fp (cons fp accum)))]
                  [else
-                  (loop (fx+ fp 1) line accum)]))))
+                  (loop (fx+ fp 1) accum)]))))
           (when use-cache?
             (with-tc-mutex
              (hashtable-set! source-lines-cache sfd (cons name table))))
