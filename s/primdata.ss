@@ -1398,7 +1398,7 @@
   (profile-load-data [sig [(pathname) -> (void)]] [flags true])
   (load-program [sig [(pathname) (pathname procedure) -> (void)]] [flags true])
   (load-shared-object [sig [(maybe-pathname) -> (void)]] [flags true])
-  (locate-source [sig [(sfd uint) -> ()] [(sfd uint) -> (string uint uint)]] [flags])
+  (locate-source [sig [(sfd uint) (sfd uint ptr) -> ()] [(sfd uint) (sfd uint ptr) -> (string uint uint)]] [flags])
   (lock-object [sig [(ptr) -> (void)]] [flags unrestricted true])
   (locked-object? [sig [(ptr) -> (boolean)]] [flags unrestricted discard])
   (logand [sig [(sint ...) -> (sint)]] [flags arith-op partial-folder])

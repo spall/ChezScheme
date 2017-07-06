@@ -6418,7 +6418,7 @@
       (lambda (src)
         (let ([sfd (source-sfd src)] [fp (source-bfp src)])
           (call-with-values
-            (lambda () ((current-locate-source) sfd fp))
+            (lambda () ((current-locate-source) sfd fp #t))
             (case-lambda
               [() (format "[char ~a of ~a]"
                     fp
@@ -9840,16 +9840,19 @@
       (unless (%source-file-descriptor? sfd) ($oops who "~s is not a source-file descriptor" sfd))
       ($open-source-file sfd)))
   (set-who! locate-source
-    (lambda (sfd fp)
-      (unless (%source-file-descriptor? sfd) ($oops who "~s is not a source-file descriptor" sfd))
-      (unless (or (%file-position? fp)
-                  (if (fixnum? fp) (fx>= fp 0) (and (bignum? fp) ($bigpositive? fp))))
-        ($oops who "~s is not an exact nonnegative integer or file-position object" fp))
-      (unless (%source-file-descriptor? sfd) ($oops who "~s is not a source-file descriptor" sfd))
-      (unless (or (%file-position? fp)
-                  (if (fixnum? fp) (fx>= fp 0) (and (bignum? fp) ($bigpositive? fp))))
-        ($oops who "~s is not an exact nonnegative integer or file-position object" fp))
-      ($locate-source sfd fp)))
+    (rec locate-source
+      (case-lambda
+       [(sfd fp) (locate-source sfd fp #f)]
+       [(sfd fp use-cache?)
+        (unless (%source-file-descriptor? sfd) ($oops who "~s is not a source-file descriptor" sfd))
+        (unless (or (%file-position? fp)
+                    (if (fixnum? fp) (fx>= fp 0) (and (bignum? fp) ($bigpositive? fp))))
+          ($oops who "~s is not an exact nonnegative integer or file-position object" fp))
+        (unless (%source-file-descriptor? sfd) ($oops who "~s is not a source-file descriptor" sfd))
+        (unless (or (%file-position? fp)
+                    (if (fixnum? fp) (fx>= fp 0) (and (bignum? fp) ($bigpositive? fp))))
+          ($oops who "~s is not an exact nonnegative integer or file-position object" fp))
+        ($locate-source sfd fp use-cache?)])))
   (set-who! current-locate-source
     ($make-thread-parameter
      locate-source

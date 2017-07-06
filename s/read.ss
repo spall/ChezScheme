@@ -1615,7 +1615,7 @@
 (let ([source-lines-cache (make-weak-eq-hashtable)])
 
   (set! $locate-source
-    (lambda (sfd fp)
+    (lambda (sfd fp use-cache?)
       (define (binary-search table name)
         (let loop ([lo 0] [hi (vector-length table)])
           (let* ([mid (fxsra (fx+ lo hi) 1)]
@@ -1633,7 +1633,8 @@
         (values (source-file-descriptor-name sfd)
                 (file-position-line fp)
                 (file-position-column fp))]
-       [(with-tc-mutex (hashtable-ref source-lines-cache sfd #f)) =>
+       [(and use-cache?
+             (with-tc-mutex (hashtable-ref source-lines-cache sfd #f))) =>
         (lambda (name+table)
           (binary-search (cdr name+table) (car name+table)))]
        [($open-source-file sfd) =>
@@ -1653,8 +1654,9 @@
                     (loop fp line (cons (cons fp line) accum)))]
                  [else
                   (loop (fx+ fp 1) line accum)]))))
-          (with-tc-mutex
-           (hashtable-set! source-lines-cache sfd (cons name table)))
+          (when use-cache?
+            (with-tc-mutex
+             (hashtable-set! source-lines-cache sfd (cons name table))))
           (binary-search table name))]
        [else (values)])))
 

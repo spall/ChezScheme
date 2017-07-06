@@ -112,9 +112,13 @@ The new primitive procedures \scheme{bytevector-compress} and
 compression functionality that is used for files with the
 \scheme{compressed} option.
 
-\subsection{File-position objects (9.4.1)}
+\subsection{Line caching and file-position objects (9.4.1)}
 
-File-position objects can be used in place of file-position integers
+The \scheme{locate-source} function accepts an optional argument that
+enables the use of a cache for line information, so that a source file
+does not have to be consulted each time to compute line information.
+To further avoid file and caching issues,
+file-position objects can be used in place of file-position integers
 for functions such as \scheme{make-source-object}. A file-position
 object combines a file position (which is relative to the start of the
 file) with a line number and column number within the line.

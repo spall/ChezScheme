@@ -1960,6 +1960,7 @@ checksum recorded in \var{sfd}.
 %----------------------------------------------------------------------------
 \entryheader
 \formdef{locate-source}{\categoryprocedure}{(locate-source \var{sfd} \var{pos})}
+\formdef{locate-source}{\categoryprocedure}{(locate-source \var{sfd} \var{pos} \var{use-cache?})}
 \returns see below
 \listlibraries
 \endentryheader
@@ -1969,7 +1970,8 @@ exact nonnegative integer or a file-position object.
 
 If \var{pos} is an integer,
 then \scheme{locate-source} either uses cached information from a previous
-request for \var{sfd} or attempts to locate and open the source file
+request for \var{sfd} (only when \var{use-cache?} is provided as true)
+or attempts to locate and open the source file
 identified by \var{sfd} to obtain line and column information.
 If successful, \scheme{locate-source} returns three values: a string \var{path}, an exact
 positive integer \var{line}, and an exact positive integer \var{column}
@@ -1996,3 +1998,5 @@ the file or comparing its checksum to the one recorded in \var{sfd}.
 \scheme{current-locate-source} determines the source-location lookup
 function that is used by the system to report errors base on source objects.
 \scheme{current-locate-source} is initially bound to \scheme{locate-source}.
+The system always calls the function bound to
+\scheme{current-locate-source} with three arguments.

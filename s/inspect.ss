@@ -2160,7 +2160,7 @@
         (if src
             (let ([sfd (source-sfd src)] [fp (source-bfp src)])
               (call-with-values
-                (lambda () ((current-locate-source) sfd fp))
+                (lambda () ((current-locate-source) sfd fp #f))
                 (case-lambda
                   [() (values (source-file-descriptor-name sfd) fp)]
                   [(path line char) (values path line char)])))

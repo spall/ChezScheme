@@ -10996,7 +10996,7 @@
    (current-locate-source "string"))
   (error? ; invalid syntax (if I were a rich man) at line 200, char 17 of foo
    (parameterize ([current-locate-source
-                   (lambda (sfd pos)
+                   (lambda (sfd pos cache?)
                      (values (source-file-descriptor-path sfd) 200 17))])
      (expand a)))
  )
@@ -11022,7 +11022,7 @@
       (lambda (sfd bfp efp)
         (if (eq? sfd expected-sfd)
             ;; Gather line and column now:
-            (let-values ([(path line col) (locate-source sfd bfp)])
+            (let-values ([(path line col) (locate-source sfd bfp #t)])
               (make-source-object sfd (make-file-position-object bfp line col) efp))
             (error 'recording-make-source-object "reading some other file?"))))
     (define (read-with-lines)
@@ -11128,7 +11128,7 @@
           sfd)))
 
     (equal? (call-with-values
-             (lambda () (locate-source sfd-to-cache 8))
+             (lambda () (locate-source sfd-to-cache 8 #t))
              (case-lambda
               [(name line col) (list line col)]))
             '(2 3)))
@@ -11140,18 +11140,24 @@
     ;; Cache may report the old source line,
     ;; or uncached should report no line:
     (equal? (call-with-values
-             (lambda () (locate-source sfd-to-cache 8))
+             (lambda () (locate-source sfd-to-cache 8 #t))
              (case-lambda
               [() '(2 3)] ; report no line same as expected cache
               [(name line col) (list line col)]))
             '(2 3)))
+
+  ;; An uncached lookup defniitely reports no line:
+  (equal? (call-with-values
+            (lambda () (locate-source sfd-to-cache 8 #f))
+            (lambda () 'none))
+          'none)
 
   (begin
     (collect (collect-maximum-generation))
     ;; After collecting the maximum generation, the
     ;; cached information shoould definitely be gone:
     (equal? (call-with-values
-             (lambda () (locate-source sfd-to-cache 8))
+             (lambda () (locate-source sfd-to-cache 8 #t))
              (lambda () 'gone))
             'gone))
   )

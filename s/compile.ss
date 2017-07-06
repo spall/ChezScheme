@@ -577,7 +577,7 @@
                          (when (and (annotation? x0) (fxlogtest (annotation-flags x0) (constant annotation-debug)))
                            (let ((s (annotation-source x0)))
                              (call-with-values
-                               (lambda () ((current-locate-source) (source-sfd s) (source-bfp s)))
+                               (lambda () ((current-locate-source) (source-sfd s) (source-bfp s) #t))
                                (case-lambda
                                  [() (void)]
                                  [(path line char) (printf " on line ~s" line)]))))))))
