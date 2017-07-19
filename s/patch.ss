@@ -15,6 +15,12 @@
 
 (printf "loading ~s cross compiler~%" (constant machine-type-name))
 
+;; UNPATCHME
+(define $current-mso
+  (case-lambda
+   [() #f]
+   [(x) (void)]))
+
 ; (current-expand (lambda args (apply sc-expand args)))
 ; (current-eval (lambda args (apply interpret args)))
 

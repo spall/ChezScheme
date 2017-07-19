@@ -39,19 +39,19 @@ TODO:
         (module (print-source)
           (include "types.ss")
           (define (print-position op prefix src start?)
-            (let ([sfd (source-sfd src)]
-                  [fp (if start? (source-bfp src) (source-efp src))])
-              (call-with-values
-                (lambda () ($locate-source sfd fp))
-                (case-lambda
-                  [()
+            (call-with-values
+              (lambda () ((current-locate-source-object-source) src start? #t))
+              (case-lambda
+                [()
+                 (let ([sfd (source-sfd src)]
+                       [fp (if start? (source-bfp src) (source-efp src))])
                    (fprintf op "~a~a char ~a of ~a" prefix
                      (if (eq? start? 'near) "near" "at")
-                     fp (source-file-descriptor-name sfd))]
-                  [(path line char)
-                   (fprintf op "~a~a line ~a, char ~a of ~a" prefix
-                     (if (eq? start? 'near) "near" "at")
-                     line char path)]))))
+                     fp (source-file-descriptor-name sfd)))]
+                [(path line char)
+                 (fprintf op "~a~a line ~a, char ~a of ~a" prefix
+                   (if (eq? start? 'near) "near" "at")
+                   line char path)])))
           (define (print-source op prefix c)
             (cond
               [($src-condition? c)
