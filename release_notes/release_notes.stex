@@ -91,6 +91,14 @@ the pair have been found reachable. An ephemeron hashtable implements
 a weak mapping where referencing a key in a value does not prevent the
 mapping from being removed from the table.
 
+\subsection{Ordered guardians (9.4.1)}
+
+The \scheme{make-guardian} function now accepts an optional argument to
+indicate whether the guardian is ordered or unordered. A guardian is
+unordered by default. An ordered guardian's objects are classified as
+inaccessible only when they are not reachable from the represetative
+of any inaccessible object in any other guardian.
+
 \subsection{Optional timeout for \protect\scheme{condition-wait} (9.4.1)}
 
 The \scheme{condition-wait} procedure now takes an optional
