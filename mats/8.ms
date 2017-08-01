@@ -10767,6 +10767,10 @@
     (source-object-bfp a))
   (error? ; 3 is not a source object
     (source-object-efp 3))
+  (error? ; 3 is not a source object
+    (source-object-line 3))
+  (error? ; 3 is not a source object
+    (source-object-column 3))
   (error? ; 3 is not an annotation
     (annotation-expression 3))
   (error? ; #<source> is not an annotation
@@ -10792,13 +10796,13 @@
   (eq? (source-object-sfd source) sfd)
   (eq? (source-object-bfp source) 2)
   (eq? (source-object-efp source) 3)
-  (eq? (source-object-bfl source) #f)
-  (eq? (source-object-bfc source) #f)
+  (eq? (source-object-line source) #f)
+  (eq? (source-object-column source) #f)
   (eq? (source-object-sfd source) sfd)
   (eq? (source-object-bfp source-at-line-two) 3)
   (eq? (source-object-efp source-at-line-two) 5)
-  (eq? (source-object-bfl source-at-line-two) 2)
-  (eq? (source-object-bfc source-at-line-two) 1)
+  (eq? (source-object-line source-at-line-two) 2)
+  (eq? (source-object-column source-at-line-two) 1)
   (equal? (annotation-expression a) '(if 3))
   (eq? (annotation-source a) source)
   (equal? (annotation-stripped a) '(if I were a rich man))
@@ -11022,20 +11026,20 @@
     (annotation? line-one))
   (equal? (annotation-stripped line-one) 'Apple)
   (equal? (source-object-bfp (annotation-source line-one)) 0)
-  (equal? (source-object-bfl (annotation-source line-one)) 1)
-  (equal? (source-object-bfc (annotation-source line-one)) 1)
+  (equal? (source-object-line (annotation-source line-one)) 1)
+  (equal? (source-object-column (annotation-source line-one)) 1)
   (begin
     (define line-two (read-with-lines))
     (annotation? line-two))
   (equal? (source-object-bfp (annotation-source line-two)) 8)
-  (equal? (source-object-bfl (annotation-source line-two)) 2)
-  (equal? (source-object-bfc (annotation-source line-two)) 3)
+  (equal? (source-object-line (annotation-source line-two)) 2)
+  (equal? (source-object-column (annotation-source line-two)) 3)
   (begin
     (define line-three (read-with-lines))
     (annotation? line-three))
   (equal? (source-object-bfp (annotation-source line-three)) 15)
-  (equal? (source-object-bfl (annotation-source line-three)) 3)
-  (equal? (source-object-bfc (annotation-source line-three)) 1)
+  (equal? (source-object-line (annotation-source line-three)) 3)
+  (equal? (source-object-column (annotation-source line-three)) 1)
   (annotation? (read-with-lines)) ; 'More
   (eof-object? (read-with-lines))
 
@@ -11069,8 +11073,8 @@
   (begin
     (define line-two (read-with-lines))
     (annotation? line-two))
-  (equal? (source-object-bfl (annotation-source line-two)) 2)
-  (equal? (source-object-bfc (annotation-source line-two)) 1)
+  (equal? (source-object-line (annotation-source line-two)) 2)
+  (equal? (source-object-column (annotation-source line-two)) 1)
   )
 
 (mat locate-source-caching

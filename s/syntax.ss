@@ -7502,7 +7502,7 @@
         (with-source-path 'include fn
           (lambda (fn)
             (let* ([p ($open-file-input-port 'include fn)]
-                   [sfd ($source-file-descriptor fn p #t)]
+                   [sfd ($source-file-descriptor fn p)]
                    [p (transcoded-port p (current-transcoder))])
               (let ([do-read ($make-read p sfd 0)])
                 (let f ()
@@ -9713,13 +9713,13 @@
     (lambda (x)
       (unless (%source? x) ($oops who "~s is not a source object" x))
       (%source-efp x)))
-  (set-who! source-object-bfl
+  (set-who! source-object-line
     (lambda (x)
       (cond
        [(%source-2d? x) (%source-2d-line x)]
        [(%source? x) #f]
        [else ($oops who "~s is not a source object" x)])))
-  (set-who! source-object-bfc
+  (set-who! source-object-column
     (lambda (x)
       (cond
        [(%source-2d? x) (%source-2d-column x)]

@@ -1631,15 +1631,14 @@
      [(sfd fp use-cache?)
       (define (binary-search table name)
         (let loop ([lo 0] [hi (vector-length table)])
-          (let* ([mid (fxsra (fx+ lo hi) 1)]
-                 [pos (vector-ref table mid)])
-            (cond
-             [(fx= (fx+ 1 lo) hi)
+          (if (fx= (fx+ 1 lo) hi)
               (values name
                       hi
-                      (fx+ 1 (fx- fp pos)))]
-             [(< fp pos) (loop lo mid)]
-             [else (loop mid hi)]))))
+                      (fx+ 1 (fx- fp (vector-ref table lo))))
+              (let ([mid (fxsra (fx+ lo hi) 1)])
+                (if (< fp (vector-ref table mid))
+                    (loop lo mid)
+                    (loop mid hi))))))
       (cond
        [(and use-cache?
              (with-tc-mutex (hashtable-ref source-lines-cache sfd #f))) =>

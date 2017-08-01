@@ -35,12 +35,12 @@ TODO:
 
   (let ()
     (define $display-condition
-      (lambda (c op prefix?)
+      (lambda (c op prefix? use-cache?)
         (module (print-source)
           (include "types.ss")
           (define (print-position op prefix src start?)
             (call-with-values
-              (lambda () ((current-locate-source-object-source) src start? #t))
+              (lambda () ((current-locate-source-object-source) src start? use-cache?))
               (case-lambda
                 [()
                  (let ([sfd (source-sfd src)]
@@ -145,11 +145,11 @@ TODO:
 
     (set-who! display-condition
       (case-lambda
-        [(c) ($display-condition c (current-output-port) #t)]
+        [(c) ($display-condition c (current-output-port) #t #f)]
         [(c op)
          (unless (and (output-port? op) (textual-port? op))
            ($oops who "~s is not a textual output port" op))
-         ($display-condition c op #t)]))
+         ($display-condition c op #t #f)]))
 
     (set! $make-source-oops
       (lambda (who msg expr)
@@ -159,7 +159,7 @@ TODO:
                   ($display-condition (condition
                                         (make-syntax-violation expr #f)
                                         (make-message-condition msg))
-                    p #f)))))))
+                    p #f #t)))))))
 
   (set! default-exception-handler
     (lambda (c)

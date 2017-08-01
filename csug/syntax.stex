@@ -1561,11 +1561,11 @@ locations to be profiled.
 Source objects are also values of a type distinct from other types and
 also have three or five components: a \emph{source-file descriptor} (sfd),
 a beginning file position (bfp), an ending file position (efp),
-an optional beginning file line (bfl), and an optional beginning file
-column (bfc). The sfd identifies the file from which an expression is read and the
+an optional beginning line, and an optional beginning
+column. The sfd identifies the file from which an expression is read and the
 bfp and efp identify the range of character positions occupied by the object
 in the file, with the bfp being inclusive and the efp being exclusive.
-The bfl and bfc are either both numbers or both not present.
+The line and column are either both numbers or both not present.
 A source object can be created via
 \index{\scheme{make-source-object}}\scheme{make-source-object}, which
 takes either three or five arguments corresponding to these components.
@@ -1613,8 +1613,8 @@ and described in more detail later in this section.
 (source-object-sfd \var{source-object}) ;-> \var{sfd}
 (source-object-bfp \var{source-object}) ;-> \var{uint}
 (source-object-efp \var{source-object}) ;-> \var{uint}
-(source-object-bfc \var{source-object}) ;-> \var{uint} or #f
-(source-object-bfl \var{source-object}) ;-> \var{uint} or #f
+(source-object-line \var{source-object}) ;-> \var{uint} or #f
+(source-object-column \var{source-object}) ;-> \var{uint} or #f
 
 (make-source-file-descriptor \var{string} \var{binary-input-port}) ;-> \var{sfd}
 (make-source-file-descriptor \var{string} \var{binary-input-port} \var{reset?}) ;-> \var{sfd}
@@ -1740,7 +1740,7 @@ marked \scheme{profile} are used for profiling.
 %----------------------------------------------------------------------------
 \entryheader
 \formdef{make-source-object}{\categoryprocedure}{(make-source-object \var{sfd} \var{bfp} \var{efp})}
-\formdef{make-source-object}{\categoryprocedure}{(make-source-object \var{sfd} \var{bfp} \var{efp} \var{bfl} \var{bfc})}
+\formdef{make-source-object}{\categoryprocedure}{(make-source-object \var{sfd} \var{bfp} \var{efp} \var{line} \var{column})}
 \returns a source-object
 \listlibraries
 \endentryheader
@@ -1748,7 +1748,7 @@ marked \scheme{profile} are used for profiling.
 \var{sfd} must be a source-file descriptor.
 \var{bfp} and \var{efp} must be exact nonnegative integers, and \var{bfp}
 should not be greater than \var{efp}.
-\var{bfl} and \var{efc} must be exact positive integers.
+\var{line} and \var{column} must be exact positive integers.
 
 %----------------------------------------------------------------------------
 \entryheader
@@ -1780,15 +1780,15 @@ should not be greater than \var{efp}.
 
 %----------------------------------------------------------------------------
 \entryheader
-\formdef{source-object-bfl}{\categoryprocedure}{(source-object-bfl \var{source-object})}
-\returns the bfl component of \var{source-object} if present, otherwise \scheme{#f}
+\formdef{source-object-line}{\categoryprocedure}{(source-object-line \var{source-object})}
+\returns the line component of \var{source-object} if present, otherwise \scheme{#f}
 \listlibraries
 \endentryheader
 
 %----------------------------------------------------------------------------
 \entryheader
-\formdef{source-object-bfc}{\categoryprocedure}{(source-object-bfc \var{source-object})}
-\returns the bfc component of \var{source-object} if present, otherwise \scheme{#f}
+\formdef{source-object-column}{\categoryprocedure}{(source-object-column \var{source-object})}
+\returns the column component of \var{source-object} if present, otherwise \scheme{#f}
 \listlibraries
 \endentryheader
 
@@ -1954,12 +1954,12 @@ This procedure is similar to \scheme{locate-source}, but instead of
 taking an sfd and a position, it takes a source object plus a request
 for either the start or end location.
 
-If \var{get-start?} is true and \var{source-object} has a bfl and bfc,
+If \var{get-start?} is true and \var{source-object} has a line and column,
 \scheme{locate-source-object-source} returns the path in
-\var{source-objects}'s sfd, \var{source-object}'s bfl, and
-\var{source-objects}'s bfc.
+\var{source-objects}'s sfd, \var{source-object}'s line, and
+\var{source-objects}'s column.
 
-If \var{source-object} has no bfl and bfc, then
+If \var{source-object} has no line and column, then
 \scheme{locate-source-object-source} calls \scheme{locate-source} on
 \var{source-object}'s sfd, either \var{source-object}'s bfp or efp
 depending on \var{get-start?}, and \var{use-cache?}.

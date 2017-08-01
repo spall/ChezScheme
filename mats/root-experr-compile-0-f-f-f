@@ -8387,6 +8387,8 @@ enum.mo:Expected error in mat enumeration: "make-record-type: cannot extend seal
 8.mo:Expected error in mat annotations: "source-object-sfd: #<sfd foo> is not a source object".
 8.mo:Expected error in mat annotations: "source-object-bfp: #<annotation foo[2:3] (if I were a rich man)> is not a source object".
 8.mo:Expected error in mat annotations: "source-object-efp: 3 is not a source object".
+8.mo:Expected error in mat annotations: "source-object-line: 3 is not a source object".
+8.mo:Expected error in mat annotations: "source-object-column: 3 is not a source object".
 8.mo:Expected error in mat annotations: "annotation-expression: 3 is not an annotation".
 8.mo:Expected error in mat annotations: "annotation-stripped: #<source foo[2:3]> is not an annotation".
 8.mo:Expected error in mat annotations: "annotation-source: #<sfd foo> is not an annotation".
