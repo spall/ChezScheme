@@ -242,6 +242,8 @@ typedef unsigned long long U64;
 #define fxvector_type_disp 0x1
 #define guardian_entry_next_disp 0x18
 #define guardian_entry_obj_disp 0x0
+#define guardian_entry_orderedp_disp 0x20
+#define guardian_entry_pending_disp 0x28
 #define guardian_entry_rep_disp 0x8
 #define guardian_entry_tconc_disp 0x10
 #define hashtable_default_size 0x8
@@ -489,7 +491,7 @@ typedef unsigned long long U64;
 #define size_exactnum 0x20
 #define size_flonum 0x10
 #define size_forward 0x10
-#define size_guardian_entry 0x20
+#define size_guardian_entry 0x30
 #define size_inexactnum 0x20
 #define size_pair 0x10
 #define size_port 0x50
@@ -871,10 +873,14 @@ typedef unsigned long long U64;
 #define GUARDIANREP(x) (*((ptr *)((uptr)(x)+8)))
 #define GUARDIANTCONC(x) (*((ptr *)((uptr)(x)+16)))
 #define GUARDIANNEXT(x) (*((ptr *)((uptr)(x)+24)))
+#define GUARDIANORDERED(x) (*((ptr *)((uptr)(x)+32)))
+#define GUARDIANPENDING(x) (*((ptr *)((uptr)(x)+40)))
 #define INITGUARDIANOBJ(x) (*((ptr *)((uptr)(x)+0)))
 #define INITGUARDIANREP(x) (*((ptr *)((uptr)(x)+8)))
 #define INITGUARDIANTCONC(x) (*((ptr *)((uptr)(x)+16)))
 #define INITGUARDIANNEXT(x) (*((ptr *)((uptr)(x)+24)))
+#define INITGUARDIANORDERED(x) (*((ptr *)((uptr)(x)+32)))
+#define INITGUARDIANPENDING(x) (*((ptr *)((uptr)(x)+40)))
 #define FORWARDMARKER(x) (*((ptr *)((uptr)(x)+0)))
 #define FORWARDADDRESS(x) (*((ptr *)((uptr)(x)+8)))
 #define CACHEDSTACKSIZE(x) (*((iptr *)((uptr)(x)+0)))
