@@ -10413,6 +10413,12 @@
                         (set! ,x ,t)
                         ,(toC (in-context Rhs
                                 (%mref ,x ,(constant record-data-disp))))))]
+                  [(fp-ftd& ,ftd)
+                   (let ([x (make-tmp 't)])
+                     (%seq
+                      (set! ,x ,t)
+                      (set! ,x ,(%mref ,x ,(constant record-data-disp)))
+                      ,(toC x)))]
                   [else ($oops who "invalid parameter type specifier ~s" type)])))
             (define C->Scheme
               ; ASSUMPTIONS: ac0, ac1, and xp are not C argument registers
@@ -10631,6 +10637,7 @@
                                  [(fp-u16*) (lookup-c-entry Scall->bytevector)]
                                  [(fp-u32*) (lookup-c-entry Scall->bytevector)]
                                  [(fp-ftd ,ftd) (lookup-c-entry Scall->fptr)]
+                                 [(fp-ftd& ,ftd) (lookup-c-entry Scall->fptr)] ; FIXME
                                  [else ($oops 'compiler-internal "invalid result type specifier ~s" result-type)]))))))))))))
         (define handle-do-rest
           (lambda (fixed-args offset save-asm-ra?)

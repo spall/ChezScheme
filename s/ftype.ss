@@ -560,21 +560,28 @@ ftype operators:
   (define expand-fp-ftype
     (lambda (who what r ftype def-alist)
       (syntax-case ftype ()
-        [(*-kwd ftype-name)
-         (and (eq? (datum *-kwd) '*) (identifier? #'ftype-name))
-         (let ([stype (syntax->datum ftype)])
-           (cond
-             [(assp (lambda (x) (bound-identifier=? #'ftype-name x)) def-alist) =>
-              (lambda (a)
-                (if (ftd? (cdr a))
-                    (make-ftd-pointer rtd/fptr #f stype pointer-size pointer-alignment (cdr a))
-                    (let ([ftd (make-ftd-pointer rtd/fptr #f stype pointer-size pointer-alignment #f)])
-                      (set-cdr! a (cons ftd (cdr a)))
-                      ftd)))]
-             [(expand-ftype-name r #'ftype-name #f) =>
-              (lambda (ftd)
-                (make-ftd-pointer rtd/fptr #f stype pointer-size pointer-alignment ftd))]
-             [else (syntax-error #'ftype-name (format "unrecognized ~s ~s ftype name" who what))]))]
+        [(*/&-kwd ftype-name)
+         (and (or (eq? (datum */&-kwd) '*)
+                  (eq? (datum */&-kwd) '&))
+              (identifier? #'ftype-name))
+         (let* ([stype (syntax->datum ftype)]
+                [ftd
+                 (cond
+                  [(assp (lambda (x) (bound-identifier=? #'ftype-name x)) def-alist) =>
+                   (lambda (a)
+                     (if (ftd? (cdr a))
+                         (make-ftd-pointer rtd/fptr #f stype pointer-size pointer-alignment (cdr a))
+                         (let ([ftd (make-ftd-pointer rtd/fptr #f stype pointer-size pointer-alignment #f)])
+                           (set-cdr! a (cons ftd (cdr a)))
+                           ftd)))]
+                  [(expand-ftype-name r #'ftype-name #f) =>
+                   (lambda (ftd)
+                     (make-ftd-pointer rtd/fptr #f stype pointer-size pointer-alignment ftd))]
+                  [else (syntax-error #'ftype-name (format "unrecognized ~s ~s ftype name" who what))])])
+           ;; Scheme-side argument is a pointer to a value, but foreign side has two variants:
+           (if (eq? (datum */&-kwd) '&)
+               (box ftd) ; boxed ftd => pass/receive the value (as opposed to a pointer to the value)
+               ftd))]    ; plain ftd => pass/receive a pointer to the value
         [_ (cond
              [(and (identifier? ftype) (expand-ftype-name r ftype #f)) =>
               (lambda (ftd)
@@ -586,11 +593,14 @@ ftype operators:
              [else (syntax->datum ftype)])])))
   (define-who indirect-ftd-pointer
     (lambda (x)
-      (if (ftd? x)
-          (if (ftd-pointer? x)
-              (ftd-pointer-ftd x)
-              ($oops who "~s is not an ftd-pointer" x))
-          x)))
+      (cond
+       [(ftd? x)
+        (if (ftd-pointer? x)
+            (ftd-pointer-ftd x)
+            ($oops who "~s is not an ftd-pointer" x))]
+       [(box? x)
+        (box (indirect-ftd-pointer (unbox x)))]
+       [else x])))
   (define-who expand-ftype-defns
     (lambda (r defid* ftype*)
       (define patch-pointer-ftds!

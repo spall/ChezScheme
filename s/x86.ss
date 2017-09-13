@@ -2244,8 +2244,38 @@
                      (%seq
                        (set! ,(%mref ,%sp ,offset) ,lorhs)
                        (set! ,(%mref ,%sp ,(fx+ offset 4)) ,hirhs))))]
+               [load-content
+                (lambda (offset len)
+                  (lambda (x) ; requires var
+                    (let loop ([offset offset] [x-offset 0] [len len])
+                      (cond
+                       [(= len 0) `(nop)]
+                       [(>= len 4)
+                        `(seq
+                          (set! ,(%mref ,%sp ,offset) (inline ,(make-info-load 'integer-32 #f)
+                                                              ,%load ,x ,%zero (immediate ,x-offset)))
+                          ,(loop (fx+ offset 4) (fx+ x-offset 4) (fx- len 4)))]
+                       [(>= len 2)
+                        `(seq
+                          (set! ,(%mref ,%sp ,offset) (inline ,(make-info-load 'integer-16 #f)
+                                                              ,%load ,x ,%zero (immediate ,x-offset)))
+                          ,(loop (fx+ offset 2) (fx+ x-offset 2) (fx- len 2)))]
+                       [else
+                        `(set! ,(%mref ,%sp ,offset) (inline ,(make-info-load 'integer-8 #f)
+                                                             ,%load ,x ,%zero (immediate ,x-offset)))]))))]
                [do-stack
                 (lambda (types locs n)
+                  (define-syntax rtd/ftd
+                    (let ([rtd ($make-record-type #!base-rtd #!base-rtd
+                                                  '#{rtd/ftd a9pth58056u34h517jsrqv-1}
+                                                  '((immutable ptr stype)
+                                                    (immutable ptr size)
+                                                    (immutable ptr alignment))
+                                                  #f
+                                                  #f)])
+                      (lambda (x) #`'#,rtd)))
+                  (define ftd-size (record-accessor rtd/ftd 1))
+
                   (if (null? types)
                       (values n locs)
                       (nanopass-case (Ltype Type) (car types)
@@ -2257,6 +2287,10 @@
                          (do-stack (cdr types)
                            (cons (load-single-stack n) locs)
                            (fx+ n 4))]
+                        [(fp-ftd& ,ftd)
+                         (do-stack (cdr types)
+                           (cons (load-content n (ftd-size ftd)) locs)
+                           (fx+ n (lcm 4 (ftd-size ftd))))]
                         [else
                          (if (nanopass-case (Ltype Type) (car types)
                                [(fp-integer ,bits) (fx= bits 64)]

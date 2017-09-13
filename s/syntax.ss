@@ -679,7 +679,11 @@
               [(integer-40 integer-48 integer-56 integer-64) `(fp-integer 64)]
               [(unsigned-40 unsigned-48 unsigned-56 unsigned-64) `(fp-unsigned 64)]
               [(void) (and void-okay? `(fp-void))]
-              [else (and ($ftd? x) `(fp-ftd ,x))])
+              [else
+               (cond
+                [($ftd? x) `(fp-ftd ,x)]
+                [(and (box? x) ($ftd? (unbox x))) `(fp-ftd& ,(unbox x))]
+                [else #f])])
             ($oops #f "invalid ~a ~a specifier ~s" who what x)))))
 
   (define build-foreign-procedure
@@ -8486,7 +8490,11 @@
           (constant-case native-endianness
             [(little) 'utf-32le]
             [(big) 'utf-32be])])]
-      [else (and ($ftd? type) type)])))
+      [else
+       (and (or ($ftd? type)
+                     (and (box? type)
+                          ($ftd? (unbox type))))
+                 type)])))
 
 (define $fp-type->pred
   (lambda (type)
@@ -8627,10 +8635,12 @@
                                                         (err ($moi) x)))))
                                        (u32*))]
                                    [else #f])
-                                 (if ($ftd? type)
-                                     #`(#,(if unsafe? #'() #`((unless (record? x '#,type) (err ($moi) x))))
-                                        (x)
-                                        (#,type))
+                                 (if (or ($ftd? type)
+                                         (and (box? type) ($ftd? (unbox type))))
+                                     (let ([ftd (if (box? type) (unbox type) type)])
+                                       #`(#,(if unsafe? #'() #`((unless (record? x '#,ftd) (err ($moi) x))))
+                                          (x)
+                                          (#,type)))
                                      (with-syntax ([pred (datum->syntax #'foreign-procedure ($fp-type->pred type))]
                                                    [type (datum->syntax #'foreign-procedure type)])
                                        #`(#,(if unsafe? #'() #'((unless (pred x) (err ($moi) x))))
@@ -8871,12 +8881,16 @@
                                                (err x)))))
                              u32*)]
                          [else
-                           (if ($ftd? result-type)
-                               (with-syntax ([type (datum->syntax #'foreign-callable result-type)])
-                                 #`((lambda (x)
-                                      #,@(if unsafe? #'() #'((unless (record? x 'type) (err x))))
-                                      x)
-                                    type))
+                           (if (or ($ftd? result-type)
+                                   (and (box? result-type)
+                                        ($ftd? (unbox result-type))))
+                               (let ([result-ftd (if (box? result-type) (unbox result-type) result-type)])
+                                 (with-syntax ([ftd (datum->syntax #'foreign-callable result-ftd)]
+                                               [type (datum->syntax #'foreign-callable result-type)])
+                                   #`((lambda (x)
+                                        #,@(if unsafe? #'() #'((unless (record? x 'ftd) (err x))))
+                                        x)
+                                      type)))
                                (with-syntax ([pred (datum->syntax #'foreign-callable ($fp-type->pred result-type))]
                                              [type (datum->syntax #'foreign-callable result-type)])
                                  #`((lambda (x)
