@@ -351,6 +351,34 @@ extern I64 S_call_int64 PROTO((void));
 extern U64 S_call_uns64 PROTO((void));
 extern uptr S_call_fptr PROTO((void));
 
+struct result_one_char { char c; };
+extern struct result_one_char S_call_indirect_copy_one_char PROTO((void));
+struct result_three_chars { char c[3]; };
+extern struct result_three_chars S_call_indirect_copy_three_chars PROTO((void));
+
+extern char S_call_indirect_byte PROTO((void));
+extern short S_call_indirect_short PROTO((void));
+extern I32 S_call_indirect_int32 PROTO((void));
+extern I64 S_call_indirect_int64 PROTO((void));
+extern float S_call_indirect_float PROTO((void));
+extern double S_call_indirect_double PROTO((void));
+
+struct result_int64_int64 { I64 a; I64 b; };
+struct result_int64_int64 S_call_indirect_sized_int64_int64 PROTO((void));
+
+struct result_int64_double { I64 a; double b; };
+struct result_int64_double S_call_indirect_sized_int64_double PROTO((void));
+
+struct result_double_int64 { double a; I64 b; };
+struct result_double_int64 S_call_indirect_sized_double_int64 PROTO((void));
+
+struct result_double_double { double a; double b; };
+struct result_double_double S_call_indirect_sized_double_double PROTO((void));
+
+ptr S_call_indirect_copy PROTO((void));
+
+extern void S_copy_argument PROTO((void));
+
 #ifdef WIN32
 /* windows.c */
 extern INT S_getpagesize(void);

@@ -550,11 +550,23 @@ under Windows running on Intel hardware.
 \foreigntype{\scheme{(* \var{ftype})}}
 \index{ftype}This type allows a pointer to a foreign
 type (ftype) to be passed.
-The argument must be an ftype pointer of with type \var{ftype},
+The argument must be an ftype pointer of type \var{ftype},
 and the actual argument is the address encapsulated in the
 ftype pointer.
 See Section~\ref{SECTFOREIGNDATA} for a description of
 foreign types.
+
+\foreigntype{\scheme{(& \var{ftype})}}
+\index{ftype}This type allows a foreign
+type (ftype) to be passed as a value, but represented
+on the Scheme side as a pointer to the foreign-type data.
+That is, a \scheme{(& \var{ftype})} argument is represented on
+the Scheme side the same as a \scheme{(* \var{ftype})} argument,
+but a \scheme{(& \var{ftype})} argument is passed to the foreign procedure as the
+content at the foreign pointer's address instead of as the
+address. For example, if \var{ftype} is a \scheme{struct} type,
+then \scheme{(& \var{ftype})} passes a struct argument instead of
+a struct-pointer argument. The \var{ftype} cannot refer to an array type.
 
 \medskip\noindent
 The result types are similar to the parameter types with the addition of a
@@ -814,6 +826,18 @@ ftype pointer encapsulating the address is returned.
 See Section~\ref{SECTFOREIGNDATA} for a description of
 foreign types.
 
+\foreigntype{\scheme{(& \var{ftype})}}
+\index{ftype}The result is interpreted as a foreign object
+whose structure is described by \var{ftype}, and a freshly allocated
+ftype pointer encapsulating a freshly allocated address is returned,
+where the address contains a copy of the foreign result.
+That is, a \scheme{(& \var{ftype})} result is represented on
+the Scheme side the same as a \scheme{(* \var{ftype})} result,
+but \scheme{(& \var{ftype})} receives content into
+a a fresh address instead of recieving the address itself.
+The freshly allocated address must be freed with \scheme{foreign-free}.
+ The \var{ftype} cannot refer to an array type.
+
 \medskip\noindent
 Consider a C identity procedure:
 \schemedisplay
@@ -969,6 +993,11 @@ except that the requirements and conversions are effectively reversed,
 e.g., the conversions described for \scheme{foreign-procedure}
 arguments are performed for \scheme{foreign-callable} return
 values.
+A \scheme{(& \var{ftype})} argument to the callable is placed in a
+freshly allocated address that must be freed with \scheme{foreign-free},
+and the address for a \scheme{(& \var{ftype})} result from a callable will
+be automatically freed with \scheme{foreign-free} as a copy of the address
+content is returned.
 Type checking is performed for result values but not argument values,
 since the parameter
 values are provided by the foreign code and must be assumed to be
