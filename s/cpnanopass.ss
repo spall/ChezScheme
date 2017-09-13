@@ -974,7 +974,7 @@
     (define-record-type info-c-simple-call (nongenerative)
       (parent info)
       (sealed #t)
-      (fields save-ra? entry))
+      (fields save-ra? save-caller-saved? entry))
 
     (module ()
       (record-writer (record-type-descriptor info-load)
@@ -10470,6 +10470,12 @@
                         (set! ,x ,t)
                         ,(toC (in-context Rhs
                                 (%mref ,x ,(constant record-data-disp))))))]
+                  [(fp-ftd& ,ftd)
+                   (let ([x (make-tmp 't)])
+                     (%seq
+                      (set! ,x ,t)
+                      (set! ,x ,(%mref ,x ,(constant record-data-disp)))
+                      ,(toC x)))]
                   [else ($oops who "invalid parameter type specifier ~s" type)])))
             (define C->Scheme
               ; ASSUMPTIONS: ac0, ac1, and xp are not C argument registers
@@ -10538,6 +10544,15 @@
                                          ,(e1 `(goto ,Lbig))
                                          (seq (label ,Lbig) ,e2)))))
                               (e1 e2))))))
+                (define (alloc-fptr ftd)
+                  (%seq
+                   (set! ,%xp
+                         ,(%constant-alloc type-typed-object (fx* (constant ptr-bytes) 2) #f))
+                   (set!
+                    ,(%mref ,%xp ,(constant record-type-disp))
+                    (literal ,(make-info-literal #f 'object ftd 0)))
+                   (set! ,(%mref ,%xp ,(constant record-data-disp)) ,%ac0)
+                   (set! ,lvalue ,%xp)))
                 (nanopass-case (Ltype Type) type
                   [(fp-void) `(set! ,lvalue ,(%constant svoid))]
                   [(fp-scheme-object) (fromC lvalue)]
@@ -10585,14 +10600,22 @@
                      (set! ,lvalue ,%xp))]
                   [(fp-ftd ,ftd)
                    (%seq
-                     ,(fromC %ac0) ; C integer return might be wiped out by alloc
-                     (set! ,%xp
-                       ,(%constant-alloc type-typed-object (fx* (constant ptr-bytes) 2) #f))
-                     (set!
-                       ,(%mref ,%xp ,(constant record-type-disp))
-                       (literal ,(make-info-literal #f 'object ftd 0)))
-                     (set! ,(%mref ,%xp ,(constant record-data-disp)) ,%ac0)
-                     (set! ,lvalue ,%xp))]
+                    ,(fromC %ac0) ; C integer return might be wiped out by alloc
+                    ,(alloc-fptr ftd))]
+                  [(fp-ftd& ,ftd)
+                   ;; Copy from the stack or address supplied by caller into newly malloc()ed space
+                   (%seq
+                    ,(fromC %ac0) ; gets address that's on the stack or supplied by caller
+                    (set! ,(ref-reg %ac1) (immediate ,(fix ($ftd-size ftd)))) ; pass size to Scopy-argument
+                    ,(save-scheme-state
+                      (in %ac0 %ac1) ; pass these two to Scopy-argument
+                      (out %xp %ts %td %cp %yp scheme-args extra-regs))
+                    ;; saves caller-saved registers:
+                    (inline ,(make-info-c-simple-call #f #t (lookup-c-entry Scopy-argument)) ,%c-simple-call)
+                    ,(restore-scheme-state
+                      (in %ac0) ; result back from Scopy-argument
+                      (out %ac1 %xp %ts %td %cp %yp scheme-args extra-regs))
+                    ,(alloc-fptr ftd))]
                   [else ($oops who "invalid result type specifier ~s" type)]))))
           (define build-foreign-call
             (with-output-language (L13 Effect)
@@ -10613,7 +10636,13 @@
                                     (ccall t0) t1* arg-type* c-args))
                                ,(let ([e (deallocate)])
                                   (if maybe-lvalue
-                                      `(seq ,(C->Scheme result-type c-res maybe-lvalue) ,e)
+                                      (nanopass-case (Ltype Type) result-type
+                                        [(fp-ftd& ,ftd)
+                                         ;; Don't actually return a value, because the result
+                                         ;; was instead installed in the first argument.
+                                         `(seq (set! ,maybe-lvalue ,(%constant svoid)) ,e)]
+                                        [else
+                                         `(seq ,(C->Scheme result-type c-res maybe-lvalue) ,e)])
                                       e))))])
                     (if new-frame?
                         (sorry! who "can't handle nontail foreign calls")
@@ -10688,6 +10717,7 @@
                                  [(fp-u16*) (lookup-c-entry Scall->bytevector)]
                                  [(fp-u32*) (lookup-c-entry Scall->bytevector)]
                                  [(fp-ftd ,ftd) (lookup-c-entry Scall->fptr)]
+                                 [(fp-ftd& ,ftd) #f] ; `c-scall` must select a suitable `Scall->indirect...`
                                  [else ($oops 'compiler-internal "invalid result type specifier ~s" result-type)]))))))))))))
         (define handle-do-rest
           (lambda (fixed-args offset save-asm-ra?)
@@ -10865,7 +10895,7 @@
                                     ,(with-saved-scheme-state
                                        (in %ac0 %cp %xp %yp scheme-args)
                                        (out %ac1 %ts %td extra-regs)
-                                       `(inline ,(make-info-c-simple-call #f (lookup-c-entry split-and-resize)) ,%c-simple-call))
+                                       `(inline ,(make-info-c-simple-call #f #f (lookup-c-entry split-and-resize)) ,%c-simple-call))
                                     (set! ,%td ,(%mref ,xp/cp ,(constant continuation-stack-clength-disp))))
                                  (nop))
                              ; (new) stack base in sfp, clength in ac1, old frame base in yp
@@ -11419,7 +11449,7 @@
                           ,(with-saved-scheme-state
                              (in %ac0 %ac1 %cp %xp %yp %ts %td scheme-args extra-regs)
                              (out)
-                             `(inline ,(make-info-c-simple-call #t entry) ,%c-simple-call))
+                             `(inline ,(make-info-c-simple-call #t #f entry) ,%c-simple-call))
                           ,(meta-cond
                              [(real-register? '%ret) (if ret-loc `(set! ,%ret ,ret-loc) `(nop))]
                              [else `(nop)])
@@ -11859,7 +11889,7 @@
                                     (with-saved-scheme-state
                                       (in %cp %xp %ac0)
                                       (out %ac1 %yp %ts %td scheme-args extra-regs)
-                                      `(inline ,(make-info-c-simple-call #f (lookup-c-entry handle-apply-overflood)) ,%c-simple-call))))
+                                      `(inline ,(make-info-c-simple-call #f #f (lookup-c-entry handle-apply-overflood)) ,%c-simple-call))))
                                (nop))
                            ,(let load-regs ([regs arg-registers])
                               (if (null? regs)
@@ -12045,7 +12075,7 @@
                        ,(save-scheme-state
                           (in scheme-args)
                           (out %ac0 %ac1 %cp %xp %yp %ts %td extra-regs))
-                       (inline ,(make-info-c-simple-call #f (lookup-c-entry instantiate-code-object))
+                       (inline ,(make-info-c-simple-call #f #f (lookup-c-entry instantiate-code-object))
                          ,%c-simple-call)
                        ,(restore-scheme-state
                           (in %ac0)
@@ -12072,7 +12102,7 @@
                          (with-saved-scheme-state
                            (in %ac0 %ac1 %cp %xp %yp scheme-args)
                            (out %ts %td extra-regs)
-                           `(inline ,(make-info-c-simple-call #f (lookup-c-entry handle-nonprocedure-symbol))
+                           `(inline ,(make-info-c-simple-call #f #f (lookup-c-entry handle-nonprocedure-symbol))
                               ,%c-simple-call))))
                   ,(do-call)))]
            [($foreign-entry-procedure)
@@ -12083,7 +12113,7 @@
                      (with-saved-scheme-state
                        (in %ac0)
                        (out %cp %xp %yp %ac1 %ts %td scheme-args extra-regs)
-                       `(inline ,(make-info-c-simple-call #f (lookup-c-entry foreign-entry))
+                       `(inline ,(make-info-c-simple-call #f #f (lookup-c-entry foreign-entry))
                           ,%c-simple-call)))
                   (jump ,%ref-ret (,%ac0))))]
            [($install-library-entry-procedure)
@@ -12094,7 +12124,7 @@
                        ,(save-scheme-state
                           (in scheme-args)
                           (out %ac0 %ac1 %cp %xp %yp %ts %td extra-regs))
-                       (inline ,(make-info-c-simple-call #f (lookup-c-entry install-library-entry))
+                       (inline ,(make-info-c-simple-call #f #f (lookup-c-entry install-library-entry))
                          ,%c-simple-call)
                        ,(restore-scheme-state
                           (in)
@@ -12203,7 +12233,7 @@
                     ,(save-scheme-state
                        (in %ac0 %ac1)
                        (out %cp %xp %yp %ts %td scheme-args extra-regs))
-                    (inline ,(make-info-c-simple-call #f (lookup-c-entry Sreturn)) ,%c-simple-call)
+                    (inline ,(make-info-c-simple-call #f #f (lookup-c-entry Sreturn)) ,%c-simple-call)
                     (label ,Lmvreturn)
                     (set! ,(ref-reg %ac1) ,%ac0)
                     (goto ,Lexit))))]
