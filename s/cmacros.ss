@@ -2642,5 +2642,16 @@
      Scall->int64
      Scall->uns64
      Scall->void
+     Scall->indirect-byte
+     Scall->indirect-short
+     Scall->indirect-int32
+     Scall->indirect-int64
+     Scall->indirect-copy-three-chars
+     Scall->indirect-copy
+     Scall->indirect-sized-int64-int64
+     Scall->indirect-sized-double-double
+     Scall->indirect-sized-int64-double
+     Scall->indirect-sized-double-int64
+     Scopy-argument
   ))
 )

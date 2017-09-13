@@ -317,6 +317,113 @@ uptr S_call_fptr() {
     return (uptr)RECORDINSTIT(AC0(tc),0);
 }
 
+static void S_call_indirect_help(ptr tc, void *r, iptr sz)
+{
+    S_call_help(tc, 1);
+    memcpy(r, RECORDINSTIT(AC0(tc), 0), sz);
+    free(RECORDINSTIT(AC0(tc), 0));
+}
+
+char S_call_indirect_byte() {
+    ptr tc = get_thread_context();
+    char r;
+    S_call_indirect_help(tc, &r, sizeof(r));
+    return r;
+}
+
+short S_call_indirect_short() {
+    ptr tc = get_thread_context();
+    short r;
+    S_call_indirect_help(tc, &r, sizeof(r));
+    return r;
+}
+
+I32 S_call_indirect_int32() {
+    ptr tc = get_thread_context();
+    I32 r;
+    S_call_indirect_help(tc, &r, sizeof(r));
+    return r;
+}
+
+I64 S_call_indirect_int64() {
+    ptr tc = get_thread_context();
+    I64 r;
+    S_call_indirect_help(tc, &r, sizeof(r));
+    return r;
+}
+
+/* On x86, a 3-byte struct covers all configurations that don't return
+   in registers and that need to pop the result-destination pointer
+   before returning. */
+struct result_three_chars S_call_indirect_copy_three_chars() {
+    ptr tc = get_thread_context();
+    ptr dest = TS(tc);
+    iptr len = UNFIX(TD(tc));
+    struct result_three_chars r;
+    S_call_indirect_help(tc, dest, len);
+    memcpy(&r, dest, sizeof(r)); /* will get copied back onto `dest` */
+    return r;
+}
+
+/* On x86_64, returns can be returned in up to two integer and/or
+   floating-point registers --- but the result may have fewer bytes
+   than that, so we pass the actual size and zero-pad the rest. */
+
+struct result_int64_int64 S_call_indirect_sized_int64_int64() {
+  ptr tc = get_thread_context();
+  iptr len = UNFIX(TD(tc));
+  struct result_int64_int64  r = { 0, 0 };
+  S_call_indirect_help(tc, &r, len);
+  return r;
+}
+
+struct result_int64_double S_call_indirect_sized_int64_double() {
+  ptr tc = get_thread_context();
+  iptr len = UNFIX(TD(tc));
+  struct result_int64_double  r = { 0, 0 };
+  S_call_indirect_help(tc, &r, len);
+  return r;
+}
+
+struct result_double_int64 S_call_indirect_sized_double_int64() {
+  ptr tc = get_thread_context();
+  iptr len = UNFIX(TD(tc));
+  struct result_double_int64  r = { 0, 0 };
+  S_call_indirect_help(tc, &r, len);
+  return r;
+}
+
+struct result_double_double S_call_indirect_sized_double_double() {
+  ptr tc = get_thread_context();
+  iptr len = UNFIX(TD(tc));
+  struct result_double_double  r = { 0, 0 };
+  S_call_indirect_help(tc, &r, len);
+  return r;
+}
+
+/* For results not returned in registers on x86_64, coy bytes to the
+   result-destination and return that same destination pointer. */
+ptr S_call_indirect_copy() {
+    ptr tc = get_thread_context();
+    ptr dest = TS(tc);
+    iptr len = UNFIX(TD(tc));
+    S_call_indirect_help(tc, dest, len);
+    return dest;
+}
+
+/* When a callable receives an argument on the stack to be copied into
+   the heap, S_copy_argument() is called to perform the copy. */
+void S_copy_argument() {
+  ptr tc = get_thread_context();
+  ptr x = AC0(tc), x2;
+  iptr sz = UNFIX(TS(tc));
+
+  x2 = malloc(sz);
+  memcpy(x2, x, sz);
+
+  AC0(tc) = x2;
+}
+
 /* cchain = ((jb . co) ...) */
 void S_return() {
     ptr tc = get_thread_context();
