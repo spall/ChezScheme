@@ -10413,6 +10413,12 @@
                         (set! ,x ,t)
                         ,(toC (in-context Rhs
                                 (%mref ,x ,(constant record-data-disp))))))]
+                  [(fp-ftd& ,ftd)
+                   (let ([x (make-tmp 't)])
+                     (%seq
+                      (set! ,x ,t)
+                      (set! ,x ,(%mref ,x ,(constant record-data-disp)))
+                      ,(toC x)))]
                   [else ($oops who "invalid parameter type specifier ~s" type)])))
             (define C->Scheme
               ; ASSUMPTIONS: ac0, ac1, and xp are not C argument registers
@@ -10481,6 +10487,15 @@
                                          ,(e1 `(goto ,Lbig))
                                          (seq (label ,Lbig) ,e2)))))
                               (e1 e2))))))
+                (define (alloc-fptr ftd)
+                  (%seq
+                   (set! ,%xp
+                         ,(%constant-alloc type-typed-object (fx* (constant ptr-bytes) 2) #f))
+                   (set!
+                    ,(%mref ,%xp ,(constant record-type-disp))
+                    (literal ,(make-info-literal #f 'object ftd 0)))
+                   (set! ,(%mref ,%xp ,(constant record-data-disp)) ,%ac0)
+                   (set! ,lvalue ,%xp)))
                 (nanopass-case (Ltype Type) type
                   [(fp-void) `(set! ,lvalue ,(%constant svoid))]
                   [(fp-scheme-object) (fromC lvalue)]
@@ -10528,14 +10543,18 @@
                      (set! ,lvalue ,%xp))]
                   [(fp-ftd ,ftd)
                    (%seq
-                     ,(fromC %ac0) ; C integer return might be wiped out by alloc
-                     (set! ,%xp
-                       ,(%constant-alloc type-typed-object (fx* (constant ptr-bytes) 2) #f))
-                     (set!
-                       ,(%mref ,%xp ,(constant record-type-disp))
-                       (literal ,(make-info-literal #f 'object ftd 0)))
-                     (set! ,(%mref ,%xp ,(constant record-data-disp)) ,%ac0)
-                     (set! ,lvalue ,%xp))]
+                    ,(fromC %ac0) ; C integer return might be wiped out by alloc
+                    ,(alloc-fptr ftd))]
+                  [(fp-ftd& ,ftd)
+                   ;; Copy from the stack or address supplied by caller into newly malloc()ed space
+                   (%seq
+                    ,(fromC %ac0) ; gets address that's on the stack or supplied by caller
+                    (set! ,(ref-reg %ac1) (immediate ,(fix ($ftd-size ftd)))) ; pass size to Scopy-argument
+                    ,(with-saved-scheme-state
+                      (in %ac0 %ac1 %td %cp %yp scheme-args extra-regs) ; ?? ok to save more registers than may be live?
+                      (out %xp %ts)
+                      `(inline ,(make-info-c-simple-call #f (lookup-c-entry Scopy-argument)) ,%c-simple-call))
+                    ,(alloc-fptr ftd))]
                   [else ($oops who "invalid result type specifier ~s" type)]))))
           (define build-foreign-call
             (with-output-language (L13 Effect)
@@ -10556,7 +10575,13 @@
                                     (ccall t0) t1* arg-type* c-args))
                                ,(let ([e (deallocate)])
                                   (if maybe-lvalue
-                                      `(seq ,(C->Scheme result-type c-res maybe-lvalue) ,e)
+                                      (nanopass-case (Ltype Type) result-type
+                                        [(fp-ftd& ,ftd)
+                                         ;; Don't actually return a value, because the result
+                                         ;; was instead installed in the first argument.
+                                         `(seq (set! ,maybe-lvalue ,(%constant svoid)) ,e)]
+                                        [else
+                                         `(seq ,(C->Scheme result-type c-res maybe-lvalue) ,e)])
                                       e))))])
                     (if new-frame?
                         (sorry! who "can't handle nontail foreign calls")
@@ -10631,6 +10656,7 @@
                                  [(fp-u16*) (lookup-c-entry Scall->bytevector)]
                                  [(fp-u32*) (lookup-c-entry Scall->bytevector)]
                                  [(fp-ftd ,ftd) (lookup-c-entry Scall->fptr)]
+                                 [(fp-ftd& ,ftd) #f] ; `c-scall` must select a suitable `Scall->indirect...`
                                  [else ($oops 'compiler-internal "invalid result type specifier ~s" result-type)]))))))))))))
         (define handle-do-rest
           (lambda (fixed-args offset save-asm-ra?)
