@@ -8842,7 +8842,7 @@
                                        (let ([ftd (unbox type)])
                                          #`(;; Make a copy that doesn't reside on the stack:
                                             (let ([copy (foreign-alloc #,($ftd-size ftd))]
-                                                  [orig (ftype-pointer-address x)])
+                                                  [orig x])
                                               ;; Would some form of `memcpy` be better here?
                                               #,@(generate-copy #'copy #'orig ($ftd-size ftd) 0)
                                               ($make-fptr '#,ftd copy))

@@ -10487,16 +10487,6 @@
                                          ,(e1 `(goto ,Lbig))
                                          (seq (label ,Lbig) ,e2)))))
                               (e1 e2))))))
-                (define (C->ftd-ptr ftd)
-                  (%seq
-                    ,(fromC %ac0) ; C integer return might be wiped out by alloc
-                    (set! ,%xp
-                      ,(%constant-alloc type-typed-object (fx* (constant ptr-bytes) 2) #f))
-                    (set!
-                      ,(%mref ,%xp ,(constant record-type-disp))
-                      (literal ,(make-info-literal #f 'object ftd 0)))
-                    (set! ,(%mref ,%xp ,(constant record-data-disp)) ,%ac0)
-                    (set! ,lvalue ,%xp)))
                 (nanopass-case (Ltype Type) type
                   [(fp-void) `(set! ,lvalue ,(%constant svoid))]
                   [(fp-scheme-object) (fromC lvalue)]
@@ -10543,12 +10533,21 @@
                      ,(fromC %xp)
                      (set! ,lvalue ,%xp))]
                   [(fp-ftd ,ftd)
-                   (C->ftd-ptr ftd)]
+                   (%seq
+                     ,(fromC %ac0) ; C integer return might be wiped out by alloc
+                     (set! ,%xp
+                       ,(%constant-alloc type-typed-object (fx* (constant ptr-bytes) 2) #f))
+                     (set!
+                       ,(%mref ,%xp ,(constant record-type-disp))
+                       (literal ,(make-info-literal #f 'object ftd 0)))
+                     (set! ,(%mref ,%xp ,(constant record-data-disp)) ,%ac0)
+                     (set! ,lvalue ,%xp))]
                   [(fp-ftd& ,ftd)
-                   ;; As an argument to a callback, treat as a pointer
-                   ;; argument, where the pointer likely refers to the stack
-                   ;; and needs to be copied out by a wrapper
-                   (C->ftd-ptr ftd)]
+                   ;; return an address on the stack to the wrapper layer, which will
+                   ;; copy it into a newly allocated, fpointer-wrapped address
+                   `(seq
+                    ,(fromC %ac0)
+                    ,(unsigned->ptr (constant ptr-bits) lvalue))]
                   [else ($oops who "invalid result type specifier ~s" type)]))))
           (define build-foreign-call
             (with-output-language (L13 Effect)
