@@ -936,6 +936,9 @@ ftype operators:
   (set! $ftd?
     (lambda (x)
       (ftd? x)))
+  (set! $ftd-size
+    (lambda (x)
+      (ftd-size x)))
   (set! $expand-fp-ftype ; for foreign-procedure, foreign-callable
     (lambda (who what r ftype)
       (indirect-ftd-pointer

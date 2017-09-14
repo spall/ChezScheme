@@ -919,7 +919,6 @@
                      asm-get-tc
                      ; machine dependent exports
                      asm-sext-eax->edx)
-
   (define byte-register?
     (lambda (x)
       (or (eq? x %eax) (eq? x %ebx) (eq? x %ecx) (eq? x %edx))))
@@ -2263,34 +2262,71 @@
                        [else
                         `(set! ,(%mref ,%sp ,offset) (inline ,(make-info-load 'integer-8 #f)
                                                              ,%load ,x ,%zero (immediate ,x-offset)))]))))]
+               [callee-expects-result-pointer?
+                (lambda (result-type)
+                  (nanopass-case (Ltype Type) result-type
+                    [(fp-ftd& ,ftd) (case ($ftd-size ftd)
+                                      [(4 8) #f]
+                                      [else #t])]
+                    [else #f]))]
+               [callee-pops-result-pointer?
+                (lambda (result-type)
+                  (callee-expects-result-pointer? result-type))]
+               [fill-result-pointer-from-registers?
+                (lambda (result-type)
+                  (nanopass-case (Ltype Type) result-type
+                    [(fp-ftd& ,ftd) (not (callee-expects-result-pointer? result-type))]
+                    [else #f]))]
+               [maybe-drop-result-ptr
+                (lambda (arg-type* result-type)
+                  (cond
+                   [(fill-result-pointer-from-registers? result-type)
+                    ;; Callee doesn't expect a pointer to fill, because the
+                    ;; result goes in registers. Move the destination argument
+                    ;; to the end, just to keep it for filling afterward.
+                    (append (cdr arg-type*) (list (car arg-type*)))]
+                   [else arg-type*]))]
                [do-stack
-                (lambda (types locs n)
-                  (define-syntax rtd/ftd
-                    (let ([rtd ($make-record-type #!base-rtd #!base-rtd
-                                                  '#{rtd/ftd a9pth58056u34h517jsrqv-1}
-                                                  '((immutable ptr stype)
-                                                    (immutable ptr size)
-                                                    (immutable ptr alignment))
-                                                  #f
-                                                  #f)])
-                      (lambda (x) #`'#,rtd)))
-                  (define ftd-size (record-accessor rtd/ftd 1))
-
+                (lambda (types locs n result-type)
                   (if (null? types)
                       (values n locs)
                       (nanopass-case (Ltype Type) (car types)
                         [(fp-double-float)
                          (do-stack (cdr types)
                            (cons (load-double-stack n) locs)
-                           (fx+ n 8))]
+                           (fx+ n 8)
+                           #f)]
                         [(fp-single-float)
                          (do-stack (cdr types)
                            (cons (load-single-stack n) locs)
-                           (fx+ n 4))]
+                           (fx+ n 4)
+                           #f)]
                         [(fp-ftd& ,ftd)
                          (do-stack (cdr types)
-                           (cons (load-content n (ftd-size ftd)) locs)
-                           (fx+ n (lcm 4 (ftd-size ftd))))]
+                           (cons (load-content n ($ftd-size ftd)) locs)
+                           (fx+ n (lcm 4 ($ftd-size ftd)))
+                           #f)]
+                        [(fp-ftd ,ftd)
+                         (cond
+                          [(and result-type
+                                (fill-result-pointer-from-registers? result-type))
+                           ;; Callee doesn't expect this argument; move
+                           ;; it to the end
+                           (let ([end-n 0])
+                             (with-values (do-stack (cdr types)
+                                                    (cons (lambda (rhs)
+                                                            ((load-stack end-n) rhs))
+                                                          locs)
+                                                    n
+                                                    #f)
+                               (lambda (frame-size locs)
+                                 (set! end-n frame-size)
+                                 (values (fx+ frame-size 4) locs))))]
+                          [else
+                           (do-stack (cdr types)
+                               (cons (load-stack n) locs)
+                               (fx+ n 4)
+                               #f)])]
                         [else
                          (if (nanopass-case (Ltype Type) (car types)
                                [(fp-integer ,bits) (fx= bits 64)]
@@ -2298,17 +2334,19 @@
                                [else #f])
                              (do-stack (cdr types)
                                (cons (load-stack64 n) locs)
-                               (fx+ n 8))
+                               (fx+ n 8)
+                               #f)
                              (do-stack (cdr types)
                                (cons (load-stack n) locs)
-                               (fx+ n 4)))])))])
+                               (fx+ n 4)
+                               #f))])))])
         (define returnem
-          (lambda (conv frame-size locs ccall r-loc)
+          (lambda (conv orig-frame-size locs result-type ccall r-loc)
             (let ([frame-size (constant-case machine-type-name
                                 ; maintain 16-byte alignment not including the return address pushed
                                 ; by the call instruction, which counts as part of callee's frame
-                                [(i3osx ti3osx) (fxlogand (fx+ frame-size 15) -16)]
-                                [else frame-size])])
+                                [(i3osx ti3osx) (fxlogand (fx+ orig-frame-size 15) -16)]
+                                [else orig-frame-size])])
               (values (lambda ()
                         (if (fx= frame-size 0)
                             `(nop)
@@ -2320,28 +2358,47 @@
                 (lambda ()
                   (if (or (fx= frame-size 0) (memq conv '(i3nt-stdcall i3nt-com)))
                       `(nop)
-                      `(set! ,%sp ,(%inline + ,%sp (immediate ,frame-size)))))))))
+                      (let ([frame-size (if (callee-pops-result-pointer? result-type)
+                                            (fx- frame-size (constant ptr-bytes))
+                                            frame-size)])
+                        `(set! ,%sp ,(%inline + ,%sp (immediate ,frame-size))))))))))
         (lambda (info)
           (safe-assert (reg-callee-save? %tc)) ; no need to save-restore
           (let ([conv (info-foreign-conv info)]
                 [arg-type* (info-foreign-arg-type* info)]
                 [result-type (info-foreign-result-type info)])
-            (with-values (do-stack arg-type* '() 0)
+            (with-values (do-stack arg-type* '() 0 result-type)
               (lambda (frame-size locs)
-                (returnem conv frame-size locs
+                (returnem conv frame-size locs result-type
                   (lambda (t0)
-                    (case conv
-                      [(i3nt-com)
-                       (when (null? arg-type*)
-                         ($oops 'foreign-procedure
-                           "__com convention requires instance argument"))
-                       ; jump indirect
-                       (%seq
-                         (set! ,%eax ,(%mref ,%sp 0))
-                         (set! ,%eax ,(%mref ,%eax 0))
-                         (set! ,%eax ,(%inline + ,%eax ,t0))
-                         (inline ,(make-info-kill*-live* (reg-list %eax %edx) '()) ,%c-call ,(%mref ,%eax 0)))]
-                      [else `(inline ,(make-info-kill*-live* (reg-list %eax %edx) '()) ,%c-call ,t0)]))
+                    (let ([call
+                           (case conv
+                             [(i3nt-com)
+                              (when (null? arg-type*)
+                                ($oops 'foreign-procedure
+                                       "__com convention requires instance argument"))
+                                        ; jump indirect
+                              (%seq
+                               (set! ,%eax ,(%mref ,%sp 0))
+                               (set! ,%eax ,(%mref ,%eax 0))
+                               (set! ,%eax ,(%inline + ,%eax ,t0))
+                               (inline ,(make-info-kill*-live* (reg-list %eax %edx) '()) ,%c-call ,(%mref ,%eax 0)))]
+                             [else `(inline ,(make-info-kill*-live* (reg-list %eax %edx) '()) ,%c-call ,t0)])])
+                      (cond
+                       [(fill-result-pointer-from-registers? result-type)
+                        (let ([size (nanopass-case (Ltype Type) result-type
+                                      [(fp-ftd& ,ftd) ($ftd-size ftd)])])
+                          (%seq
+                           ,call
+                           (set! ,%ecx ,(%mref ,%sp ,(fx- frame-size (constant ptr-bytes))))
+                           ,(cond
+                             [(= size 4)
+                              `(set! ,(%mref ,%ecx 0) ,%eax)]
+                             [else
+                              `(seq
+                                (set! ,(%mref ,%ecx 0) ,%eax)
+                                (set! ,(%mref ,%ecx 4) ,%edx))])))]
+                       [else call])))
                   (nanopass-case (Ltype Type) result-type
                     [(fp-double-float)
                      (lambda (x)

@@ -10562,7 +10562,13 @@
                                     (ccall t0) t1* arg-type* c-args))
                                ,(let ([e (deallocate)])
                                   (if maybe-lvalue
-                                      `(seq ,(C->Scheme result-type c-res maybe-lvalue) ,e)
+                                      (nanopass-case (Ltype Type) result-type
+                                        [(fp-ftd& ,ftd)
+                                         ;; Don't actually return a value, because the result
+                                         ;; was instead installed in the first argument.
+                                         `(seq (set! ,maybe-lvalue ,(%constant svoid)) ,e)]
+                                        [else
+                                         `(seq ,(C->Scheme result-type c-res maybe-lvalue) ,e)])
                                       e))))])
                     (if new-frame?
                         (sorry! who "can't handle nontail foreign calls")

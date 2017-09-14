@@ -8672,15 +8672,38 @@
                          [(unsigned-48) #`((lambda (x) (mod x #x1000000000000)) unsigned-64)]
                          [(integer-56) #`((lambda (x) (mod0 x #x100000000000000)) integer-64)]
                          [(unsigned-56) #`((lambda (x) (mod x #x100000000000000)) unsigned-64)]
-                         [else #`(values #,(datum->syntax #'foreign-procedure result-type))])])
-          #`(let ([p ($foreign-procedure conv foreign-name ?foreign-addr (arg ... ...) result)]
+                         [else
+                          (cond
+                            [(and (box? result-type)
+                                  ($ftd? (unbox result-type)))
+                             ;; Return allocated memory
+                             #`((lambda (r) &-result) #,(datum->syntax #'foreign-procedure result-type))]
+                            [else
+                             #`(values #,(datum->syntax #'foreign-procedure result-type))])])]
+                      [(extra-binds [extra-arg ...] [extra ...])
+                       ;; When the result type is `(& <ftype>)`, the `$foreign-procedure` result
+                       ;; expects an extra argument as a `(* <ftype>)` that it uses to store the
+                       ;; foreign-procedure result, and it returns void. The extra argument is
+                       ;; made explicit for `$foreign-procedure`, but the return type preserved
+                       ;; to let `$foreign-procedure` know that it needs to fill the first argument.
+                       ;; Meanwhile, the wrapper procedure takes care of allocating the result
+                       ;; space and returning the newly allocated result.
+                       (cond
+                         [(and (box? result-type)
+                               ($ftd? (unbox result-type)))
+                          #`(([&-result
+                               ($make-fptr '#,(unbox result-type) (foreign-alloc #,($ftd-size (unbox result-type))))])
+                             [#,(unbox result-type)]
+                             [&-result])]
+                         [else #'(() [] [])])])
+          #`(let ([p ($foreign-procedure conv foreign-name ?foreign-addr (extra-arg ... arg ... ...) result)]
                   #,@(if unsafe?
                          #'()
                          #'([err (lambda (who x)
                                    ($oops (or who foreign-name)
                                      "invalid foreign-procedure argument ~s"
                                      x))])))
-              (lambda (t ...) check ... ... (result-filter (p actual ... ...)))))))))
+              (lambda (t ...) check ... ... (let extra-binds (result-filter (p extra ... actual ... ...))))))))))
 
 (define-syntax foreign-procedure
   (lambda (x)
