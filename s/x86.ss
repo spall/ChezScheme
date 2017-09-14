@@ -2304,7 +2304,7 @@
                         [(fp-ftd& ,ftd)
                          (do-stack (cdr types)
                            (cons (load-content n ($ftd-size ftd)) locs)
-                           (fx+ n (lcm 4 ($ftd-size ftd)))
+                           (fx+ n (fxlogand (fx+ ($ftd-size ftd) 3) -4))
                            #f)]
                         [(fp-ftd ,ftd)
                          (cond
@@ -2480,6 +2480,10 @@
                            "unexpected load-int-stack fp-unsigned size ~s"
                            bits)])]
                 [else `(set! ,lvalue ,(%mref ,%sp ,offset))]))))
+        (define load-stack-address
+          (lambda (offset)
+            (lambda (lvalue) ; requires lvalue
+              `(set! ,lvalue ,(%inline + ,%sp (immediate ,offset))))))
         (define load-stack64
           (lambda (type offset)
             (lambda (lolvalue hilvalue) ; requires lvalue
@@ -2499,6 +2503,10 @@
                    (do-stack (cdr types)
                      (cons (load-single-stack n) locs)
                      (fx+ n 4))]
+                  [(fp-ftd& ,ftd)
+                   (do-stack (cdr types)
+                     (cons (load-stack-address n) locs)
+                     (fx+ n (fxlogand (fx+ ($ftd-size ftd) 3) -4)))]
                   [else
                    (if (nanopass-case (Ltype Type) (car types)
                          [(fp-integer ,bits) (fx= bits 64)]
