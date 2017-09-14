@@ -317,6 +317,52 @@ uptr S_call_fptr() {
     return (uptr)RECORDINSTIT(AC0(tc),0);
 }
 
+char S_call_indirect_byte() {
+    ptr tc = get_thread_context();
+    char r;
+    S_call_help(tc, 1);
+    memcpy(&r, RECORDINSTIT(AC0(tc), 0), sizeof(char));
+    return r;
+}
+
+short S_call_indirect_short() {
+    ptr tc = get_thread_context();
+    short r;
+    S_call_help(tc, 1);
+    memcpy(&r, RECORDINSTIT(AC0(tc), 0), sizeof(short));
+    return r;
+}
+
+I32 S_call_indirect_int32() {
+    ptr tc = get_thread_context();
+    I32 r;
+    S_call_help(tc, 1);
+    memcpy(&r, RECORDINSTIT(AC0(tc), 0), sizeof(I32));
+    return r;
+}
+
+I64 S_call_indirect_int64() {
+    ptr tc = get_thread_context();
+    I64 r;
+    S_call_help(tc, 1);
+    memcpy(&r, RECORDINSTIT(AC0(tc), 0), sizeof(I64));
+    return r;
+}
+
+/* On x86, this one is intended to cover all configurations
+   that don't return in registers, and 3 bytes is the smallest
+   such configuration. */
+struct result_three_chars S_call_indirect_copy_three_chars() {
+    ptr tc = get_thread_context();
+    ptr dest = TS(tc);
+    iptr len = UNFIX(TD(tc));
+    struct result_three_chars r;
+    S_call_help(tc, 1);
+    memcpy(dest, RECORDINSTIT(AC0(tc), 0), len);
+    memcpy(&r, dest, sizeof(r));
+    return r;
+}
+
 /* cchain = ((jb . co) ...) */
 void S_return() {
     ptr tc = get_thread_context();

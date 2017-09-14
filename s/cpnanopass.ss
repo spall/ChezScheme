@@ -10649,7 +10649,7 @@
                                  [(fp-u16*) (lookup-c-entry Scall->bytevector)]
                                  [(fp-u32*) (lookup-c-entry Scall->bytevector)]
                                  [(fp-ftd ,ftd) (lookup-c-entry Scall->fptr)]
-                                 [(fp-ftd& ,ftd) (lookup-c-entry Scall->fptr)] ; FIXME
+                                 [(fp-ftd& ,ftd) #f] ; `c-scall` must select a suitable `Scall->indirect...`
                                  [else ($oops 'compiler-internal "invalid result type specifier ~s" result-type)]))))))))))))
         (define handle-do-rest
           (lambda (fixed-args offset save-asm-ra?)

@@ -2219,6 +2219,22 @@
                  ,e))])))]
     [else (define asm-enter values)])
 
+  (define callee-expects-result-pointer?
+    (lambda (result-type)
+      (nanopass-case (Ltype Type) result-type
+        [(fp-ftd& ,ftd) (case ($ftd-size ftd)
+                          [(4 8) #f]
+                          [else #t])]
+        [else #f])))
+  (define callee-pops-result-pointer?
+    (lambda (result-type)
+      (callee-expects-result-pointer? result-type)))
+  (define fill-result-pointer-from-registers?
+    (lambda (result-type)
+      (nanopass-case (Ltype Type) result-type
+        [(fp-ftd& ,ftd) (not (callee-expects-result-pointer? result-type))]
+        [else #f])))
+
   (define asm-foreign-call
     (with-output-language (L13 Effect)
       (letrec ([load-double-stack
@@ -2262,21 +2278,6 @@
                        [else
                         `(set! ,(%mref ,%sp ,offset) (inline ,(make-info-load 'integer-8 #f)
                                                              ,%load ,x ,%zero (immediate ,x-offset)))]))))]
-               [callee-expects-result-pointer?
-                (lambda (result-type)
-                  (nanopass-case (Ltype Type) result-type
-                    [(fp-ftd& ,ftd) (case ($ftd-size ftd)
-                                      [(4 8) #f]
-                                      [else #t])]
-                    [else #f]))]
-               [callee-pops-result-pointer?
-                (lambda (result-type)
-                  (callee-expects-result-pointer? result-type))]
-               [fill-result-pointer-from-registers?
-                (lambda (result-type)
-                  (nanopass-case (Ltype Type) result-type
-                    [(fp-ftd& ,ftd) (not (callee-expects-result-pointer? result-type))]
-                    [else #f]))]
                [maybe-drop-result-ptr
                 (lambda (arg-type* result-type)
                   (cond
@@ -2518,12 +2519,33 @@
                        (do-stack (cdr types)
                          (cons (load-stack (car types) n) locs)
                          (fx+ n 4)))]))))
+        (define (register-result-copy result-type stack-offset e)
+          (let ([len (nanopass-case (Ltype Type) result-type
+                       [(fp-ftd& ,ftd) ($ftd-size ftd)])])
+            ;; `Scall->copy-result` expects a destination pointer and length
+            ;; in tc's TS and TD, respectively. (Is it ok to use those slots?)
+            (in-context Tail
+              (%seq
+               (set! ,(%tc-ref ts) ,(%mref ,%sp ,stack-offset))
+               (set! ,(%tc-ref td) (immediate ,(fix len)))
+               ,e))))
+        (define (pick-Scall Scall->result-type result-type)
+          (nanopass-case (Ltype Type) result-type
+            [(fp-ftd& ,ftd) (case ($ftd-size ftd)
+                              [(1) (lookup-c-entry Scall->indirect-byte)]
+                              [(2) (lookup-c-entry Scall->indirect-short)]
+                              [(4) (lookup-c-entry Scall->indirect-int32)]
+                              [(8) (lookup-c-entry Scall->indirect-int64)]
+                              [else (lookup-c-entry Scall->indirect-copy-three-chars)])]
+            [else Scall->result-type]))
         (lambda (info)
           (let ([conv (info-foreign-conv info)]
                 [arg-type* (info-foreign-arg-type* info)]
-                [result-type (info-foreign-result-type info)])
+                [result-type (info-foreign-result-type info)]
+                [init-stack-offset (constant-case machine-type-name [(i3osx ti3osx) 32] [else 20])])
             (with-values (do-stack arg-type* '()
-                           (constant-case machine-type-name [(i3osx ti3osx) 32] [else 20]))
+                           (+ init-stack-offset
+                              (if (callee-expects-result-pointer? result-type) (constant ptr-bytes) 0)))
               (lambda (frame-size locs)
                 (values
                   (lambda ()
@@ -2550,29 +2572,33 @@
                   (lambda (fv* Scall->result-type)
                     (in-context Tail
                       ((lambda (e)
-                         (constant-case machine-type-name
-                           [(i3osx ti3osx)
-                            (%seq
-                              (set! ,%sp ,(%inline + ,%sp (immediate 12)))
-                              ,e)]
-                           [else e]))
-                       (%seq
-                         (set! ,%ebx ,(%inline pop))
-                         (set! ,%edi ,(%inline pop))
-                         (set! ,%esi ,(%inline pop))
-                         (set! ,%ebp ,(%inline pop))
-                         ; Windows __stdcall convention requires callee to clean up
-                         ,((lambda (e)
-                             (if (memq conv '(i3nt-stdcall i3nt-com))
-                                 (let ([arg-size (fx- frame-size 20)])
-                                   (if (fx> arg-size 0)
-                                       (%seq
-                                         (set!
-                                           ,(%mref ,%sp ,arg-size)
-                                           ,(%mref ,%sp 0))
-                                         (set! ,%sp ,(%inline + ,%sp (immediate ,arg-size)))
-                                         ,e)
-                                       e))
-                                 e))
-                           `(jump (literal ,(make-info-literal #f 'entry Scall->result-type 0))
-                              (,%ebx ,%edi ,%esi ,%ebp ,fv* ...))))))))))))))))
+                         (if (callee-expects-result-pointer? result-type)
+                             (register-result-copy result-type init-stack-offset e)
+                             e))
+                       ((lambda (e)
+                          (constant-case machine-type-name
+                            [(i3osx ti3osx)
+                             (%seq
+                               (set! ,%sp ,(%inline + ,%sp (immediate 12)))
+                               ,e)]
+                            [else e]))
+                        (%seq
+                          (set! ,%ebx ,(%inline pop))
+                          (set! ,%edi ,(%inline pop))
+                          (set! ,%esi ,(%inline pop))
+                          (set! ,%ebp ,(%inline pop))
+                          ; Windows __stdcall convention requires callee to clean up
+                          ,((lambda (e)
+                              (if (memq conv '(i3nt-stdcall i3nt-com))
+                                  (let ([arg-size (fx- frame-size 20)])
+                                    (if (fx> arg-size 0)
+                                        (%seq
+                                          (set!
+                                            ,(%mref ,%sp ,arg-size)
+                                            ,(%mref ,%sp 0))
+                                          (set! ,%sp ,(%inline + ,%sp (immediate ,arg-size)))
+                                          ,e)
+                                        e))
+                                  e))
+                            `(jump (literal ,(make-info-literal #f 'entry (pick-Scall Scall->result-type result-type) 0))
+                               (,%ebx ,%edi ,%esi ,%ebp ,fv* ...)))))))))))))))))

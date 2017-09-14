@@ -351,6 +351,15 @@ extern I64 S_call_int64 PROTO((void));
 extern U64 S_call_uns64 PROTO((void));
 extern uptr S_call_fptr PROTO((void));
 
+struct result_three_chars {
+  char c[3];
+};
+extern struct result_three_chars S_call_indirect_copy_three_chars PROTO((void));
+extern char S_call_indirect_byte PROTO((void));
+extern short S_call_indirect_short PROTO((void));
+extern I32 S_call_indirect_int32 PROTO((void));
+extern I64 S_call_indirect_int64 PROTO((void));
+
 #ifdef WIN32
 /* windows.c */
 extern INT S_getpagesize(void);
