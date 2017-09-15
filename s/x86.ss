@@ -2223,7 +2223,7 @@
     (lambda (result-type)
       (nanopass-case (Ltype Type) result-type
         [(fp-ftd& ,ftd) (case ($ftd-size ftd)
-                          [(4 8) #f]
+                          [(1 2 4 8) #f]
                           [else #t])]
         [else #f])))
   (define callee-pops-result-pointer?
@@ -2378,7 +2378,7 @@
                               (when (null? arg-type*)
                                 ($oops 'foreign-procedure
                                        "__com convention requires instance argument"))
-                                        ; jump indirect
+                              ; jump indirect
                               (%seq
                                (set! ,%eax ,(%mref ,%sp 0))
                                (set! ,%eax ,(%mref ,%eax 0))
@@ -2392,13 +2392,19 @@
                           (%seq
                            ,call
                            (set! ,%ecx ,(%mref ,%sp ,(fx- frame-size (constant ptr-bytes))))
-                           ,(cond
-                             [(= size 4)
-                              `(set! ,(%mref ,%ecx 0) ,%eax)]
-                             [else
-                              `(seq
-                                (set! ,(%mref ,%ecx 0) ,%eax)
-                                (set! ,(%mref ,%ecx 4) ,%edx))])))]
+                           ,(case size
+                              [(1)
+                               `(inline ,(make-info-load 'integer-8 #f) ,%store
+                                        ,%ecx ,%zero (immediate ,0) ,%eax)]
+                              [(2)
+                               `(inline ,(make-info-load 'integer-16 #f) ,%store
+                                        ,%ecx ,%zero (immediate ,0) ,%eax)]
+                              [(4)
+                               `(set! ,(%mref ,%ecx 0) ,%eax)]
+                              [(8)
+                               `(seq
+                                 (set! ,(%mref ,%ecx 0) ,%eax)
+                                 (set! ,(%mref ,%ecx 4) ,%edx))])))]
                        [else call])))
                   (nanopass-case (Ltype Type) result-type
                     [(fp-double-float)

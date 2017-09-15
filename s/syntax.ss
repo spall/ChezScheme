@@ -8683,10 +8683,10 @@
                       [(extra-binds [extra-arg ...] [extra ...])
                        ;; When the result type is `(& <ftype>)`, the `$foreign-procedure` result
                        ;; expects an extra argument as a `(* <ftype>)` that it uses to store the
-                       ;; foreign-procedure result, and it returns void. The extra argument is
-                       ;; made explicit for `$foreign-procedure`, but the return type preserved
+                       ;; foreign-procedure result, and it returns void. The extra argument is made
+                       ;; explicit for `$foreign-procedure`, and the return type is preserved as-is
                        ;; to let `$foreign-procedure` know that it needs to fill the first argument.
-                       ;; Meanwhile, the wrapper procedure takes care of allocating the result
+                       ;; Meanwhile, the wrapper procedure here takes care of allocating the result
                        ;; space and returning the newly allocated result.
                        (cond
                          [(and (box? result-type)
@@ -8951,7 +8951,7 @@
                                       #,@(if unsafe? #'() #'((unless (pred x) (err x))))
                                       x)
                                     type)))])])
-          ; use a gensym to avoid giving the procedure a confusing namej
+          ; use a gensym to avoid giving the procedure a confusing name
           (with-syntax ([p (datum->syntax #'foreign-callable (gensym))])
             #`($foreign-callable conv
                 (let ([p ?proc])
