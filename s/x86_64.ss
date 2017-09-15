@@ -2408,6 +2408,60 @@
         (define make-vint (lambda () (vector %Carg1 %Carg2 %Carg3 %Carg4 %Carg5 %Carg6)))
         (define make-vfp (lambda () (vector %Cfparg1 %Cfparg2 %Cfparg3 %Cfparg4 %Cfparg5 %Cfparg6 %Cfparg7 %Cfparg8)))))
 
+    (define (align n size)
+      (logand (+ n (fx- size 1) (- size))))
+
+    (define (classify-eightbytes ftd)
+      ;; FIXME: assumes normal alignment
+      (define (merge t1 t2)
+        (cond
+         [(eq? t1 t2) t1]
+         [(eq? t1 'no-class) t2]
+         [(eq? t2 'no-class) t1]
+         [(eq? t1 'memory) 'memory]
+         [(eq? t2 'memory) 'memory]
+         [else 'integer]))
+      (define (emit-class offset so-far classes)
+        (cond
+         [(zero? offset) classes]
+         [else (cons so-far classes)]))
+      (let loop ([types ($ftd->types ftd)] [offset 0] [so-far 'no-class])
+        (cond
+         [(null? types)
+          (emit-class offset so-far '())]
+         [else
+          (let ([integer
+                 (lambda (bits)
+                   (let ([bytes (fxsrl bits 3)])
+                     (cond
+                      [(<= (+ (align offset bytes) bytes) 8)
+                       (loop (cdr types) (+ (align offset bytes) bytes) (merge 'integer so-far))]
+                      [else
+                       (emit-class offset so-far (loop (cdr types) bytes 'integer))])))])
+            (let ([type (car types)])
+              (case type
+                [(double double-float)
+                 (emit-class offset so-far
+                             (loop (cdr types) 8 'sse))]
+                [(float single-float)
+                 (cond
+                  [(<= offset 4)
+                   (loop (cdr types) (+ (align offset 4) 4) (merge 'sse so-far))]
+                  [else
+                   (emit-class offset so-far (loop (cdr types) 4 'sse))])]
+                [(short unsigned-short) (integer 2)]
+                [(int unsigned unsigned-int) (integer 4)]
+                [(long unsigned-long) (if-feature windows (integer4) (integer 8))]
+                [(pointer long-long unsigned-long-long size_t ssize_t ptrdiff_t) (integer 8)]
+                [(char) (integer 1)]
+                [(wchar wchar_t) (if-feature windows (integer 2) (integer 4))]
+                [else
+                 (cond
+                  [(fixnum? type)
+                   (integer types)]
+                  [else
+                   ($oops 'classify-eightbytes "unrecognized ~s" type)])])))])))
+
     (define asm-foreign-call
       (with-output-language (L13 Effect)
         (letrec ([load-double-stack
@@ -2452,6 +2506,58 @@
                            ; x is a non-triv right-hand-side
                            [else (%seq (set! ,ireg ,x) (set! ,ireg ,(%inline zext32 ,ireg)))])]
                         [else `(set! ,ireg ,x)])))]
+                 [load-content-stack
+                  (lambda (offset len)
+                    (lambda (x) ; requires var
+                      (let loop ([offset offset] [x-offset 0] [len len])
+                        (cond
+                         [(= len 0) `(nop)]
+                         [(>= len 8)
+                          `(seq
+                            (set! ,(%mref ,%sp ,offset) (inline ,(make-info-load 'integer-64 #f)
+                                                                ,%load ,x ,%zero (immediate ,x-offset)))
+                            ,(loop (fx+ offset 8) (fx+ x-offset 8) (fx- len 8)))]
+                         [(>= len 4)
+                          `(seq
+                            (set! ,(%mref ,%sp ,offset) (inline ,(make-info-load 'integer-32 #f)
+                                                                ,%load ,x ,%zero (immediate ,x-offset)))
+                            ,(loop (fx+ offset 4) (fx+ x-offset 4) (fx- len 4)))]
+                         [(>= len 2)
+                          `(seq
+                            (set! ,(%mref ,%sp ,offset) (inline ,(make-info-load 'integer-16 #f)
+                                                                ,%load ,x ,%zero (immediate ,x-offset)))
+                            ,(loop (fx+ offset 2) (fx+ x-offset 2) (fx- len 2)))]
+                         [else
+                          `(set! ,(%mref ,%sp ,offset) (inline ,(make-info-load 'integer-8 #f)
+                                                               ,%load ,x ,%zero (immediate ,x-offset)))]))))]
+                 [load-content-regs
+                  (lambda (classes iint ifp vint vfp)
+                    (lambda (x) ; requires var
+                      (let loop ([iint iint] [ifp ifp] [classes classes] [x-offset 0])
+                        (cond
+                         [(null? classes) `(nop)]
+                         [(eq? 'sse (car classes))
+                          `(seq
+                            (inline ,(make-info-loadfl (vector-ref vfp ifp)) ,%load-double ,x ,%zero (immediate ,x-offset))
+                            ,(loop iint (fx+ ifp 1) (cdr classes) (fx+ x-offset 8)))]
+                         [else
+                          `(seq
+                            (set! ,(vector-ref vint iint) (inline ,(make-info-load 'integer-64 #f)
+                                                                  ,%load ,x ,%zero (immediate ,x-offset)))
+                            ,(loop (fx+ iint 1) ifp (cdr classes) (fx+ x-offset 8)))]))))]
+                 [count
+                  (lambda (v l)
+                    (cond
+                     [(null? l) 0]
+                     [(eq? (car l) v) (fx+ 1 (count v (cdr l)))]
+                     [else (count v (cdr l))]))]
+                 [add-int-regs
+                  (lambda (ints iint vint regs)
+                    (cond
+                     [(fx= 0 ints) regs]
+                     [else
+                      (add-int-regs (fx- ints 1) (fx+ iint 1) vint
+                                    (cons (vector-ref vint iint) regs))]))]
                  [do-args
                   (lambda (types vint vfp)
                     (if-feature windows
@@ -2506,6 +2612,31 @@
                                    (loop (cdr types)
                                      (cons (load-single-stack isp) locs)
                                      regs iint ifp (fx+ isp 8)))]
+                              [(fp-ftd& ,ftd)
+                               (cond
+                                [(> ($ftd-size ftd) 32) ; FIXME: also check for unaligned
+                                 ;; pass on the stack
+                                 (loop (cdr types)
+                                       (cons (load-int-stack isp) locs)
+                                       regs iint ifp (fx+ isp ($ftd-size ftd)))]
+                                [else
+                                 (let* ([classes (classify-eightbytes ftd)]
+                                        [ints (count 'integer classes)]
+                                        [fps (count 'sse classes)])
+                                   (cond
+                                    [(or (memq 'memory classes)
+                                         (> (+ iint ints) 8)
+                                         (> (+ ifp fps) 8))
+                                     ;; pass on the stack
+                                     (loop (cdr types)
+                                           (cons (load-content-stack isp ($ftd-size ftd)) locs)
+                                           regs iint ifp (fx+ isp ($ftd-size ftd)))]
+                                    [else
+                                     ;; pass in registers
+                                     (loop (cdr types)
+                                           (cons (load-content-regs classes iint ifp vint vfp) locs)
+                                           (add-int-regs ints iint vint regs)
+                                           (fx+ iint ints) (fx+ ifp fps) isp)]))])]
                               [else
                                (if (< iint 6)
                                    (let ([reg (vector-ref vint iint)])

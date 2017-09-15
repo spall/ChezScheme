@@ -942,6 +942,45 @@ ftype operators:
   (set! $ftd-size
     (lambda (x)
       (ftd-size x)))
+  (set! $ftd->types
+    (lambda (x)
+      ;; Return a list of integers to represent integer/pointer bitwidths,
+      ;; 'short, etc., 'double, 'float, and nested lists to represent unions
+      (cond
+       [(ftd-base? x)
+        (list
+         ;; Get various fixed widths out of the way, otherwise
+         ;; leave the base type:
+         (case (ftd-base-type x)
+           [(integer-8 unsigned-8) 8]
+           [(integer-16 unsigned-16) 16]
+           [(integer-24 unsigned-24) 24]
+           [(integer-32 unsigned-32) 32]
+           [(integer-40 unsigned-40) 40]
+           [(integer-48 unsigned-48) 48]
+           [(integer-56 unsigned-56) 56]
+           [(integer-64 unsigned-64) 64]
+           [else (ftd-base-type x)]))]
+       [(ftd-struct? x) (apply append (map (lambda (fld)
+                                             ($ftd->types (caddr fld)))
+                                           (ftd-struct-field* x)))]
+       [(ftd-union? x) (map $ftd->types (ftd-union-field* x))]
+       [(ftd-array? x) (let ([elem ($ftd->types (ftd-array-ftd x))])
+                         (let loop ([len (ftd-array-length x)])
+                           (cond
+                            [(fx= len 0) '()]
+                            [else (append elem (loop (fx- len 1)))])))]
+       [(ftd-pointer? x) (list 'pointer)]
+       [(ftd-bits? x)
+        (let loop ([fields (ftd-bits-field* x)])
+          (if (null? fields)
+              0
+              (+ (apply
+                  (lambda (id signed? start end)
+                    (- end start))
+                  (car fields))
+                 (loop (cdr fields)))))]
+       [else ($oops '$ftd-types "unsupported type ~s" x)])))
   (set! $expand-fp-ftype ; for foreign-procedure, foreign-callable
     (lambda (who what r ftype)
       (indirect-ftd-pointer
