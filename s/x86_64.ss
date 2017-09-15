@@ -2411,6 +2411,11 @@
     (define (align n size)
       (logand (+ n (fx- size 1) (- size))))
 
+    (define (classify-type type)
+      (nanopass-case (Ltype Type) type
+        [(fp-ftd& ,ftd) (classify-eightbytes ftd)]
+        [else #f]))
+
     (define (classify-eightbytes ftd)
       ;; FIXME: assumes normal alignment
       (define (merge t1 t2)
@@ -2449,18 +2454,30 @@
                    (loop (cdr types) (+ (align offset 4) 4) (merge 'sse so-far))]
                   [else
                    (emit-class offset so-far (loop (cdr types) 4 'sse))])]
-                [(short unsigned-short) (integer 2)]
-                [(int unsigned unsigned-int) (integer 4)]
-                [(long unsigned-long) (if-feature windows (integer4) (integer 8))]
-                [(pointer long-long unsigned-long-long size_t ssize_t ptrdiff_t) (integer 8)]
-                [(char) (integer 1)]
-                [(wchar wchar_t) (if-feature windows (integer 2) (integer 4))]
+                [(short unsigned-short) (integer 16)]
+                [(int unsigned unsigned-int) (integer 32)]
+                [(long unsigned-long) (if-feature windows (integer 32) (integer 64))]
+                [(pointer long-long unsigned-long-long size_t ssize_t ptrdiff_t) (integer 64)]
+                [(char) (integer 8)]
+                [(wchar wchar_t) (if-feature windows (integer 16) (integer 32))]
                 [else
                  (cond
                   [(fixnum? type)
                    (integer types)]
                   [else
                    ($oops 'classify-eightbytes "unrecognized ~s" type)])])))])))
+
+    (define (count v l)
+      (cond
+       [(null? l) 0]
+       [(eq? (car l) v) (fx+ 1 (count v (cdr l)))]
+       [else (count v (cdr l))]))
+  
+    (define (fill-result-pointer-from-registers? result-classes)
+      (and result-classes
+           (not (memq 'memory result-classes))
+           (<= (count 'integer result-classes) 2)
+           (<= (count 'sse result-classes) 2)))
 
     (define asm-foreign-call
       (with-output-language (L13 Effect)
@@ -2545,12 +2562,6 @@
                             (set! ,(vector-ref vint iint) (inline ,(make-info-load 'integer-64 #f)
                                                                   ,%load ,x ,%zero (immediate ,x-offset)))
                             ,(loop (fx+ iint 1) ifp (cdr classes) (fx+ x-offset 8)))]))))]
-                 [count
-                  (lambda (v l)
-                    (cond
-                     [(null? l) 0]
-                     [(eq? (car l) v) (fx+ 1 (count v (cdr l)))]
-                     [else (count v (cdr l))]))]
                  [add-int-regs
                   (lambda (ints iint vint regs)
                     (cond
@@ -2617,7 +2628,7 @@
                                 [(> ($ftd-size ftd) 32) ; FIXME: also check for unaligned
                                  ;; pass on the stack
                                  (loop (cdr types)
-                                       (cons (load-int-stack isp) locs)
+                                       (cons (load-content-stack isp ($ftd-size ftd)) locs)
                                        regs iint ifp (fx+ isp ($ftd-size ftd)))]
                                 [else
                                  (let* ([classes (classify-eightbytes ftd)]
@@ -2625,7 +2636,7 @@
                                         [fps (count 'sse classes)])
                                    (cond
                                     [(or (memq 'memory classes)
-                                         (> (+ iint ints) 8)
+                                         (> (+ iint ints) 6)
                                          (> (+ ifp fps) 8))
                                      ;; pass on the stack
                                      (loop (cdr types)
@@ -2647,6 +2658,35 @@
                                    (loop (cdr types)
                                      (cons (load-int-stack isp) locs)
                                      regs iint ifp (fx+ isp 8)))])))))])
+          (define (add-save-fill-target fill-result-here? frame-size locs)
+            (cond
+             [fill-result-here?
+              ;; The callee isn't expecting a pointer to fill with the result.
+              ;; Stash the pointer as an extra argument, and then when the
+              ;; function returns, we'll move register content for the result
+              ;; into the pointer's target
+              (values (fx+ frame-size (constant ptr-bytes))
+                      (append locs
+                              (list
+                               (lambda (x) ; requires var
+                                 `(set! ,(%mref ,%sp ,frame-size) ,x)))))]
+             [else
+              (values frame-size locs)]))
+          (define (add-fill-result c-call saved-offset classes)
+            (let loop ([classes classes] [offset 0] [iregs (reg-list %rax %rdx)] [fpregs (reg-list %Cfparg1 %Cfparg2)])
+              (cond
+               [(null? classes)
+                `(seq
+                  ,c-call
+                  (set! ,%rcx ,(%mref ,%sp ,saved-offset)))]
+               [(eq? 'sse (car classes))
+                `(seq
+                  ,(loop (cdr classes) (fx+ offset 8) iregs (cdr fpregs))
+                  (inline ,(make-info-loadfl (car fpregs)) ,%load-double ,%rcx ,%zero (immediate ,offset)))]
+               [else
+                `(seq
+                  ,(loop (cdr classes) (fx+ offset 8) (cdr iregs) fpregs)
+                  (set! ,(%mref ,%rcx ,offset) ,(car iregs)))])))
           (define returnem
             (lambda (frame-size locs ccall r-loc)
              ; need to maintain 16-byte alignment, ignoring the return address
@@ -2666,51 +2706,60 @@
                         `(set! ,%sp ,(%inline + ,%sp (immediate ,frame-size)))))))))
           (lambda (info)
             (safe-assert (reg-callee-save? %tc)) ; no need to save-restore
-            (let ([conv (info-foreign-conv info)]
-                  [arg-type* (info-foreign-arg-type* info)]
-                  [result-type (info-foreign-result-type info)])
-              (with-values (do-args arg-type* (make-vint) (make-vfp))
+            (let* ([conv (info-foreign-conv info)]
+                   [arg-type* (info-foreign-arg-type* info)]
+                   [result-type (info-foreign-result-type info)]
+                   [result-classes (classify-type result-type)]
+                   [fill-result-here? (fill-result-pointer-from-registers? result-classes)])
+              (with-values (do-args (if fill-result-here? (cdr arg-type*) arg-type*) (make-vint) (make-vfp))
                 (lambda (frame-size nfp locs live*)
-                  (returnem frame-size locs
-                    (lambda (t0)
-                      (if-feature windows
-                        (%seq
-                          (set! ,%sp ,(%inline - ,%sp (immediate 32)))
-                          (inline ,(make-info-kill*-live* (reg-list %rax) live*) ,%c-call ,t0)
-                          (set! ,%sp ,(%inline + ,%sp (immediate 32))))
-                        (%seq
-                          ; System V ABI varargs functions require count of fp regs used in %al register.
-                          ; since we don't know if the callee is a varargs function, we always set it.
-                          (set! ,%rax (immediate ,nfp))
-                          (inline ,(make-info-kill*-live* (reg-list %rax) (cons %rax live*)) ,%c-call ,t0))))
-                    (nanopass-case (Ltype Type) result-type
-                      [(fp-double-float)
-                       (lambda (lvalue)
-                         `(inline ,(make-info-loadfl %Cfpretval) ,%store-double ,lvalue ,%zero
-                            ,(%constant flonum-data-disp)))]
-                      [(fp-single-float)
-                       (lambda (lvalue)
-                         `(inline ,(make-info-loadfl %Cfpretval) ,%store-single->double ,lvalue ,%zero
-                            ,(%constant flonum-data-disp)))]
-                      [(fp-integer ,bits)
-                       (case bits
-                         [(8) (lambda (lvalue) `(set! ,lvalue ,(%inline sext8 ,%rax)))]
-                         [(16) (lambda (lvalue) `(set! ,lvalue ,(%inline sext16 ,%rax)))]
-                         [(32) (lambda (lvalue) `(set! ,lvalue ,(%inline sext32 ,%rax)))]
-                         [(64) (lambda (lvalue) `(set! ,lvalue ,%rax))]
-                         [else ($oops 'assembler-internal
-                                 "unexpected asm-foreign-procedures fp-integer size ~s"
-                                 bits)])]
-                      [(fp-unsigned ,bits)
-                       (case bits
-                         [(8) (lambda (lvalue) `(set! ,lvalue ,(%inline zext8 ,%rax)))]
-                         [(16) (lambda (lvalue) `(set! ,lvalue ,(%inline zext16 ,%rax)))]
-                         [(32) (lambda (lvalue) `(set! ,lvalue ,(%inline zext32 ,%rax)))]
-                         [(64) (lambda (lvalue) `(set! ,lvalue ,%rax))]
-                         [else ($oops 'assembler-internal
-                                 "unexpected asm-foreign-procedures fp-unsigned size ~s"
-                                 bits)])]
-                      [else (lambda (lvalue) `(set! ,lvalue ,%rax))])))))))))
+                  (with-values (add-save-fill-target fill-result-here? frame-size locs)
+                    (lambda (frame-size locs)
+                      (returnem frame-size locs
+                        (lambda (t0)
+                          (let ([c-call
+                                 (if-feature windows
+                                   (%seq
+                                     (set! ,%sp ,(%inline - ,%sp (immediate 32)))
+                                     (inline ,(make-info-kill*-live* (reg-list %rax) live*) ,%c-call ,t0)
+                                     (set! ,%sp ,(%inline + ,%sp (immediate 32))))
+                                   (%seq
+                                     ;; System V ABI varargs functions require count of fp regs used in %al register.
+                                     ;; since we don't know if the callee is a varargs function, we always set it.
+                                     (set! ,%rax (immediate ,nfp))
+                                     (inline ,(make-info-kill*-live* (reg-list %rax) (cons %rax live*)) ,%c-call ,t0)))])
+                            (cond
+                             [fill-result-here?
+                              (add-fill-result c-call (fx- frame-size (constant ptr-bytes)) result-classes)]
+                             [else c-call])))
+                        (nanopass-case (Ltype Type) result-type
+                          [(fp-double-float)
+                           (lambda (lvalue)
+                             `(inline ,(make-info-loadfl %Cfpretval) ,%store-double ,lvalue ,%zero
+                                ,(%constant flonum-data-disp)))]
+                          [(fp-single-float)
+                           (lambda (lvalue)
+                             `(inline ,(make-info-loadfl %Cfpretval) ,%store-single->double ,lvalue ,%zero
+                                ,(%constant flonum-data-disp)))]
+                          [(fp-integer ,bits)
+                           (case bits
+                             [(8) (lambda (lvalue) `(set! ,lvalue ,(%inline sext8 ,%rax)))]
+                             [(16) (lambda (lvalue) `(set! ,lvalue ,(%inline sext16 ,%rax)))]
+                             [(32) (lambda (lvalue) `(set! ,lvalue ,(%inline sext32 ,%rax)))]
+                             [(64) (lambda (lvalue) `(set! ,lvalue ,%rax))]
+                             [else ($oops 'assembler-internal
+                                     "unexpected asm-foreign-procedures fp-integer size ~s"
+                                     bits)])]
+                          [(fp-unsigned ,bits)
+                           (case bits
+                             [(8) (lambda (lvalue) `(set! ,lvalue ,(%inline zext8 ,%rax)))]
+                             [(16) (lambda (lvalue) `(set! ,lvalue ,(%inline zext16 ,%rax)))]
+                             [(32) (lambda (lvalue) `(set! ,lvalue ,(%inline zext32 ,%rax)))]
+                             [(64) (lambda (lvalue) `(set! ,lvalue ,%rax))]
+                             [else ($oops 'assembler-internal
+                                     "unexpected asm-foreign-procedures fp-unsigned size ~s"
+                                     bits)])]
+                          [else (lambda (lvalue) `(set! ,lvalue ,%rax))])))))))))))
 
     (define asm-foreign-callable
       #|

@@ -2278,15 +2278,6 @@
                        [else
                         `(set! ,(%mref ,%sp ,offset) (inline ,(make-info-load 'integer-8 #f)
                                                              ,%load ,x ,%zero (immediate ,x-offset)))]))))]
-               [maybe-drop-result-ptr
-                (lambda (arg-type* result-type)
-                  (cond
-                   [(fill-result-pointer-from-registers? result-type)
-                    ;; Callee doesn't expect a pointer to fill, because the
-                    ;; result goes in registers. Move the destination argument
-                    ;; to the end, just to keep it for filling afterward.
-                    (append (cdr arg-type*) (list (car arg-type*)))]
-                   [else arg-type*]))]
                [do-stack
                 (lambda (types locs n result-type)
                   (if (null? types)
@@ -2312,7 +2303,8 @@
                           [(and result-type
                                 (fill-result-pointer-from-registers? result-type))
                            ;; Callee doesn't expect this argument; move
-                           ;; it to the end
+                           ;; it to the end just to save it for filling
+                           ;; when the callee returns
                            (let ([end-n 0])
                              (with-values (do-stack (cdr types)
                                                     (cons (lambda (rhs)
