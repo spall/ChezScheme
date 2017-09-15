@@ -150,6 +150,7 @@ static void create_c_entry_vector() {
     install_c_entry(CENTRY_Scall_indirect_int32, proc2ptr(S_call_indirect_int32));
     install_c_entry(CENTRY_Scall_indirect_int64, proc2ptr(S_call_indirect_int64));
     install_c_entry(CENTRY_Scall_indirect_copy_three_chars, proc2ptr(S_call_indirect_copy_three_chars));
+    install_c_entry(CENTRY_Scopy_argument, proc2ptr(S_copy_argument));
 
     for (i = 0; i < c_entry_vector_size; i++) {
 #ifndef PTHREADS

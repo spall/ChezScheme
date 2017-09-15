@@ -2485,6 +2485,11 @@
            (<= (count 'integer result-classes) 2)
            (<= (count 'sse result-classes) 2)))
 
+    (define (pass-here-by-stack? classes iint ints ifp fps)
+      (or (memq 'memory classes)
+          (fx> (fx+ iint ints) 6)
+          (fx> (fx+ ifp fps) 8)))
+
     (define asm-foreign-call
       (with-output-language (L13 Effect)
         (letrec ([load-double-stack
@@ -2634,9 +2639,7 @@
                                       [ints (count 'integer classes)]
                                       [fps (count 'sse classes)])
                                  (cond
-                                  [(or (memq 'memory classes)
-                                       (> (+ iint ints) 6)
-                                       (> (+ ifp fps) 8))
+                                  [(pass-here-by-stack? classes iint ints ifp fps)
                                    ;; pass on the stack
                                    (loop (cdr types)
                                          (cons (load-content-stack isp ($ftd-size ftd)) locs)
@@ -2896,9 +2899,7 @@
                                 [ints (count 'integer classes)]
                                 [fps (count 'sse classes)])
                            (cond
-                            [(or (memq 'memory classes)
-                                 (> (+ iint ints) 6)
-                                 (> (+ ifp fps) 8))
+                            [(pass-here-by-stack? classes iint ints ifp fps)
                              ;; receive on the stack
                              (f (cdr types) iint ifp isp)]
                             [else
@@ -2963,9 +2964,7 @@
                                 [ints (count 'integer classes)]
                                 [fps (count 'sse classes)])
                            (cond
-                            [(or (memq 'memory classes)
-                                 (> (+ iint ints) 6)
-                                 (> (+ ifp fps) 8))
+                            [(pass-here-by-stack? classes iint ints ifp fps)
                              ;; receive on the stack
                              (f (cdr types)
                                 (cons (load-stack-address sisp) locs)
@@ -2985,6 +2984,35 @@
                              (f (cdr types)
                                (cons (load-int-stack (car types) risp) locs)
                                (fx+ iint 1) ifp (fx+ risp 8) sisp))]))))))
+          (define copy-arguments-out-of-frame
+            ;; Just before we tail-call as `Scall->...` function, for
+            ;; any pointer arguments into the register-copy portion of
+            ;; the stack, copy the data to a new place.
+            (lambda (types e)
+              (in-context Tail
+                (let f ([types types] [pos 0] [iint 0] [ifp 0])
+                  (if (null? types)
+                      e
+                      (nanopass-case (Ltype Type) (car types)
+                        [(fp-double-float)
+                         (f (cdr types) (fx+ pos 1) iint (fx+ ifp 1))]
+                        [(fp-single-float)
+                         (f (cdr types) (fx+ pos 1) iint (fx+ ifp 1))]
+                        [(fp-ftd& ,ftd)
+                         (let* ([classes (classify-eightbytes ftd)]
+                                [ints (count 'integer classes)]
+                                [fps (count 'sse classes)])
+                           (cond
+                            [(pass-here-by-stack? classes iint ints ifp fps)
+                             (f (cdr types) (fx+ pos 1) iint ifp)]
+                            [else
+                             (%seq
+                              (set! ,(%tc-ref ts) (immediate ,(fix pos)))
+                              (set! ,(%tc-ref td) (immediate ,(fix ($ftd-size ftd))))
+                              (inline ,(make-info-c-simple-call #f (lookup-c-entry Scopy-argument)) ,%c-simple-call)
+                              ,(f (cdr types) (fx+ pos 1) (fx+ iint ints) (fx+ ifp fps)))]))]
+                        [else
+                         (f (cdr types) (fx+ pos 1) (fx+ iint 1) ifp)]))))))
           (lambda (info)
             (let ([conv (info-foreign-conv info)]
                   [arg-type* (info-foreign-arg-type* info)]
@@ -3022,6 +3050,8 @@
                   (reverse locs)
                   (lambda (fv* Scall->result-type)
                     (in-context Tail
+                     (copy-arguments-out-of-frame
+                      arg-type*
                       (%seq
                         ,(if-feature windows
                            (%seq
@@ -3043,5 +3073,5 @@
                              (set! ,%rbx ,(%inline pop))
                              (set! ,%sp ,(%inline + ,%sp (immediate 120)))))
                         (jump (literal ,(make-info-literal #f 'entry Scall->result-type 0))
-                          (,%rbx ,%rbp ,%r12 ,%r13 ,%r14 ,%r15 ,fv* ...)))))))))))))
+                          (,%rbx ,%rbp ,%r12 ,%r13 ,%r14 ,%r15 ,fv* ...))))))))))))))
   )

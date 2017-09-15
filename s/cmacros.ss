@@ -2647,5 +2647,6 @@
      Scall->indirect-int32
      Scall->indirect-int64
      Scall->indirect-copy-three-chars
+     Scopy-argument
   ))
 )
