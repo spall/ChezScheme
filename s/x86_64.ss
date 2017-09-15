@@ -2430,42 +2430,48 @@
         (cond
          [(zero? offset) classes]
          [else (cons so-far classes)]))
-      (let loop ([types ($ftd->types ftd)] [offset 0] [so-far 'no-class])
-        (cond
-         [(null? types)
-          (emit-class offset so-far '())]
-         [else
-          (let ([integer
-                 (lambda (bits)
-                   (let ([bytes (fxsrl bits 3)])
-                     (cond
-                      [(<= (+ (align offset bytes) bytes) 8)
-                       (loop (cdr types) (+ (align offset bytes) bytes) (merge 'integer so-far))]
-                      [else
-                       (emit-class offset so-far (loop (cdr types) bytes 'integer))])))])
-            (let ([type (car types)])
-              (case type
-                [(double double-float)
-                 (emit-class offset so-far
-                             (loop (cdr types) 8 'sse))]
-                [(float single-float)
-                 (cond
-                  [(<= offset 4)
-                   (loop (cdr types) (+ (align offset 4) 4) (merge 'sse so-far))]
+      (cond
+       [(> ($ftd-size ftd) 32)
+        '(memory)]
+       [(fx= 0 ($ftd-size ftd)) ; not sure this can happen, but just in case
+        '(memory)]
+       [else
+        (let loop ([types ($ftd->types ftd)] [offset 0] [so-far 'no-class])
+          (cond
+           [(null? types)
+            (emit-class offset so-far '())]
+           [else
+            (let ([integer
+                   (lambda (bits)
+                     (let ([bytes (fxsrl bits 3)])
+                       (cond
+                        [(<= (+ (align offset bytes) bytes) 8)
+                         (loop (cdr types) (+ (align offset bytes) bytes) (merge 'integer so-far))]
+                        [else
+                         (emit-class offset so-far (loop (cdr types) bytes 'integer))])))])
+              (let ([type (car types)])
+                (case type
+                  [(double double-float)
+                   (emit-class offset so-far
+                               (loop (cdr types) 8 'sse))]
+                  [(float single-float)
+                   (cond
+                    [(<= offset 4)
+                     (loop (cdr types) (+ (align offset 4) 4) (merge 'sse so-far))]
+                    [else
+                     (emit-class offset so-far (loop (cdr types) 4 'sse))])]
+                  [(short unsigned-short) (integer 16)]
+                  [(int unsigned unsigned-int) (integer 32)]
+                  [(long unsigned-long) (if-feature windows (integer 32) (integer 64))]
+                  [(pointer long-long unsigned-long-long size_t ssize_t ptrdiff_t) (integer 64)]
+                  [(char) (integer 8)]
+                  [(wchar wchar_t) (if-feature windows (integer 16) (integer 32))]
                   [else
-                   (emit-class offset so-far (loop (cdr types) 4 'sse))])]
-                [(short unsigned-short) (integer 16)]
-                [(int unsigned unsigned-int) (integer 32)]
-                [(long unsigned-long) (if-feature windows (integer 32) (integer 64))]
-                [(pointer long-long unsigned-long-long size_t ssize_t ptrdiff_t) (integer 64)]
-                [(char) (integer 8)]
-                [(wchar wchar_t) (if-feature windows (integer 16) (integer 32))]
-                [else
-                 (cond
-                  [(fixnum? type)
-                   (integer types)]
-                  [else
-                   ($oops 'classify-eightbytes "unrecognized ~s" type)])])))])))
+                   (cond
+                    [(fixnum? type)
+                     (integer types)]
+                    [else
+                     ($oops 'classify-eightbytes "unrecognized ~s" type)])])))]))]))
 
     (define (count v l)
       (cond
@@ -2624,30 +2630,23 @@
                                      (cons (load-single-stack isp) locs)
                                      regs iint ifp (fx+ isp 8)))]
                               [(fp-ftd& ,ftd)
-                               (cond
-                                [(> ($ftd-size ftd) 32) ; FIXME: also check for unaligned
-                                 ;; pass on the stack
-                                 (loop (cdr types)
-                                       (cons (load-content-stack isp ($ftd-size ftd)) locs)
-                                       regs iint ifp (fx+ isp ($ftd-size ftd)))]
-                                [else
-                                 (let* ([classes (classify-eightbytes ftd)]
-                                        [ints (count 'integer classes)]
-                                        [fps (count 'sse classes)])
-                                   (cond
-                                    [(or (memq 'memory classes)
-                                         (> (+ iint ints) 6)
-                                         (> (+ ifp fps) 8))
-                                     ;; pass on the stack
-                                     (loop (cdr types)
-                                           (cons (load-content-stack isp ($ftd-size ftd)) locs)
-                                           regs iint ifp (fx+ isp ($ftd-size ftd)))]
-                                    [else
-                                     ;; pass in registers
-                                     (loop (cdr types)
-                                           (cons (load-content-regs classes iint ifp vint vfp) locs)
-                                           (add-int-regs ints iint vint regs)
-                                           (fx+ iint ints) (fx+ ifp fps) isp)]))])]
+                               (let* ([classes (classify-eightbytes ftd)]
+                                      [ints (count 'integer classes)]
+                                      [fps (count 'sse classes)])
+                                 (cond
+                                  [(or (memq 'memory classes)
+                                       (> (+ iint ints) 6)
+                                       (> (+ ifp fps) 8))
+                                   ;; pass on the stack
+                                   (loop (cdr types)
+                                         (cons (load-content-stack isp ($ftd-size ftd)) locs)
+                                         regs iint ifp (fx+ isp ($ftd-size ftd)))]
+                                  [else
+                                   ;; pass in registers
+                                   (loop (cdr types)
+                                         (cons (load-content-regs classes iint ifp vint vfp) locs)
+                                         (add-int-regs ints iint vint regs)
+                                         (fx+ iint ints) (fx+ ifp fps) isp)]))]
                               [else
                                (if (< iint 6)
                                    (let ([reg (vector-ref vint iint)])
@@ -2841,6 +2840,10 @@
                              "unexpected load-int-stack fp-unsigned size ~s"
                              bits)])]
                   [else `(set! ,lvalue ,(%mref ,%sp ,offset))]))))
+          (define load-stack-address
+            (lambda (offset)
+              (lambda (lvalue) ; requires lvalue
+                `(set! ,lvalue ,(%inline + ,%sp (immediate ,offset))))))
           (define save-arg-regs
             (lambda (types)
               (define vint (make-vint))
@@ -2888,6 +2891,31 @@
                                  ,%sp ,%zero (immediate ,isp))
                                ,(f (cdr types) iint (fx+ ifp 1) (fx+ isp 8)))
                              (f (cdr types) iint ifp isp))]
+                        [(fp-ftd& ,ftd)
+                         (let* ([classes (classify-eightbytes ftd)]
+                                [ints (count 'integer classes)]
+                                [fps (count 'sse classes)])
+                           (cond
+                            [(or (memq 'memory classes)
+                                 (> (+ iint ints) 6)
+                                 (> (+ ifp fps) 8))
+                             ;; receive on the stack
+                             (f (cdr types) iint ifp isp)]
+                            [else
+                             ;; receive via registers
+                             (let reg-loop ([classes classes] [iint iint] [ifp ifp] [isp isp])
+                               (cond
+                                [(null? classes)
+                                 (f (cdr types) iint ifp isp)]
+                                [(eq? (car classes) 'sse)
+                                 `(seq
+                                   (inline ,(make-info-loadfl (vector-ref vfp ifp)) ,%store-double
+                                           ,%sp ,%zero (immediate ,isp))
+                                   ,(reg-loop (cdr classes) iint (fx+ ifp 1) (+ isp 8)))]
+                                [else
+                                 `(seq
+                                   (set! ,(%mref ,%sp ,isp) ,(vector-ref vint iint))
+                                   ,(reg-loop (cdr classes) (fx+ iint 1) ifp (+ isp 8)))]))]))]
                         [else
                          (if (< iint 6)
                              (%seq
@@ -2930,6 +2958,25 @@
                              (f (cdr types)
                                (cons (load-single-stack risp) locs)
                                iint (fx+ ifp 1) (fx+ risp 8) sisp))]
+                        [(fp-ftd& ,ftd)
+                         (let* ([classes (classify-eightbytes ftd)]
+                                [ints (count 'integer classes)]
+                                [fps (count 'sse classes)])
+                           (cond
+                            [(or (memq 'memory classes)
+                                 (> (+ iint ints) 6)
+                                 (> (+ ifp fps) 8))
+                             ;; receive on the stack
+                             (f (cdr types)
+                                (cons (load-stack-address sisp) locs)
+                                iint ifp risp (fx+ sisp ($ftd-size ftd)))]
+                            [else
+                             ;; receive via registers; `save-args-regs` has saved
+                             ;; the registers in a suitable order so that the data
+                             ;; is contiguous on the stack
+                             (f (cdr types)
+                                (cons (load-stack-address risp) locs)
+                                (fx+ iint ints) (fx+ ifp fps) (fx+ risp ($ftd-size ftd)) sisp)]))]
                         [else
                          (if (= iint 6)
                              (f (cdr types)
