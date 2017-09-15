@@ -682,7 +682,7 @@
               [else
                (cond
                 [($ftd? x) `(fp-ftd ,x)]
-                [(and (box? x) ($ftd? (unbox x))) `(fp-ftd& ,(unbox x))]
+                [($ftd-as-box? x) `(fp-ftd& ,(unbox x))]
                 [else #f])])
             ($oops #f "invalid ~a ~a specifier ~s" who what x)))))
 
@@ -8491,10 +8491,8 @@
             [(little) 'utf-32le]
             [(big) 'utf-32be])])]
       [else
-       (and (or ($ftd? type)
-                     (and (box? type)
-                          ($ftd? (unbox type))))
-                 type)])))
+       (and (or ($ftd? type) ($ftd-as-box? type))
+            type)])))
 
 (define $fp-type->pred
   (lambda (type)
@@ -8635,9 +8633,8 @@
                                                         (err ($moi) x)))))
                                        (u32*))]
                                    [else #f])
-                                 (if (or ($ftd? type)
-                                         (and (box? type) ($ftd? (unbox type))))
-                                     (let ([ftd (if (box? type) (unbox type) type)])
+                                 (if (or ($ftd? type) ($ftd-as-box? type))
+                                     (let ([ftd (if ($ftd? type) type (unbox type))])
                                        #`(#,(if unsafe? #'() #`((unless (record? x '#,ftd) (err ($moi) x))))
                                           (x)
                                           (#,type)))
@@ -8674,8 +8671,7 @@
                          [(unsigned-56) #`((lambda (x) (mod x #x100000000000000)) unsigned-64)]
                          [else
                           (cond
-                            [(and (box? result-type)
-                                  ($ftd? (unbox result-type)))
+                            [($ftd-as-box? result-type)
                              ;; Return allocated memory
                              #`((lambda (r) &-result) #,(datum->syntax #'foreign-procedure result-type))]
                             [else
@@ -8689,8 +8685,7 @@
                        ;; Meanwhile, the wrapper procedure here takes care of allocating the result
                        ;; space and returning the newly allocated result.
                        (cond
-                         [(and (box? result-type)
-                               ($ftd? (unbox result-type)))
+                         [($ftd-as-box? result-type)
                           #`(([&-result
                                ($make-fptr '#,(unbox result-type) (foreign-alloc #,($ftd-size (unbox result-type))))])
                              [#,(unbox result-type)]
@@ -8819,7 +8814,7 @@
                                        (unsigned-64)))]
                                  [else
                                   (cond
-                                    [(and (box? type) ($ftd? (unbox type)))
+                                    [($ftd-as-box? type)
                                      (letrec ([generate-copy
                                                (lambda (dest src count offset)
                                                  (cond
@@ -8935,10 +8930,8 @@
                                                (err x)))))
                              u32*)]
                          [else
-                           (if (or ($ftd? result-type)
-                                   (and (box? result-type)
-                                        ($ftd? (unbox result-type))))
-                               (let ([result-ftd (if (box? result-type) (unbox result-type) result-type)])
+                           (if (or ($ftd? result-type) ($ftd-as-box? result-type))
+                               (let ([result-ftd (if ($ftd? result-type) result-type (unbox result-type))])
                                  (with-syntax ([ftd (datum->syntax #'foreign-callable result-ftd)]
                                                [type (datum->syntax #'foreign-callable result-type)])
                                    #`((lambda (x)

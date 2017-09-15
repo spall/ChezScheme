@@ -936,6 +936,9 @@ ftype operators:
   (set! $ftd?
     (lambda (x)
       (ftd? x)))
+  (set! $ftd-as-box? ; represents `(& <ftype>)` from `expand-fp-ftype`
+    (lambda (x)
+      (and (box? x) (ftd? (unbox x)))))
   (set! $ftd-size
     (lambda (x)
       (ftd-size x)))

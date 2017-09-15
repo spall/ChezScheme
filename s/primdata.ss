@@ -1967,6 +1967,7 @@
   ($fptr-unlock! [flags])
   ($fp-type->pred [flags])
   ($ftd? [flags])
+  ($ftd-as-box? [flags])
   ($ftd-size [flags])
   ($ftype-pointer? [flags])
   ($fxaddress [flags unrestricted alloc])
