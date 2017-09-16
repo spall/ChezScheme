@@ -10548,7 +10548,24 @@
                    `(seq
                     ,(fromC %ac0)
                     ,(unsigned->ptr (constant ptr-bits) lvalue))]
-                  [else ($oops who "invalid result type specifier ~s" type)]))))
+                  [else ($oops who "invalid result type specifier ~s" type)])))
+          (define copy-arguments-out-of-frame
+            ;; Just before we tail-call a `Scall->...` function,
+            ;; copy `fp-ftd&` data from the stack to the heap
+            (lambda (types e)
+              (in-context Tail
+                (let f ([types types] [pos 0])
+                  (if (null? types)
+                      e
+                      (nanopass-case (Ltype Type) (car types)
+                        [(fp-ftd& ,ftd)
+                         (%seq
+                          (set! ,(%tc-ref ts) (immediate ,(fix pos)))
+                          (set! ,(%tc-ref td) (immediate ,(fix ($ftd-size ftd))))
+                          (inline ,(make-info-c-simple-call #f (lookup-c-entry Scopy-argument)) ,%c-simple-call)
+                          ,(f (cdr types) (fx+ pos 1)))]
+                        [else
+                         (f (cdr types) (fx+ pos 1))])))))))
           (define build-foreign-call
             (with-output-language (L13 Effect)
               (lambda (info t0 t1* maybe-lvalue new-frame?)
@@ -10628,7 +10645,9 @@
                             ,(save-scheme-state
                                (in %ac0 %ac1)
                                (out %cp %xp %yp %ts %td scheme-args extra-regs))
-                            ,(c-scall fv*
+                            ,(copy-arguments-out-of-frame
+                              arg-type*
+                              (c-scall fv*
                                (nanopass-case (Ltype Type) result-type
                                  [(fp-scheme-object) (lookup-c-entry Scall->ptr)]
                                  [(fp-void) (lookup-c-entry Scall->void)]
@@ -10650,7 +10669,7 @@
                                  [(fp-u32*) (lookup-c-entry Scall->bytevector)]
                                  [(fp-ftd ,ftd) (lookup-c-entry Scall->fptr)]
                                  [(fp-ftd& ,ftd) #f] ; `c-scall` must select a suitable `Scall->indirect...`
-                                 [else ($oops 'compiler-internal "invalid result type specifier ~s" result-type)]))))))))))))
+                                 [else ($oops 'compiler-internal "invalid result type specifier ~s" result-type)])))))))))))))
         (define handle-do-rest
           (lambda (fixed-args offset save-asm-ra?)
             (with-output-language (L13 Effect)

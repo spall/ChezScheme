@@ -2984,23 +2984,6 @@
                              (f (cdr types)
                                (cons (load-int-stack (car types) risp) locs)
                                (fx+ iint 1) ifp (fx+ risp 8) sisp))]))))))
-          (define copy-arguments-out-of-frame
-            ;; Just before we tail-call a `Scall->...` function,
-            ;; copy `fp-ftd&` data from the stack to the heap
-            (lambda (types e)
-              (in-context Tail
-                (let f ([types types] [pos 0])
-                  (if (null? types)
-                      e
-                      (nanopass-case (Ltype Type) (car types)
-                        [(fp-ftd& ,ftd)
-                         (%seq
-                          (set! ,(%tc-ref ts) (immediate ,(fix pos)))
-                          (set! ,(%tc-ref td) (immediate ,(fix ($ftd-size ftd))))
-                          (inline ,(make-info-c-simple-call #f (lookup-c-entry Scopy-argument)) ,%c-simple-call)
-                          ,(f (cdr types) (fx+ pos 1)))]
-                        [else
-                         (f (cdr types) (fx+ pos 1))]))))))
           (lambda (info)
             (let ([conv (info-foreign-conv info)]
                   [arg-type* (info-foreign-arg-type* info)]
@@ -3038,8 +3021,6 @@
                   (reverse locs)
                   (lambda (fv* Scall->result-type)
                     (in-context Tail
-                     (copy-arguments-out-of-frame
-                      arg-type*
                       (%seq
                         ,(if-feature windows
                            (%seq
@@ -3061,5 +3042,5 @@
                              (set! ,%rbx ,(%inline pop))
                              (set! ,%sp ,(%inline + ,%sp (immediate 120)))))
                         (jump (literal ,(make-info-literal #f 'entry Scall->result-type 0))
-                          (,%rbx ,%rbp ,%r12 ,%r13 ,%r14 ,%r15 ,fv* ...))))))))))))))
+                          (,%rbx ,%rbp ,%r12 ,%r13 ,%r14 ,%r15 ,fv* ...)))))))))))))
   )
