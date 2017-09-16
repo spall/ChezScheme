@@ -150,17 +150,12 @@ static void create_c_entry_vector() {
     install_c_entry(CENTRY_Scall_indirect_int32, proc2ptr(S_call_indirect_int32));
     install_c_entry(CENTRY_Scall_indirect_int64, proc2ptr(S_call_indirect_int64));
     install_c_entry(CENTRY_Scall_indirect_copy_three_chars, proc2ptr(S_call_indirect_copy_three_chars));
-    install_c_entry(CENTRY_Scopy_argument, proc2ptr(S_copy_argument));
+    install_c_entry(CENTRY_Scall_indirect_int64_int64, proc2ptr(S_call_indirect_int64_int64));
+    install_c_entry(CENTRY_Scall_indirect_int64_double, proc2ptr(S_call_indirect_int64_double));
+    install_c_entry(CENTRY_Scall_indirect_double_int64, proc2ptr(S_call_indirect_double_int64));
+    install_c_entry(CENTRY_Scall_indirect_double_double, proc2ptr(S_call_indirect_double_double));
     install_c_entry(CENTRY_Scall_indirect_copy, proc2ptr(S_call_indirect_copy));
-
-#define install_S_call_x86_64(t1, t2)         \
-    install_c_entry(CENTRY_Scall_indirect_  ## t1 ## _ ## t2, \
-                    proc2ptr(S_call_indirect_ ## t1 ## _ ## t2));
-
-    install_S_call_x86_64(int64, int64);
-    install_S_call_x86_64(int64, double);
-    install_S_call_x86_64(double, int64);
-    install_S_call_x86_64(double, double);
+    install_c_entry(CENTRY_Scopy_argument, proc2ptr(S_copy_argument));
     
     for (i = 0; i < c_entry_vector_size; i++) {
 #ifndef PTHREADS

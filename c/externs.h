@@ -351,24 +351,25 @@ extern I64 S_call_int64 PROTO((void));
 extern U64 S_call_uns64 PROTO((void));
 extern uptr S_call_fptr PROTO((void));
 
-struct result_three_chars {
-  char c[3];
-};
+struct result_three_chars { char c[3]; };
 extern struct result_three_chars S_call_indirect_copy_three_chars PROTO((void));
+
 extern char S_call_indirect_byte PROTO((void));
 extern short S_call_indirect_short PROTO((void));
 extern I32 S_call_indirect_int32 PROTO((void));
 extern I64 S_call_indirect_int64 PROTO((void));
 
-#define decl_S_call_x86_64(t1, t2, T1, T2)         \
-  struct result_ ## t1 ## _ ## t2 { T1 a; T2 b; }; \
-  struct result_ ## t1 ## _ ## t2 \
-  S_call_indirect_ ## t1 ## _ ## t2 PROTO((void));
+struct result_int64_int64 { I64 a; I64 b; };
+struct result_int64_int64 S_call_indirect_int64_int64 PROTO((void));
 
-decl_S_call_x86_64(int64, int64, I64, I64)
-decl_S_call_x86_64(int64, double, I64, double)
-decl_S_call_x86_64(double, int64, double, I64)
-decl_S_call_x86_64(double, double, double, double)
+struct result_int64_double { I64 a; double b; };
+struct result_int64_double S_call_indirect_int64_double PROTO((void));
+
+struct result_double_int64 { double a; I64 b; };
+struct result_double_int64 S_call_indirect_double_int64 PROTO((void));
+
+struct result_double_double { double a; double b; };
+struct result_double_double S_call_indirect_double_double PROTO((void));
 
 ptr S_call_indirect_copy PROTO((void));
 

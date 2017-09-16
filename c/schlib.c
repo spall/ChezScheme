@@ -365,22 +365,40 @@ struct result_three_chars S_call_indirect_copy_three_chars() {
     return r;
 }
 
-/* On x86_64, returns can be returned in up to two integer
-   registers and up to two floating-point registers */
-#define impl_S_call_x86_64(t1, t2) \
-  struct result_ ## t1 ## _ ## t2 \
-      S_call_indirect_ ## t1 ## _ ## t2() { \
-     ptr tc = get_thread_context(); \
-     iptr len = UNFIX(TD(tc)); \
-     struct result_ ## t1 ## _ ## t2  r = { 0, 0 }; \
-      S_call_indirect_help(tc, &r, len);              \
-     return r; \
-   }
+/* On x86_64, returns can be returned in up to two integer and/or
+   floating-point registers */
 
-impl_S_call_x86_64(int64, int64)
-impl_S_call_x86_64(int64, double)
-impl_S_call_x86_64(double, int64)
-impl_S_call_x86_64(double, double)
+struct result_int64_int64 S_call_indirect_int64_int64() {
+  ptr tc = get_thread_context();
+  iptr len = UNFIX(TD(tc));
+  struct result_int64_int64  r = { 0, 0 };
+  S_call_indirect_help(tc, &r, len);
+  return r;
+}
+
+struct result_int64_double S_call_indirect_int64_double() {
+  ptr tc = get_thread_context();
+  iptr len = UNFIX(TD(tc));
+  struct result_int64_double  r = { 0, 0 };
+  S_call_indirect_help(tc, &r, len);
+  return r;
+}
+
+struct result_double_int64 S_call_indirect_double_int64() {
+  ptr tc = get_thread_context();
+  iptr len = UNFIX(TD(tc));
+  struct result_double_int64  r = { 0, 0 };
+  S_call_indirect_help(tc, &r, len);
+  return r;
+}
+
+struct result_double_double S_call_indirect_double_double() {
+  ptr tc = get_thread_context();
+  iptr len = UNFIX(TD(tc));
+  struct result_double_double  r = { 0, 0 };
+  S_call_indirect_help(tc, &r, len);
+  return r;
+}
 
 ptr S_call_indirect_copy() {
     ptr tc = get_thread_context();
