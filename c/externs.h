@@ -360,6 +360,18 @@ extern short S_call_indirect_short PROTO((void));
 extern I32 S_call_indirect_int32 PROTO((void));
 extern I64 S_call_indirect_int64 PROTO((void));
 
+#define decl_S_call_x86_64(t1, t2, T1, T2)         \
+  struct result_ ## t1 ## _ ## t2 { T1 a; T2 b; }; \
+  struct result_ ## t1 ## _ ## t2 \
+  S_call_indirect_ ## t1 ## _ ## t2 PROTO((void));
+
+decl_S_call_x86_64(int64, int64, I64, I64)
+decl_S_call_x86_64(int64, double, I64, double)
+decl_S_call_x86_64(double, int64, double, I64)
+decl_S_call_x86_64(double, double, double, double)
+
+ptr S_call_indirect_copy PROTO((void));
+
 extern void S_copy_argument PROTO((void));
 
 #ifdef WIN32

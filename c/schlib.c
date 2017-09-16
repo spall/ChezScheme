@@ -317,35 +317,38 @@ uptr S_call_fptr() {
     return (uptr)RECORDINSTIT(AC0(tc),0);
 }
 
+static void S_call_indirect_help(ptr tc, void *r, iptr sz)
+{
+    S_call_help(tc, 1);
+    memcpy(r, RECORDINSTIT(AC0(tc), 0), sz);
+    free(RECORDINSTIT(AC0(tc), 0));
+}
+
 char S_call_indirect_byte() {
     ptr tc = get_thread_context();
     char r;
-    S_call_help(tc, 1);
-    memcpy(&r, RECORDINSTIT(AC0(tc), 0), sizeof(char));
+    S_call_indirect_help(tc, &r, sizeof(r));
     return r;
 }
 
 short S_call_indirect_short() {
     ptr tc = get_thread_context();
     short r;
-    S_call_help(tc, 1);
-    memcpy(&r, RECORDINSTIT(AC0(tc), 0), sizeof(short));
+    S_call_indirect_help(tc, &r, sizeof(r));
     return r;
 }
 
 I32 S_call_indirect_int32() {
     ptr tc = get_thread_context();
     I32 r;
-    S_call_help(tc, 1);
-    memcpy(&r, RECORDINSTIT(AC0(tc), 0), sizeof(I32));
+    S_call_indirect_help(tc, &r, sizeof(r));
     return r;
 }
 
 I64 S_call_indirect_int64() {
     ptr tc = get_thread_context();
     I64 r;
-    S_call_help(tc, 1);
-    memcpy(&r, RECORDINSTIT(AC0(tc), 0), sizeof(I64));
+    S_call_indirect_help(tc, &r, sizeof(r));
     return r;
 }
 
@@ -357,10 +360,34 @@ struct result_three_chars S_call_indirect_copy_three_chars() {
     ptr dest = TS(tc);
     iptr len = UNFIX(TD(tc));
     struct result_three_chars r;
-    S_call_help(tc, 1);
-    memcpy(dest, RECORDINSTIT(AC0(tc), 0), len);
-    memcpy(&r, dest, sizeof(r));
+    S_call_indirect_help(tc, dest, len);
+    memcpy(&r, dest, sizeof(r)); /* will get copied back onto `dest` */
     return r;
+}
+
+/* On x86_64, returns can be returned in up to two integer
+   registers and up to two floating-point registers */
+#define impl_S_call_x86_64(t1, t2) \
+  struct result_ ## t1 ## _ ## t2 \
+      S_call_indirect_ ## t1 ## _ ## t2() { \
+     ptr tc = get_thread_context(); \
+     iptr len = UNFIX(TD(tc)); \
+     struct result_ ## t1 ## _ ## t2  r = { 0, 0 }; \
+      S_call_indirect_help(tc, &r, len);              \
+     return r; \
+   }
+
+impl_S_call_x86_64(int64, int64)
+impl_S_call_x86_64(int64, double)
+impl_S_call_x86_64(double, int64)
+impl_S_call_x86_64(double, double)
+
+ptr S_call_indirect_copy() {
+    ptr tc = get_thread_context();
+    ptr dest = TS(tc);
+    iptr len = UNFIX(TD(tc));
+    S_call_indirect_help(tc, dest, len);
+    return dest;
 }
 
 void S_copy_argument() {

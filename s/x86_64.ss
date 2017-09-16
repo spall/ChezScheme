@@ -2478,13 +2478,17 @@
        [(null? l) 0]
        [(eq? (car l) v) (fx+ 1 (count v (cdr l)))]
        [else (count v (cdr l))]))
-  
+
+    ;; A result is put in registers if it has up to two
+    ;; egithbytes, each 'integer or 'sse
     (define (result-fits-in-registers? result-classes)
       (and result-classes
            (not (memq 'memory result-classes))
-           (<= (count 'integer result-classes) 2)
-           (<= (count 'sse result-classes) 2)))
+           (or (null? (cdr result-classes))
+               (null? (cddr result-classes)))))
 
+    ;; An argument is put in registeres depending on how many
+    ;; registers are left
     (define (pass-here-by-stack? classes iint ints ifp fps)
       (or (memq 'memory classes)
           (fx> (fx+ iint ints) 6)
@@ -2924,7 +2928,7 @@
                                ,(f (cdr types) (fx+ iint 1) ifp (fx+ isp 8)))
                              (f (cdr types) iint ifp isp))]))))))
           (define do-stack
-            (lambda (types)
+            (lambda (types first-arg-is-result-dest?)
              ; risp is where incoming register args are stored
              ; sisp is where incoming stack args are stored
               (if-feature windows
@@ -2939,7 +2943,12 @@
                              [else (load-int-stack (car types) isp)])
                            locs)
                          (fx+ isp 8))))
-                (let f ([types types] [locs '()] [iint 0] [ifp 0] [risp 48] [sisp 176])
+                (let f ([types types]
+                        [locs '()]
+                        [iint (if first-arg-is-result-dest? 1 0)]
+                        [ifp 0]
+                        [risp (+ 48 (if first-arg-is-result-dest? (constant ptr-bytes) 0))]
+                        [sisp 176])
                   (if (null? types)
                       locs
                       (nanopass-case (Ltype Type) (car types)
@@ -2986,67 +2995,66 @@
                                (fx+ iint 1) ifp (fx+ risp 8) sisp))]))))))
           (define (pick-Scall Scall->result-type result-classes)
             (cond
-             [(not result-classes) Scall->result-type]
+             [(not result-classes)
+              ;; Normal case that's not `fp-ftd&`
+              Scall->result-type]
+             
              [(result-fits-in-registers? result-classes)
-              ;; Result will use up to two integer registers and up to
-              ;; two floating-point registers
-              Scall->result-type
-              #;
+              ;; Result will use up to two integer registers. It's ok
+              ;; to return extra values that are zeroed out
               (cond
                [(equal? result-classes '(integer))
-                (lookup-c-entry Scall->indirect-copy-int64)]
+                (lookup-c-entry Scall->indirect-int64-int64)]
                [(equal? result-classes '(sse))
-                (lookup-c-entry Scall->indirect-copy-double)]
+                (lookup-c-entry Scall->indirect-double-double)]
                
                [(equal? result-classes '(integer sse))
-                (lookup-c-entry Scall->indirect-copy-int64-double)]
+                (lookup-c-entry Scall->indirect-int64-double)]
                [(equal? result-classes '(sse integer))
-                (lookup-c-entry Scall->indirect-copy-double-int64)]
+                (lookup-c-entry Scall->indirect-double-int64)]
                [(equal? result-classes '(integer integer))
-                (lookup-c-entry Scall->indirect-copy-int64-int64)]
+                (lookup-c-entry Scall->indirect-int64-int64)]
                [(equal? result-classes '(sse sse))
-                (lookup-c-entry Scall->indirect-copy-double-double)]
-               
-               [(equal? result-classes '(integer sse integer))
-                (lookup-c-entry Scall->indirect-copy-int64-double-int64)]
-               [(equal? result-classes '(sse integer integer))
-                (lookup-c-entry Scall->indirect-copy-double-int64-int64)]
-               [(equal? result-classes '(integer sse sse))
-                (lookup-c-entry Scall->indirect-copy-int64-double-double)]
-               [(equal? result-classes '(sse integer sse))
-                (lookup-c-entry Scall->indirect-copy-double-int64-double)]
-               [(equal? result-classes '(integer integer sse))
-                (lookup-c-entry Scall->indirect-copy-int64-int64-double)]
-               [(equal? result-classes '(sse sse integer))
-                (lookup-c-entry Scall->indirect-copy-double-double-int64)]
-
-               [(equal? result-classes '(integer sse integer see))
-                (lookup-c-entry Scall->indirect-copy-int64-double-int64-double)]
-               [(equal? result-classes '(sse integer integer sse))
-                (lookup-c-entry Scall->indirect-copy-double-int64-int64-double)]
-               [(equal? result-classes '(integer sse sse integer))
-                (lookup-c-entry Scall->indirect-copy-int64-double-double-int64)]
-               [(equal? result-classes '(sse integer sse integer))
-                (lookup-c-entry Scall->indirect-copy-double-int64-double-int64)]
-               [(equal? result-classes '(integer integer sse sse))
-                (lookup-c-entry Scall->indirect-copy-int64-int64-double-double)]
-               [(equal? result-classes '(sse sse integer integer))
-                (lookup-c-entry Scall->indirect-copy-double-double-int64-int64)]
+                (lookup-c-entry Scall->indirect-double-double)]
 
                [else ($oops 'pick-Scall "no case for ~s" result-classes)])]
              [else
-              Scall->result-type
-              #;
+              ;; Caller supplied a destination to copy into:
               (lookup-c-entry Scall->indirect-copy)]))
+          (define (register-result-copy result-type result-classes e)
+            (let ([len (nanopass-case (Ltype Type) result-type
+                         [(fp-ftd& ,ftd) ($ftd-size ftd)])])
+              (cond
+               [(result-fits-in-registers? result-classes)
+                ;; Register size
+                (in-context Tail
+                  (%seq
+                   (set! ,(%tc-ref td) (immediate ,(fix len)))
+                   ,e))]
+               [else
+                ;; Register pinter and size
+                (in-context Tail
+                  (%seq
+                   (set! ,(%tc-ref ts) ,(%mref ,%sp ,(if-feature windows 80 48))) ; destination was the first argument
+                   (set! ,(%tc-ref td) (immediate ,(fix len)))
+                   ,e))])))
           (lambda (info)
             (let ([conv (info-foreign-conv info)]
                   [arg-type* (info-foreign-arg-type* info)]
                   [result-type (info-foreign-result-type info)])
-              (let ([locs (do-stack arg-type*)]
-                    [result-classes (classify-type result-type)])
+              (let* ([result-classes (classify-type result-type)]
+                     [first-arg-is-result-dest? (and result-classes
+                                                     (not (result-fits-in-registers? result-classes)))]
+                     [locs (do-stack arg-type* first-arg-is-result-dest?)])
                 (values
-                  (lambda ()
-                    (%seq
+                 (lambda ()
+                   ((lambda (e)
+                      (if first-arg-is-result-dest?
+                          `(seq
+                            ,e
+                            (set! ,(%mref ,%sp ,(if-feature windows 80 48)) ,(vector-ref (make-vint) 0)))
+                          e))
+                     (%seq
                       ,(if-feature windows
                          (%seq
                            ,(save-arg-regs arg-type*)
@@ -3072,14 +3080,14 @@
                          (%seq 
                            (set! ,%rax ,(%inline get-tc))
                            (set! ,%tc ,%rax))
-                         `(set! ,%tc (literal ,(make-info-literal #f 'entry (lookup-c-entry thread-context) 0))))))
+                         `(set! ,%tc (literal ,(make-info-literal #f 'entry (lookup-c-entry thread-context) 0)))))))
                   (reverse locs)
                   (lambda (fv* Scall->result-type)
                     (in-context Tail
                       ((lambda (e)
-                         e #;(if (result-fits-in-registers? result-classes)
-                             e
-                             (register-result-copy result-type init-stack-offset e)))
+                         (if result-classes
+                             (register-result-copy result-type result-classes e)
+                             e))
                        (%seq
                         ,(if-feature windows
                            (%seq
