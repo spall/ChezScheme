@@ -2409,15 +2409,15 @@
         (define make-vfp (lambda () (vector %Cfparg1 %Cfparg2 %Cfparg3 %Cfparg4 %Cfparg5 %Cfparg6 %Cfparg7 %Cfparg8)))))
 
     (define (align n size)
-      (logand (+ n (fx- size 1) (- size))))
+      (fxlogand (fx+ n (fx- size 1)) (fx- size)))
 
     (define (classify-type type)
       (nanopass-case (Ltype Type) type
         [(fp-ftd& ,ftd) (classify-eightbytes ftd)]
         [else #f]))
 
+    ;; Returns '(memory) or a nonemtpy list of 'integer/'sse
     (define (classify-eightbytes ftd)
-      ;; FIXME: assumes normal alignment
       (define (merge t1 t2)
         (cond
          [(eq? t1 t2) t1]
@@ -2426,52 +2426,34 @@
          [(eq? t1 'memory) 'memory]
          [(eq? t2 'memory) 'memory]
          [else 'integer]))
-      (define (emit-class offset so-far classes)
-        (cond
-         [(zero? offset) classes]
-         [else (cons so-far classes)]))
       (cond
-       [(> ($ftd-size ftd) 32)
-        '(memory)]
-       [(fx= 0 ($ftd-size ftd)) ; not sure this can happen, but just in case
+       [(or (> ($ftd-size ftd) 16) ; more than 2 eightbytes => passed in memory
+            (fx= 0 ($ftd-size ftd)))
         '(memory)]
        [else
-        (let loop ([types ($ftd->types ftd)] [offset 0] [so-far 'no-class])
-          (cond
-           [(null? types)
-            (emit-class offset so-far '())]
-           [else
-            (let ([integer
-                   (lambda (bits)
-                     (let ([bytes (fxsrl bits 3)])
-                       (cond
-                        [(<= (+ (align offset bytes) bytes) 8)
-                         (loop (cdr types) (+ (align offset bytes) bytes) (merge 'integer so-far))]
-                        [else
-                         (emit-class offset so-far (loop (cdr types) bytes 'integer))])))])
-              (let ([type (car types)])
-                (case type
-                  [(double double-float)
-                   (emit-class offset so-far
-                               (loop (cdr types) 8 'sse))]
-                  [(float single-float)
-                   (cond
-                    [(<= offset 4)
-                     (loop (cdr types) (+ (align offset 4) 4) (merge 'sse so-far))]
-                    [else
-                     (emit-class offset so-far (loop (cdr types) 4 'sse))])]
-                  [(short unsigned-short) (integer 16)]
-                  [(int unsigned unsigned-int) (integer 32)]
-                  [(long unsigned-long) (if-feature windows (integer 32) (integer 64))]
-                  [(pointer long-long unsigned-long-long size_t ssize_t ptrdiff_t) (integer 64)]
-                  [(char) (integer 8)]
-                  [(wchar wchar_t) (if-feature windows (integer 16) (integer 32))]
-                  [else
-                   (cond
-                    [(fixnum? type)
-                     (integer types)]
-                    [else
-                     ($oops 'classify-eightbytes "unrecognized ~s" type)])])))]))]))
+        (let ([classes (make-vector (fxsrl (align ($ftd-size ftd) 8) 3) 'no-class)])
+          (let loop ([mbrs ($ftd->members ftd)])
+            (cond
+             [(null? mbrs)
+              (vector->list classes)]
+             [else
+              (let ([kind (caar mbrs)]
+                    [size (cadar mbrs)]
+                    [offset (caddar mbrs)])
+                (cond
+                 [(not (fx= offset (align offset size)))
+                  ;; misaligned
+                  '(memory)]
+                 [else
+                  (let* ([pos (fxsrl offset 3)]
+                         [class (vector-ref classes pos)]
+                         [new-class (merge class (if (eq? kind 'float) 'sse 'integer))])
+                    (cond
+                     [(eq? new-class 'memory)
+                      '(memory)]
+                     [else
+                      (vector-set! classes pos new-class)
+                      (loop (cdr mbrs))]))]))])))]))
 
     (define (count v l)
       (cond
@@ -2480,17 +2462,17 @@
        [else (count v (cdr l))]))
 
     ;; A result is put in registers if it has up to two
-    ;; egithbytes, each 'integer or 'sse
+    ;; eightbytes, each 'integer or 'sse
     (define (result-fits-in-registers? result-classes)
       (and result-classes
-           (not (memq 'memory result-classes))
+           (not (eq? 'memory (car result-classes)))
            (or (null? (cdr result-classes))
                (null? (cddr result-classes)))))
 
     ;; An argument is put in registeres depending on how many
     ;; registers are left
     (define (pass-here-by-stack? classes iint ints ifp fps)
-      (or (memq 'memory classes)
+      (or (eq? 'memory (car classes))
           (fx> (fx+ iint ints) 6)
           (fx> (fx+ ifp fps) 8)))
 

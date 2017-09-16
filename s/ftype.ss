@@ -942,45 +942,46 @@ ftype operators:
   (set! $ftd-size
     (lambda (x)
       (ftd-size x)))
-  (set! $ftd->types
+  (set! $ftd->members
     (lambda (x)
-      ;; Return a list of integers to represent integer/pointer bitwidths,
-      ;; 'short, etc., 'double, 'float, and nested lists to represent unions
-      (cond
-       [(ftd-base? x)
-        (list
-         ;; Get various fixed widths out of the way, otherwise
-         ;; leave the base type:
-         (case (ftd-base-type x)
-           [(integer-8 unsigned-8) 8]
-           [(integer-16 unsigned-16) 16]
-           [(integer-24 unsigned-24) 24]
-           [(integer-32 unsigned-32) 32]
-           [(integer-40 unsigned-40) 40]
-           [(integer-48 unsigned-48) 48]
-           [(integer-56 unsigned-56) 56]
-           [(integer-64 unsigned-64) 64]
-           [else (ftd-base-type x)]))]
-       [(ftd-struct? x) (apply append (map (lambda (fld)
-                                             ($ftd->types (caddr fld)))
-                                           (ftd-struct-field* x)))]
-       [(ftd-union? x) (map $ftd->types (ftd-union-field* x))]
-       [(ftd-array? x) (let ([elem ($ftd->types (ftd-array-ftd x))])
-                         (let loop ([len (ftd-array-length x)])
-                           (cond
-                            [(fx= len 0) '()]
-                            [else (append elem (loop (fx- len 1)))])))]
-       [(ftd-pointer? x) (list 'pointer)]
-       [(ftd-bits? x)
-        (let loop ([fields (ftd-bits-field* x)])
-          (if (null? fields)
-              0
-              (+ (apply
-                  (lambda (id signed? start end)
-                    (- end start))
-                  (car fields))
-                 (loop (cdr fields)))))]
-       [else ($oops '$ftd-types "unsupported type ~s" x)])))
+      ;; Currently used for x86_64 ABI: Returns a list of
+      ;;  (list 'integer/'float size offset)
+      (let loop ([x x] [offset 0] [accum '()])
+        (cond
+         [(ftd-base? x)
+          (cons (list (case (ftd-base-type x)
+                        [(double double-float float single-float)
+                         'float]
+                        [else 'integer])
+                      (ftd-size x)
+                      offset)
+                accum)]
+         [(ftd-struct? x)
+          (let struct-loop ([field* (ftd-struct-field* x)] [accum accum])
+            (cond
+             [(null? field*) accum]
+             [else (let* ([fld (car field*)]
+                          [sub-ftd (caddr fld)]
+                          [sub-offset (cadr fld)])
+                     (struct-loop (cdr field*)
+                                  (loop sub-ftd (+ offset sub-offset) accum)))]))]
+         [(ftd-union? x)
+          (let union-loop ([field* (ftd-union-field* x)] [accum accum])
+            (cond
+             [(null? field*) accum]
+             [else (let* ([fld (car field*)]
+                          [sub-ftd (cdr fld)])
+                     (union-loop (cdr field*)
+                                 (loop sub-ftd offset accum)))]))]
+         [(ftd-array? x)
+          (let ([elem-ftd (ftd-array-ftd x)])
+            (let array-loop ([len (ftd-array-length x)] [offset offset] [accum accum])
+              (cond
+               [(fx= len 0) accum]
+               [else (array-loop (fx- len 1)
+                                 (+ offset (ftd-size elem-ftd))
+                                 (loop elem-ftd offset accum))])))]
+         [else (cons (list 'integer (ftd-size x) offset) accum)]))))
   (set! $expand-fp-ftype ; for foreign-procedure, foreign-callable
     (lambda (who what r ftype)
       (indirect-ftd-pointer

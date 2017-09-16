@@ -1969,7 +1969,7 @@
   ($ftd? [flags])
   ($ftd-as-box? [flags])
   ($ftd-size [flags])
-  ($ftd->types [flags])
+  ($ftd->members [flags])
   ($ftype-pointer? [flags])
   ($fxaddress [flags unrestricted alloc])
   ($fx-? [flags])
