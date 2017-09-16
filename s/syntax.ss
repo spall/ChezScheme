@@ -8812,12 +8812,7 @@
                                     #`((mod x #x100000000000000)
                                        (x)
                                        (unsigned-64)))]
-                                 [else
-                                  (cond
-                                    [($ftd-as-box? type)
-                                     ;; Wrapper creation delayed to allow copy
-                                     #`(($make-fptr '#,(unbox type) x) (x) (#,type))]
-                                    [else #f])])
+                                 [else #f])
                                (with-syntax ([(x) (generate-temporaries #'(*))])
                                  #`(x (x) (#,(datum->syntax #'foreign-callable type))))))
                          type*)]

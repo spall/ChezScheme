@@ -2479,7 +2479,7 @@
        [(eq? (car l) v) (fx+ 1 (count v (cdr l)))]
        [else (count v (cdr l))]))
   
-    (define (fill-result-pointer-from-registers? result-classes)
+    (define (result-fits-in-registers? result-classes)
       (and result-classes
            (not (memq 'memory result-classes))
            (<= (count 'integer result-classes) 2)
@@ -2712,7 +2712,7 @@
                    [arg-type* (info-foreign-arg-type* info)]
                    [result-type (info-foreign-result-type info)]
                    [result-classes (classify-type result-type)]
-                   [fill-result-here? (fill-result-pointer-from-registers? result-classes)])
+                   [fill-result-here? (result-fits-in-registers? result-classes)])
               (with-values (do-args (if fill-result-here? (cdr arg-type*) arg-type*) (make-vint) (make-vfp))
                 (lambda (frame-size nfp locs live*)
                   (with-values (add-save-fill-target fill-result-here? frame-size locs)
@@ -2984,11 +2984,66 @@
                              (f (cdr types)
                                (cons (load-int-stack (car types) risp) locs)
                                (fx+ iint 1) ifp (fx+ risp 8) sisp))]))))))
+          (define (pick-Scall Scall->result-type result-classes)
+            (cond
+             [(not result-classes) Scall->result-type]
+             [(result-fits-in-registers? result-classes)
+              ;; Result will use up to two integer registers and up to
+              ;; two floating-point registers
+              Scall->result-type
+              #;
+              (cond
+               [(equal? result-classes '(integer))
+                (lookup-c-entry Scall->indirect-copy-int64)]
+               [(equal? result-classes '(sse))
+                (lookup-c-entry Scall->indirect-copy-double)]
+               
+               [(equal? result-classes '(integer sse))
+                (lookup-c-entry Scall->indirect-copy-int64-double)]
+               [(equal? result-classes '(sse integer))
+                (lookup-c-entry Scall->indirect-copy-double-int64)]
+               [(equal? result-classes '(integer integer))
+                (lookup-c-entry Scall->indirect-copy-int64-int64)]
+               [(equal? result-classes '(sse sse))
+                (lookup-c-entry Scall->indirect-copy-double-double)]
+               
+               [(equal? result-classes '(integer sse integer))
+                (lookup-c-entry Scall->indirect-copy-int64-double-int64)]
+               [(equal? result-classes '(sse integer integer))
+                (lookup-c-entry Scall->indirect-copy-double-int64-int64)]
+               [(equal? result-classes '(integer sse sse))
+                (lookup-c-entry Scall->indirect-copy-int64-double-double)]
+               [(equal? result-classes '(sse integer sse))
+                (lookup-c-entry Scall->indirect-copy-double-int64-double)]
+               [(equal? result-classes '(integer integer sse))
+                (lookup-c-entry Scall->indirect-copy-int64-int64-double)]
+               [(equal? result-classes '(sse sse integer))
+                (lookup-c-entry Scall->indirect-copy-double-double-int64)]
+
+               [(equal? result-classes '(integer sse integer see))
+                (lookup-c-entry Scall->indirect-copy-int64-double-int64-double)]
+               [(equal? result-classes '(sse integer integer sse))
+                (lookup-c-entry Scall->indirect-copy-double-int64-int64-double)]
+               [(equal? result-classes '(integer sse sse integer))
+                (lookup-c-entry Scall->indirect-copy-int64-double-double-int64)]
+               [(equal? result-classes '(sse integer sse integer))
+                (lookup-c-entry Scall->indirect-copy-double-int64-double-int64)]
+               [(equal? result-classes '(integer integer sse sse))
+                (lookup-c-entry Scall->indirect-copy-int64-int64-double-double)]
+               [(equal? result-classes '(sse sse integer integer))
+                (lookup-c-entry Scall->indirect-copy-double-double-int64-int64)]
+
+               [else ($oops 'pick-Scall "no case for ~s" result-classes)])]
+             [else
+              Scall->result-type
+              #;
+              (lookup-c-entry Scall->indirect-copy)]))
           (lambda (info)
             (let ([conv (info-foreign-conv info)]
                   [arg-type* (info-foreign-arg-type* info)]
                   [result-type (info-foreign-result-type info)])
-              (let ([locs (do-stack arg-type*)])
+              (let ([locs (do-stack arg-type*)]
+                    [result-classes (classify-type result-type)])
                 (values
                   (lambda ()
                     (%seq
@@ -3021,7 +3076,11 @@
                   (reverse locs)
                   (lambda (fv* Scall->result-type)
                     (in-context Tail
-                      (%seq
+                      ((lambda (e)
+                         e #;(if (result-fits-in-registers? result-classes)
+                             e
+                             (register-result-copy result-type init-stack-offset e)))
+                       (%seq
                         ,(if-feature windows
                            (%seq
                              (set! ,%sp ,(%inline + ,%sp (immediate 8)))
@@ -3041,6 +3100,6 @@
                              (set! ,%rbp ,(%inline pop))
                              (set! ,%rbx ,(%inline pop))
                              (set! ,%sp ,(%inline + ,%sp (immediate 120)))))
-                        (jump (literal ,(make-info-literal #f 'entry Scall->result-type 0))
-                          (,%rbx ,%rbp ,%r12 ,%r13 ,%r14 ,%r15 ,fv* ...)))))))))))))
+                        (jump (literal ,(make-info-literal #f 'entry (pick-Scall Scall->result-type result-classes) 0))
+                          (,%rbx ,%rbp ,%r12 ,%r13 ,%r14 ,%r15 ,fv* ...))))))))))))))
   )

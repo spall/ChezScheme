@@ -365,24 +365,13 @@ struct result_three_chars S_call_indirect_copy_three_chars() {
 
 void S_copy_argument() {
   ptr tc = get_thread_context();
-  ptr x, x2;
-  iptr i = UNFIX(TS(tc)) + 1;
-  iptr sz = UNFIX(TD(tc));
+  ptr x = AC0(tc), x2;
+  iptr sz = UNFIX(TS(tc));
 
-  if (i <= asm_arg_reg_cnt)
-    x = REGARG(tc, i);
-  else
-    x = FRAME(tc, i - asm_arg_reg_cnt);
-
-  x = (ptr)S_integer_value("copy-argument", x);
   x2 = malloc(sz);
   memcpy(x2, x, sz);
-  x2 = Sinteger((iptr)x2);
-  
-  if (i <= asm_arg_reg_cnt)
-    REGARG(tc, i) = x2;
-  else
-    FRAME(tc, i - asm_arg_reg_cnt) = x2;
+
+  AC0(tc) = x2;
 }
 
 /* cchain = ((jb . co) ...) */
