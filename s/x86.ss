@@ -2517,6 +2517,23 @@
                        (do-stack (cdr types)
                          (cons (load-stack (car types) n) locs)
                          (fx+ n 4)))]))))
+          (define copy-arguments-out-of-frame
+            ;; Just before we tail-call a `Scall->...` function,
+            ;; copy `fp-ftd&` data from the stack to the heap
+            (lambda (types e)
+              (in-context Tail
+                (let f ([types types] [pos 0])
+                  (if (null? types)
+                      e
+                      (nanopass-case (Ltype Type) (car types)
+                        [(fp-ftd& ,ftd)
+                         (%seq
+                          (set! ,(%tc-ref ts) (immediate ,(fix pos)))
+                          (set! ,(%tc-ref td) (immediate ,(fix ($ftd-size ftd))))
+                          (inline ,(make-info-c-simple-call #f (lookup-c-entry Scopy-argument)) ,%c-simple-call)
+                          ,(f (cdr types) (fx+ pos 1)))]
+                        [else
+                         (f (cdr types) (fx+ pos 1))]))))))
         (define (register-result-copy result-type stack-offset e)
           (let ([len (nanopass-case (Ltype Type) result-type
                        [(fp-ftd& ,ftd) ($ftd-size ftd)])])
@@ -2569,6 +2586,8 @@
                   (reverse locs)
                   (lambda (fv* Scall->result-type)
                     (in-context Tail
+                     (copy-arguments-out-of-frame
+                      arg-type*
                       ((lambda (e)
                          (if (callee-expects-result-pointer? result-type)
                              (register-result-copy result-type init-stack-offset e)
@@ -2599,4 +2618,4 @@
                                         e))
                                   e))
                             `(jump (literal ,(make-info-literal #f 'entry (pick-Scall Scall->result-type result-type) 0))
-                               (,%ebx ,%edi ,%esi ,%ebp ,fv* ...)))))))))))))))))
+                               (,%ebx ,%edi ,%esi ,%ebp ,fv* ...))))))))))))))))))

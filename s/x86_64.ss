@@ -2985,34 +2985,22 @@
                                (cons (load-int-stack (car types) risp) locs)
                                (fx+ iint 1) ifp (fx+ risp 8) sisp))]))))))
           (define copy-arguments-out-of-frame
-            ;; Just before we tail-call as `Scall->...` function, for
-            ;; any pointer arguments into the register-copy portion of
-            ;; the stack, copy the data to a new place.
+            ;; Just before we tail-call a `Scall->...` function,
+            ;; copy `fp-ftd&` data from the stack to the heap
             (lambda (types e)
               (in-context Tail
-                (let f ([types types] [pos 0] [iint 0] [ifp 0])
+                (let f ([types types] [pos 0])
                   (if (null? types)
                       e
                       (nanopass-case (Ltype Type) (car types)
-                        [(fp-double-float)
-                         (f (cdr types) (fx+ pos 1) iint (fx+ ifp 1))]
-                        [(fp-single-float)
-                         (f (cdr types) (fx+ pos 1) iint (fx+ ifp 1))]
                         [(fp-ftd& ,ftd)
-                         (let* ([classes (classify-eightbytes ftd)]
-                                [ints (count 'integer classes)]
-                                [fps (count 'sse classes)])
-                           (cond
-                            [(pass-here-by-stack? classes iint ints ifp fps)
-                             (f (cdr types) (fx+ pos 1) iint ifp)]
-                            [else
-                             (%seq
-                              (set! ,(%tc-ref ts) (immediate ,(fix pos)))
-                              (set! ,(%tc-ref td) (immediate ,(fix ($ftd-size ftd))))
-                              (inline ,(make-info-c-simple-call #f (lookup-c-entry Scopy-argument)) ,%c-simple-call)
-                              ,(f (cdr types) (fx+ pos 1) (fx+ iint ints) (fx+ ifp fps)))]))]
+                         (%seq
+                          (set! ,(%tc-ref ts) (immediate ,(fix pos)))
+                          (set! ,(%tc-ref td) (immediate ,(fix ($ftd-size ftd))))
+                          (inline ,(make-info-c-simple-call #f (lookup-c-entry Scopy-argument)) ,%c-simple-call)
+                          ,(f (cdr types) (fx+ pos 1)))]
                         [else
-                         (f (cdr types) (fx+ pos 1) (fx+ iint 1) ifp)]))))))
+                         (f (cdr types) (fx+ pos 1))]))))))
           (lambda (info)
             (let ([conv (info-foreign-conv info)]
                   [arg-type* (info-foreign-arg-type* info)]

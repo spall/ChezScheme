@@ -8815,34 +8815,8 @@
                                  [else
                                   (cond
                                     [($ftd-as-box? type)
-                                     (letrec ([generate-copy
-                                               (lambda (dest src count offset)
-                                                 (cond
-                                                   [(fx= count 0) '()]
-                                                   [else
-                                                    (let* ([size (case count
-                                                                   [(1) 1]
-                                                                   [(2 3) 2]
-                                                                   [else 4])]
-                                                           [type (datum->syntax
-                                                                  #'foreign-callable
-                                                                  (case size
-                                                                    [(1) 'unsigned-8]
-                                                                    [(2) 'unsigned-16]
-                                                                    [(4) 'unsigned-32]))])
-                                                      (cons
-                                                       #`(foreign-set! '#,type #,dest #,offset
-                                                                       (foreign-ref '#,type #,src #,offset))
-                                                       (generate-copy dest src (fx- count size) (fx+ offset size))))]))])
-                                       (let ([ftd (unbox type)])
-                                         #`(;; Make a copy that doesn't reside on the stack:
-                                            (let ([copy (foreign-alloc #,($ftd-size ftd))]
-                                                  [orig x])
-                                              ;; Would some form of `memcpy` be better here?
-                                              #,@(generate-copy #'copy #'orig ($ftd-size ftd) 0)
-                                              ($make-fptr '#,ftd copy))
-                                            (x)
-                                            (#,type))))]
+                                     ;; Wrapper creation delayed to allow copy
+                                     #`(($make-fptr '#,(unbox type) x) (x) (#,type))]
                                     [else #f])])
                                (with-syntax ([(x) (generate-temporaries #'(*))])
                                  #`(x (x) (#,(datum->syntax #'foreign-callable type))))))
