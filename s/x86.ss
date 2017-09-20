@@ -733,6 +733,9 @@
   (define-instruction value (fstpl)
     [(op (z mem)) `(set! ,(make-live-info) ,z (asm ,info ,asm-fstpl))])
 
+  (define-instruction value (fstps)
+    [(op (z mem)) `(set! ,(make-live-info) ,z (asm ,info ,asm-fstps))])
+
   (define-instruction effect (load-single->double load-double->single)
     [(op (x ur) (y ur) (z imm32))
      `(asm ,info ,(asm-fl-cvt op (info-loadfl-flreg info)) ,x ,y ,z)])
@@ -907,7 +910,7 @@
                      asm-pop asm-shiftop asm-sll asm-logand asm-lognot
                      asm-logtest asm-fl-relop asm-relop asm-push asm-indirect-jump asm-literal-jump
                      asm-direct-jump asm-return-address asm-jump asm-conditional-jump asm-data-label asm-rp-header
-                     asm-lea1 asm-lea2 asm-indirect-call asm-fstpl asm-condition-code
+                     asm-lea1 asm-lea2 asm-indirect-call asm-fstpl asm-fstps asm-condition-code
                      asm-fl-cvt asm-fl-store asm-fl-load asm-flt asm-trunc asm-div
                      asm-exchange asm-pause asm-locked-incr asm-locked-decr
                      asm-flop-2 asm-flsqrt asm-c-simple-call
@@ -1077,6 +1080,7 @@
   ; coprocessor ops required to handle calling conventions
   (define-op fldl  float-op2 #b101 #b000) ; double memory push => ST[0]
   (define-op fstpl float-op2 #b101 #b011) ; ST[0] => double memory, pop
+  (define-op fstps float-op2 #b001 #b011) ; ST[0] => single memory, pop
 
   ; SSE2 instructions (pulled from x86_64macros.ss)
   (define-op sse.addsd     sse-op1 #xF2 #x58)
@@ -1628,6 +1632,11 @@
     (lambda (code* dest)
       (Trivit (dest)
         (emit fstpl dest code*))))
+
+  (define asm-fstps
+    (lambda (code* dest)
+      (Trivit (dest)
+        (emit fstps dest code*))))
 
   (define asm-fl-cvt
     (lambda (op flreg)
@@ -2272,13 +2281,20 @@
                                                               ,%load ,x ,%zero (immediate ,x-offset)))
                           ,(loop (fx+ offset 4) (fx+ x-offset 4) (fx- len 4)))]
                        [(>= len 2)
-                        `(seq
-                          (set! ,(%mref ,%sp ,offset) (inline ,(make-info-load 'integer-16 #f)
-                                                              ,%load ,x ,%zero (immediate ,x-offset)))
+                        (%seq
+                          (set! ,%eax (inline ,(make-info-load 'integer-16 #f)
+                                              ,%load ,x ,%zero (immediate ,x-offset)))
+                          (inline ,(make-info-load 'integer-16 #f)
+                                  ,%store ,%sp ,%zero (immediate ,offset)
+                                  ,%eax)
                           ,(loop (fx+ offset 2) (fx+ x-offset 2) (fx- len 2)))]
                        [else
-                        `(set! ,(%mref ,%sp ,offset) (inline ,(make-info-load 'integer-8 #f)
-                                                             ,%load ,x ,%zero (immediate ,x-offset)))]))))]
+                        (%seq
+                         (set! ,%eax (inline ,(make-info-load 'integer-8 #f)
+                                             ,%load ,x ,%zero (immediate ,x-offset)))
+                         (inline ,(make-info-load 'integer-8 #f)
+                                 ,%store ,%sp ,%zero (immediate ,offset)
+                                 ,%eax))]))))]
                [do-stack
                 (lambda (types locs n result-type)
                   (if (null? types)
@@ -2380,8 +2396,9 @@
                              [else `(inline ,(make-info-kill*-live* (reg-list %eax %edx) '()) ,%c-call ,t0)])])
                       (cond
                        [(fill-result-pointer-from-registers? result-type)
-                        (let ([size (nanopass-case (Ltype Type) result-type
-                                      [(fp-ftd& ,ftd) ($ftd-size ftd)])])
+                        (let* ([ftd (nanopass-case (Ltype Type) result-type
+                                      [(fp-ftd& ,ftd) ftd])]
+                               [size ($ftd-size ftd)])
                           (%seq
                            ,call
                            (set! ,%ecx ,(%mref ,%sp ,(fx- frame-size (constant ptr-bytes))))
@@ -2393,11 +2410,23 @@
                                `(inline ,(make-info-load 'integer-16 #f) ,%store
                                         ,%ecx ,%zero (immediate ,0) ,%eax)]
                               [(4)
-                               `(set! ,(%mref ,%ecx 0) ,%eax)]
+                               (cond
+                                [(equal? '((float 4 0)) ($ftd->members ftd))
+                                 ;; Treat a compound containing just a `float` the same as
+                                 ;; `float`:
+                                 `(set! ,(%mref ,%ecx 0) ,(%inline fstps))]
+                                [else
+                                 `(set! ,(%mref ,%ecx 0) ,%eax)])]
                               [(8)
-                               `(seq
-                                 (set! ,(%mref ,%ecx 0) ,%eax)
-                                 (set! ,(%mref ,%ecx 4) ,%edx))])))]
+                               (cond
+                                [(equal? '((float 8 0)) ($ftd->members ftd))
+                                 ;; Treat a compound containing just a `double` the same as
+                                 ;; `double`:
+                                 `(set! ,(%mref ,%ecx 0) ,(%inline fstpl))]
+                                [else
+                                 `(seq
+                                   (set! ,(%mref ,%ecx 0) ,%eax)
+                                   (set! ,(%mref ,%ecx 4) ,%edx))])])))]
                        [else call])))
                   (nanopass-case (Ltype Type) result-type
                     [(fp-double-float)
@@ -2533,8 +2562,18 @@
             [(fp-ftd& ,ftd) (case ($ftd-size ftd)
                               [(1) (lookup-c-entry Scall->indirect-byte)]
                               [(2) (lookup-c-entry Scall->indirect-short)]
-                              [(4) (lookup-c-entry Scall->indirect-int32)]
-                              [(8) (lookup-c-entry Scall->indirect-int64)]
+                              [(4)
+                               (cond
+                                [(equal? '((float 4 0)) ($ftd->members ftd))
+                                 (lookup-c-entry Scall->indirect-float)]
+                                [else
+                                 (lookup-c-entry Scall->indirect-int32)])]
+                              [(8)
+                               (cond
+                                [(equal? '((float 8 0)) ($ftd->members ftd))
+                                 (lookup-c-entry Scall->indirect-double)]
+                                [else
+                                 (lookup-c-entry Scall->indirect-int64)])]
                               [else (lookup-c-entry Scall->indirect-copy-three-chars)])]
             [else Scall->result-type]))
         (lambda (info)

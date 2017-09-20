@@ -358,6 +358,8 @@ extern char S_call_indirect_byte PROTO((void));
 extern short S_call_indirect_short PROTO((void));
 extern I32 S_call_indirect_int32 PROTO((void));
 extern I64 S_call_indirect_int64 PROTO((void));
+extern float S_call_indirect_float PROTO((void));
+extern double S_call_indirect_double PROTO((void));
 
 struct result_int64_int64 { I64 a; I64 b; };
 struct result_int64_int64 S_call_indirect_sized_int64_int64 PROTO((void));

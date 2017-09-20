@@ -26,44 +26,95 @@ typedef long long i64;
 # define EXPORT
 #endif
 
+/* To help make sure that argument and result handling doens't
+   read or write too far, try to provide functions that allocate
+   a structure at the end of a memory page (where the next page is
+   likely to be unmapped) */
+#if defined(__linux__) || (defined(__APPLE__) && defined(__MACH__))
+# include <stdlib.h>
+# include <sys/mman.h>
+# include <unistd.h>
+# include <inttypes.h>
 
-#define GEN_2(t1, t2, v1, v2)                  \
-  struct f4_ ## t1 ## _ ## t2 { t1 x; t2 y; };              \
-  EXPORT struct f4_ ## t1 ## _ ## t2 f4_get_ ## t1 ## _ ## t2 () { \
-    struct f4_ ## t1 ## _ ## t2 r = { v1, v2 };             \
-    return r;                                               \
+EXPORT void *malloc_at_boundary(int sz)
+{
+  intptr_t alloc_size = getpagesize();
+  char *p;
+  p = mmap(NULL, alloc_size, PROT_READ | PROT_WRITE, MAP_ANON | MAP_PRIVATE, -1, 0);
+  return p + alloc_size - sz;
+}
+
+EXPORT void free_at_boundary(void *p)
+{
+  intptr_t alloc_size = getpagesize();
+  munmap((void *)(((intptr_t)p) & ~(alloc_size-1)), alloc_size);
+}
+#else
+EXPORT void *malloc_at_boundary(int sz)
+{
+  return malloc(sz);
+}
+ 
+EXPORT void free_at_boundary(void *p)
+{
+  free(p);
+}
+#endif
+
+#define GEN(ts, init, sum)                                              \
+  EXPORT ts f4_get_ ## ts () {                                          \
+    ts r = init;                                                        \
+    return r;                                                           \
   }                                                                     \
-  EXPORT double f4_sum_ ## t1 ## _ ## t2 (struct f4_ ## t1 ## _ ## t2 v) {     \
-    return (double)v.x + (double)v.y;                                   \
+  EXPORT double f4_sum_ ## ts (ts v) {                                  \
+    return sum(v);                                                      \
   }                                                                     \
-  EXPORT double f4_sum_pre_double_ ## t1 ## _ ## t2 (double v0, struct f4_ ## t1 ## _ ## t2 v) { \
-    return v0 + (double)v.x + (double)v.y;                              \
+  EXPORT double f4_sum_pre_double_ ## ts (double v0, ts v) {            \
+    return v0 + sum(v);                                                 \
   }                                                                     \
-  EXPORT double f4_sum_ ## t1 ## _ ## t2 ## _post_double (struct f4_ ## t1 ## _ ## t2 v, double v0) { \
-    return v0 + (double)v.x + (double)v.y;                              \
+  EXPORT double f4_sum_ ## ts ## _post_double (ts v, double v0) {       \
+    return v0 + sum(v);                                                 \
   }                                                                     \
-  EXPORT double f4_sum_pre_int_ ## t1 ## _ ## t2 (int v0, struct f4_ ## t1 ## _ ## t2 v) { \
-    return (double)v0 + (double)v.x + (double)v.y;                      \
+  EXPORT double f4_sum_pre_int_ ## ts (int v0, ts v) {                  \
+    return (double)v0 + sum(v);                                         \
   }                                                                     \
-  EXPORT double f4_sum_ ## t1 ## _ ## t2 ## _post_int (struct f4_ ## t1 ## _ ## t2 v, int v0) { \
-    return (double)v0 + (double)v.x + (double)v.y;                      \
+  EXPORT double f4_sum_ ## ts ## _post_int (ts v, int v0) {             \
+    return (double)v0 + sum(v);                                         \
   }                                                                     \
-  EXPORT double f4_cb_send_ ## t1 ## _ ## t2 (double (*cb)(struct f4_ ## t1 ## _ ## t2)) { \
-    struct f4_ ## t1 ## _ ## t2 r = { v1, v2 };                         \
+  EXPORT double f4_cb_send_ ## ts (double (*cb)(ts)) {                  \
+    ts r = init;                                                        \
     return cb(r) + 1.0;                                                 \
-    }                                                                   \
-  EXPORT double f4_cb_send_pre_int_ ## t1 ## _ ## t2 (double (*cb)(int, struct f4_ ## t1 ## _ ## t2)) { \
-    struct f4_ ## t1 ## _ ## t2 r = { v1, v2 };                         \
+  }                                                                     \
+  EXPORT double f4_cb_send_pre_int_ ## ts (double (*cb)(int, ts)) {     \
+    ts r = init;                                                        \
     return cb(8, r) + 1.0;                                              \
-    }                                                                   \
-  EXPORT double f4_cb_send_pre_double_ ## t1 ## _ ## t2 (double (*cb)(double, struct f4_ ## t1 ## _ ## t2)) { \
-    struct f4_ ## t1 ## _ ## t2 r = { v1, v2 };                         \
+  }                                                                     \
+  EXPORT double f4_cb_send_pre_double_ ## ts (double (*cb)(double, ts)) { \
+    ts r = init;                                                        \
     return cb(8.25, r) + 1.0;                                           \
-    }                                                                   \
-  EXPORT double f4_sum_cb_ ## t1 ## _ ## t2 (struct f4_ ## t1 ## _ ## t2 (*cb)()) { \
-    struct f4_ ## t1 ## _ ## t2 v = cb();                               \
+  }                                                                     \
+  EXPORT double f4_sum_cb_ ## ts (ts (*cb)()) {                         \
+    ts v = cb();                                                        \
+    return sum(v);                                                      \
+  }
+
+/* For any sane ABI, a struct containing just a primitive type
+   is the same as just the primitive type */
+#define TO_DOUBLE(x) ((double)(x))
+GEN(i8, 11, TO_DOUBLE)
+GEN(short, 22, TO_DOUBLE)
+GEN(long, 33, TO_DOUBLE)
+GEN(int, 44, TO_DOUBLE)
+GEN(float, 55.0, TO_DOUBLE)
+GEN(double, 66.0, TO_DOUBLE)
+
+#define GEN_2(t1, t2, v1, v2)                                           \
+  typedef struct t1 ## _ ## t2 { t1 x; t2 y; } t1 ## _ ## t2;           \
+  static double _f4_sum_ ## t1 ## _ ## t2 (t1 ## _ ## t2 v) {           \
     return (double)v.x + (double)v.y;                                   \
-  }                                                                     
+  }                                                                     \
+  static t1 ## _ ## t2 init_ ## t1 ## _ ## t2 = { v1, v2 };             \
+  GEN(t1 ## _ ## t2, init_ ## t1 ## _ ## t2, _f4_sum_ ## t1 ## _ ## t2)
 
 #define GEN_2_SET(t, x)                         \
   GEN_2(t, i8, 1+x, 10)                         \
@@ -84,42 +135,12 @@ GEN_2(float, float, 4.5, 40.5)
 GEN_2(double, double, 4.25, 40.25)
 
 #define GEN_3(t1, t2, t3, v1, v2, v3)                                   \
-  struct f4_ ## t1 ## _ ## t2 ## _ ## t3{ t1 x; t2 y; t3 z; };          \
-  EXPORT struct f4_ ## t1 ## _ ## t2 ## _ ## t3 f4_get_ ## t1 ## _ ## t2 ## _ ## t3 () { \
-    struct f4_ ## t1 ## _ ## t2 ## _ ## t3 r = { v1, v2, v3 };          \
-    return r;                                                           \
-  }                                                                     \
-  EXPORT double f4_sum_ ## t1 ## _ ## t2 ## _ ## t3 (struct f4_ ## t1 ## _ ## t2 ## _ ## t3 v) { \
+  typedef struct t1 ## _ ## t2 ## _ ## t3 { t1 x; t2 y; t3 z; } t1 ## _ ## t2 ## _ ## t3; \
+  static double _f4_sum_ ## t1 ## _ ## t2 ## _ ## t3 (t1 ## _ ## t2 ## _ ## t3 v) { \
     return (double)v.x + (double)v.y + (double)v.z;                     \
   }                                                                     \
-  EXPORT double f4_sum_pre_double_ ## t1 ## _ ## t2 ## _ ## t3 (double v0, struct f4_ ## t1 ## _ ## t2 ## _ ## t3 v) { \
-    return v0 + (double)v.x + (double)v.y + (double)v.z;                \
-  }                                                                     \
-  EXPORT double f4_sum_ ## t1 ## _ ## t2 ## _ ## t3 ## _post_double (struct f4_ ## t1 ## _ ## t2 ## _ ## t3 v, double v0) { \
-    return v0 + (double)v.x + (double)v.y + (double)v.z;                \
-  }                                                                     \
-  EXPORT double f4_sum_pre_int_ ## t1 ## _ ## t2 ## _ ## t3 (int v0, struct f4_ ## t1 ## _ ## t2 ## _ ## t3 v) { \
-    return (double)v0 + (double)v.x + (double)v.y + (double)v.z;        \
-  }                                                                     \
-  EXPORT double f4_sum_ ## t1 ## _ ## t2 ## _ ## t3 ## _post_int (struct f4_ ## t1 ## _ ## t2 ## _ ## t3 v, int v0) { \
-    return (double)v0 + (double)v.x + (double)v.y + (double)v.z;        \
-  }                                                                     \
-  EXPORT double f4_cb_send_ ## t1 ## _ ## t2 ## _ ## t3 (double (*cb)(struct f4_ ## t1 ## _ ## t2 ## _ ## t3)) { \
-    struct f4_ ## t1 ## _ ## t2 ## _ ## t3 r = { v1, v2, v3 };          \
-    return cb(r) + 1.0;                                                 \
-    }                                                                   \
-  EXPORT double f4_cb_send_pre_int_ ## t1 ## _ ## t2 ## _ ## t3 (double (*cb)(int, struct f4_ ## t1 ## _ ## t2 ## _ ## t3)) { \
-    struct f4_ ## t1 ## _ ## t2 ## _ ## t3 r = { v1, v2, v3 };          \
-    return cb(8, r) + 1.0;                                              \
-    }                                                                   \
-  EXPORT double f4_cb_send_pre_double_ ## t1 ## _ ## t2 ## _ ## t3 (double (*cb)(double, struct f4_ ## t1 ## _ ## t2 ## _ ## t3)) { \
-    struct f4_ ## t1 ## _ ## t2 ## _ ## t3 r = { v1, v2, v3 };          \
-    return cb(8.25, r) + 1.0;                                           \
-    }                                                                   \
-  EXPORT double f4_sum_cb_ ## t1 ## _ ## t2 ## _ ## t3 (struct f4_ ## t1 ## _ ## t2 ## _ ## t3 (*cb)()) { \
-    struct f4_ ## t1 ## _ ## t2 ## _ ## t3 v = cb();                    \
-    return (double)v.x + (double)v.y + (double)v.z;                     \
-  }
+  static t1 ## _ ## t2 ## _ ## t3 init_ ## t1 ## _ ## t2 ## _ ## t3 = { v1, v2, v3 }; \
+  GEN(t1 ## _ ## t2 ## _ ## t3, init_ ## t1 ## _ ## t2 ## _ ## t3, _f4_sum_ ## t1 ## _ ## t2 ## _ ## t3)
 
 #define GEN_3_SET(t, x)                           \
   GEN_3(t, i8, int, 1+x, 10, 100)                 \
@@ -135,6 +156,22 @@ GEN_3_SET(int, 0)
 GEN_3_SET(float, 0.5)
 GEN_3_SET(double, 0.25)
 
+GEN_3(i8, i8, i8, 4, 38, 127)
+GEN_3(short, short, short, 4, 39, 399)
 GEN_3(int, int, int, 4, 40, 400)
 GEN_3(float, float, float, 4.5, 40.5, 400.5)
 GEN_3(double, double, double, 4.25, 40.25, 400.25)
+
+typedef struct i8_i8_i8_i8_i8 { i8 x, y, z, w, q; } i8_i8_i8_i8_i8;
+static double _f4_sum_i8_i8_i8_i8_i8 (i8_i8_i8_i8_i8 v) {
+  return (double)v.x + (double)v.y + (double)v.z + (double)v.w + (double)v.q;
+}
+static struct i8_i8_i8_i8_i8 init_i8_i8_i8_i8_i8 = { 1, 2, 3, 4, 5 };
+GEN(i8_i8_i8_i8_i8, init_i8_i8_i8_i8_i8, _f4_sum_i8_i8_i8_i8_i8)
+
+typedef struct i8_i8_i8_i8_i8_i8_i8 { i8 x, y, z, w, q, r, s; } i8_i8_i8_i8_i8_i8_i8;
+static double _f4_sum_i8_i8_i8_i8_i8_i8_i8 (struct i8_i8_i8_i8_i8_i8_i8 v) {
+  return (double)v.x + (double)v.y + (double)v.z + (double)v.w + (double)v.q + (double)v.r + (double)v.s;
+}
+static struct i8_i8_i8_i8_i8_i8_i8 init_i8_i8_i8_i8_i8_i8_i8 = { 1, 2, 3, 4, 5, 6, 7 };
+GEN(i8_i8_i8_i8_i8_i8_i8, init_i8_i8_i8_i8_i8_i8_i8, _f4_sum_i8_i8_i8_i8_i8_i8_i8)

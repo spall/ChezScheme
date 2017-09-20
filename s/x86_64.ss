@@ -2545,20 +2545,55 @@
                           `(set! ,(%mref ,%sp ,offset) (inline ,(make-info-load 'integer-8 #f)
                                                                ,%load ,x ,%zero (immediate ,x-offset)))]))))]
                  [load-content-regs
-                  (lambda (classes iint ifp vint vfp)
+                  (lambda (classes size iint ifp vint vfp)
                     (lambda (x) ; requires var
-                      (let loop ([iint iint] [ifp ifp] [classes classes] [x-offset 0])
+                      (let loop ([size size] [iint iint] [ifp ifp] [classes classes] [x-offset 0])
                         (cond
                          [(null? classes) `(nop)]
                          [(eq? 'sse (car classes))
-                          `(seq
-                            (inline ,(make-info-loadfl (vector-ref vfp ifp)) ,%load-double ,x ,%zero (immediate ,x-offset))
-                            ,(loop iint (fx+ ifp 1) (cdr classes) (fx+ x-offset 8)))]
-                         [else
+                          (cond
+                           [(fx= size 4)
+                            ;; Must be the last element
+                            `(inline ,(make-info-loadfl (vector-ref vfp ifp)) ,%load-single ,x ,%zero (immediate ,x-offset))]
+                           [else
+                            `(seq
+                              (inline ,(make-info-loadfl (vector-ref vfp ifp)) ,%load-double ,x ,%zero (immediate ,x-offset))
+                              ,(loop (fx- size 8) iint (fx+ ifp 1) (cdr classes) (fx+ x-offset 8)))])]
+                         ;; Remaining cases are integers:
+                         [(>= size 8)
                           `(seq
                             (set! ,(vector-ref vint iint) (inline ,(make-info-load 'integer-64 #f)
                                                                   ,%load ,x ,%zero (immediate ,x-offset)))
-                            ,(loop (fx+ iint 1) ifp (cdr classes) (fx+ x-offset 8)))]))))]
+                            ,(loop (fx- size 8) (fx+ iint 1) ifp (cdr classes) (fx+ x-offset 8)))]
+                         ;; Remaining cases must be the last element
+                         [else
+                          (let loop ([reg (vector-ref vint iint)] [size size] [x-offset x-offset])
+                            (cond
+                             [(= size 4)
+                              `(set! ,reg (inline ,(make-info-load 'unsigned-32 #f)
+                                                  ,%load ,x ,%zero (immediate ,x-offset)))]
+                             [(= size 2)
+                              `(set! ,reg (inline ,(make-info-load 'unsigned-16 #f)
+                                                  ,%load ,x ,%zero (immediate ,x-offset)))]
+                             [(= size 1)
+                              `(set! ,reg (inline ,(make-info-load 'unsigned-8 #f)
+                                                  ,%load ,x ,%zero (immediate ,x-offset)))]
+                             [(> size 4)
+                              ;; 5, 6, or 7: multiple steps to avoid reading too many bytes
+                              (let ([tmp %rax]) ;; ?? ok to use %rax?
+                                (%seq
+                                 ,(loop reg (fx- size 4) (fx+ x-offset 4))
+                                 (set! ,reg ,(%inline sll ,reg (immediate 32)))
+                                 ,(loop tmp 4 x-offset)
+                                 (set! ,reg ,(%inline + ,reg ,tmp))))]
+                             [else
+                              ;; 3: multiple steps to avoid reading too many bytes
+                              (let ([tmp %rax]) ;; ?? ok to use %rax?
+                                (%seq
+                                 ,(loop reg (fx- size 2) (fx+ x-offset 2))
+                                 (set! ,reg ,(%inline sll ,reg (immediate 16)))
+                                 ,(loop tmp 2 x-offset)
+                                 (set! ,reg ,(%inline + ,reg ,tmp))))]))]))))]
                  [add-int-regs
                   (lambda (ints iint vint regs)
                     (cond
@@ -2633,7 +2668,7 @@
                                   [else
                                    ;; pass in registers
                                    (loop (cdr types)
-                                         (cons (load-content-regs classes iint ifp vint vfp) locs)
+                                         (cons (load-content-regs classes ($ftd-size ftd) iint ifp vint vfp) locs)
                                          (add-int-regs ints iint vint regs)
                                          (fx+ iint ints) (fx+ ifp fps) isp)]))]
                               [else

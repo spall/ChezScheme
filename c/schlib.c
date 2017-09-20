@@ -352,6 +352,20 @@ I64 S_call_indirect_int64() {
     return r;
 }
 
+float S_call_indirect_float() {
+    ptr tc = get_thread_context();
+    float r;
+    S_call_indirect_help(tc, &r, sizeof(r));
+    return r;
+}
+
+double S_call_indirect_double() {
+    ptr tc = get_thread_context();
+    double r;
+    S_call_indirect_help(tc, &r, sizeof(r));
+    return r;
+}
+
 /* On x86, a 3-byte struct covers all configurations that don't return
    in registers and that need to pop the result-destination pointer
    before returning. */

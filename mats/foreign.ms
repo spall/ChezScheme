@@ -2656,6 +2656,7 @@
            (define-ftype callback (function ((& T)) double))
            (define-ftype pre-int-callback (function (int (& T)) double))
            (define-ftype pre-double-callback (function (double (& T)) double))
+           (define-ftype callback-r (function () (& T)))
            (define s (apply string-append
                             (let loop ([l '(ti ...)])
                               (cond
@@ -2680,6 +2681,8 @@
                                                       ((* pre-int-callback)) double))
            (define cb_send_pre_double (foreign-procedure (format "f4_cb_send_pre_double~a" s)
                                                          ((* pre-double-callback)) double))
+           (define sum_cb (foreign-procedure (format "f4_sum_cb~a" s)
+                                             ((* callback-r)) double))
            (and (let ([v (get)])
                   (and (or (= (ftype-ref T (ni) (get)) vi)
                            (error 'check-n "fail ~s in ~s" 'ti (list 'ti ...)))
@@ -2687,7 +2690,7 @@
                        (begin
                          (foreign-free (ftype-pointer-address v))
                          #t)))
-                (let ([a (make-ftype-pointer T (foreign-alloc (ftype-sizeof T)))])
+                (let ([a (make-ftype-pointer T (malloc_at_boundary (ftype-sizeof T)))])
                   (ftype-set! T (ni) a vi) ...
                   (and (= (+ vi ...) (sum a))
                        (= (+ 8 vi ...) (sum_pre_int 8 a))
@@ -2697,18 +2700,43 @@
                        (= (+ 1.0 vi ...) (cb_send (make-ftype-pointer
                                                    callback
                                                    (lambda (r)
-                                                     (exact->inexact (+ (ftype-ref T (ni) r) ...))))))
+                                                     (let ([n (exact->inexact (+ (ftype-ref T (ni) r) ...))])
+                                                       (foreign-free (ftype-pointer-address r))
+                                                       n)))))
+                       (equal? (list vi ...) (let ([saved #f]) ; make sure it's still ok after foreign return
+                                               (cb_send (make-ftype-pointer
+                                                         callback
+                                                         (lambda (r)
+                                                           (set! saved r)
+                                                           1.0)))
+                                               (let ([l (list (ftype-ref T (ni) saved) ...)])
+                                                 (foreign-free (ftype-pointer-address saved))
+                                                 l)))
                        (= (+ 1.0 8 vi ...) (cb_send_pre_int (make-ftype-pointer
                                                              pre-int-callback
                                                              (lambda (v r)
-                                                               (exact->inexact (+ v (ftype-ref T (ni) r) ...))))))
+                                                               (let ([n (exact->inexact (+ v (ftype-ref T (ni) r) ...))])
+                                                                 (foreign-free (ftype-pointer-address r))
+                                                                 n)))))
                        (= (+ 1.0 8.25 vi ...) (cb_send_pre_double (make-ftype-pointer
                                                                    pre-double-callback
                                                                    (lambda (v r)
-                                                                     (exact->inexact (+ v (ftype-ref T (ni) r) ...))))))
+                                                                     (let ([n (exact->inexact (+ v (ftype-ref T (ni) r) ...))])
+                                                                       (foreign-free (ftype-pointer-address r))
+                                                                       n)))))
+                       (= (+ vi ...) (sum_cb (make-ftype-pointer
+                                              callback-r
+                                              (lambda ()
+                                                (let ([r (make-ftype-pointer T (foreign-alloc (ftype-sizeof T)))])
+                                                  (ftype-set! T (ni) r vi) ...
+                                                  r)))))
                        (begin
-                         (foreign-free (ftype-pointer-address a))
+                         (free_at_boundary (ftype-pointer-address a))
                          #t)))))]))
+    (define-syntax check-1
+      (syntax-rules ()
+        [(_ t1 v1)
+         (check-n [x t1 v1])]))
     (define-syntax check-2
       (syntax-rules ()
         [(_ t1 t2 v1 v2)
@@ -2741,7 +2769,17 @@
           (check-3 long t int 7 (+ 70 x) 700)
           (check-3 i64 t int 9 (+ 90 x) 900)
           (check-3 i8 t int 10 (+ 100 x) 1000))]))
+    (define malloc_at_boundary (foreign-procedure "malloc_at_boundary"
+                                                  (int) uptr))
+    (define free_at_boundary (foreign-procedure "free_at_boundary"
+                                                (uptr) void))
     #t)
+  (check-1 i8 11)
+  (check-1 short 22)
+  (check-1 long 33)
+  (check-1 int 44)
+  (check-1 float 55.0)
+  (check-1 double 66.0)
   (check-2-set int 0)
   (check-2-set float 0.5)
   (check-2-set double 0.25)
@@ -2751,6 +2789,10 @@
   (check-3-set int 0)
   (check-3-set float 0.5)
   (check-3-set double 0.25)
+  (check-3 i8 i8 i8 4 38 127)
+  (check-3 short short short 4 39 399)
   (check-3 int int int 4 40 400)
   (check-3 float float float 4.5 40.5 400.5)
-  (check-3 double double double 4.25 40.25 400.25))
+  (check-3 double double double 4.25 40.25 400.25)
+  (check-n [x i8 1] [y i8 2] [z i8 3] [w i8 4] [q i8 5])
+  (check-n [x i8 1] [y i8 2] [z i8 3] [w i8 4] [q i8 5] [r i8 6] [s i8 7]))
