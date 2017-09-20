@@ -2643,3 +2643,114 @@
       read)
     '(3.5 2.5 -1.5 6.75 8.25 -9.5 1e32 -4.5 7.25 -0.5))
 )
+
+(mat structs
+  (begin
+    (define-ftype i8 integer-8)
+    (define-ftype i64 integer-64)
+    (define-syntax check-n
+      (syntax-rules ()
+        [(_ [ni ti vi] ...)
+         (let ()
+           (define-ftype T (struct [ni ti] ...))
+           (define-ftype callback (function ((& T)) double))
+           (define-ftype pre-int-callback (function (int (& T)) double))
+           (define-ftype pre-double-callback (function (double (& T)) double))
+           (define s (apply string-append
+                            (let loop ([l '(ti ...)])
+                              (cond
+                               [(null? l) '()]
+                               [else (cons (format "_~a" (car l))
+                                           (loop (cdr l)))]))))
+           (define get (foreign-procedure (format "f4_get~a" s)
+                                          () (& T)))
+           (define sum (foreign-procedure (format "f4_sum~a" s)
+                                          ((& T)) double))
+           (define sum_pre_int (foreign-procedure (format "f4_sum_pre_int~a" s)
+                                                  (int (& T)) double))
+           (define sum_post_int (foreign-procedure (format "f4_sum~a_post_int" s)
+                                                   ((& T) int) double))
+           (define sum_pre_double (foreign-procedure (format "f4_sum_pre_double~a" s)
+                                                     (double (& T)) double))
+           (define sum_post_double (foreign-procedure (format "f4_sum~a_post_double" s)
+                                                      ((& T) double) double))
+           (define cb_send (foreign-procedure (format "f4_cb_send~a" s)
+                                              ((* callback)) double))
+           (define cb_send_pre_int (foreign-procedure (format "f4_cb_send_pre_int~a" s)
+                                                      ((* pre-int-callback)) double))
+           (define cb_send_pre_double (foreign-procedure (format "f4_cb_send_pre_double~a" s)
+                                                         ((* pre-double-callback)) double))
+           (and (let ([v (get)])
+                  (and (or (= (ftype-ref T (ni) (get)) vi)
+                           (error 'check-n "fail ~s in ~s" 'ti (list 'ti ...)))
+                       ...
+                       (begin
+                         (foreign-free (ftype-pointer-address v))
+                         #t)))
+                (let ([a (make-ftype-pointer T (foreign-alloc (ftype-sizeof T)))])
+                  (ftype-set! T (ni) a vi) ...
+                  (and (= (+ vi ...) (sum a))
+                       (= (+ 8 vi ...) (sum_pre_int 8 a))
+                       (= (+ 8 vi ...) (sum_post_int a 8))
+                       (= (+ 8.25 vi ...) (sum_pre_double 8.25 a))
+                       (= (+ 8.25 vi ...) (sum_post_double a 8.25))
+                       (= (+ 1.0 vi ...) (cb_send (make-ftype-pointer
+                                                   callback
+                                                   (lambda (r)
+                                                     (exact->inexact (+ (ftype-ref T (ni) r) ...))))))
+                       (= (+ 1.0 8 vi ...) (cb_send_pre_int (make-ftype-pointer
+                                                             pre-int-callback
+                                                             (lambda (v r)
+                                                               (exact->inexact (+ v (ftype-ref T (ni) r) ...))))))
+                       (= (+ 1.0 8.25 vi ...) (cb_send_pre_double (make-ftype-pointer
+                                                                   pre-double-callback
+                                                                   (lambda (v r)
+                                                                     (exact->inexact (+ v (ftype-ref T (ni) r) ...))))))
+                       (begin
+                         (foreign-free (ftype-pointer-address a))
+                         #t)))))]))
+    (define-syntax check-2
+      (syntax-rules ()
+        [(_ t1 t2 v1 v2)
+         (check-n [x t1 v1] [y t2 v2])]))
+    (define-syntax check-2-set
+      (syntax-rules ()
+        [(_ t x)
+         (and
+          (check-2 t i8 (+ 1 x) 10)
+          (check-2 t short (+ 2 x) 20)
+          (check-2 t long (+ 3 x) 30)
+          (check-2 t i64 (+ 5 x) 50)
+          (check-2 short t 6 (+ 60 x))
+          (check-2 long t 7 (+ 70 x))
+          (check-2 i64 t 9 (+ 90 x))
+          (check-2 i8 t 10 (+ 100 x)))]))
+    (define-syntax check-3
+      (syntax-rules ()
+        [(_ t1 t2 t3 v1 v2 v3)
+         (check-n [x t1 v1] [y t2 v2] [z t3 v3])]))
+    (define-syntax check-3-set
+      (syntax-rules ()
+        [(_ t x)
+         (and
+          (check-3 t i8 int (+ 1 x) 10 100)
+          (check-3 t short int (+ 2 x) 20 200)
+          (check-3 t long int (+ 3 x) 30 300)
+          (check-3 t i64 int (+ 5 x) 50 500)
+          (check-3 short t int 6 (+ 60 x) 600)
+          (check-3 long t int 7 (+ 70 x) 700)
+          (check-3 i64 t int 9 (+ 90 x) 900)
+          (check-3 i8 t int 10 (+ 100 x) 1000))]))
+    #t)
+  (check-2-set int 0)
+  (check-2-set float 0.5)
+  (check-2-set double 0.25)
+  (check-2 int int 4 40)
+  (check-2 float float 4.5 40.5)
+  (check-2 double double 4.25 40.25)
+  (check-3-set int 0)
+  (check-3-set float 0.5)
+  (check-3-set double 0.25)
+  (check-3 int int int 4 40 400)
+  (check-3 float float float 4.5 40.5 400.5)
+  (check-3 double double double 4.25 40.25 400.25))

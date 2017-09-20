@@ -2670,7 +2670,7 @@
                [(eq? 'sse (car classes))
                 `(seq
                   ,(loop (cdr classes) (fx+ offset 8) iregs (cdr fpregs))
-                  (inline ,(make-info-loadfl (car fpregs)) ,%load-double ,%rcx ,%zero (immediate ,offset)))]
+                  (inline ,(make-info-loadfl (car fpregs)) ,%store-double ,%rcx ,%zero (immediate ,offset)))]
                [else
                 `(seq
                   ,(loop (cdr classes) (fx+ offset 8) (cdr iregs) fpregs)
