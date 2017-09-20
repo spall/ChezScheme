@@ -20,45 +20,47 @@
 typedef char i8;
 #ifdef _WIN32
 typedef __int64 i64;
+# define EXPORT extern __declspec (dllexport)
 #else
 typedef long long i64;
+# define EXPORT
 #endif
 
 
 #define GEN_2(t1, t2, v1, v2)                  \
   struct f4_ ## t1 ## _ ## t2 { t1 x; t2 y; };              \
-  struct f4_ ## t1 ## _ ## t2 f4_get_ ## t1 ## _ ## t2 () { \
+  EXPORT struct f4_ ## t1 ## _ ## t2 f4_get_ ## t1 ## _ ## t2 () { \
     struct f4_ ## t1 ## _ ## t2 r = { v1, v2 };             \
     return r;                                               \
   }                                                                     \
-  double f4_sum_ ## t1 ## _ ## t2 (struct f4_ ## t1 ## _ ## t2 v) {     \
+  EXPORT double f4_sum_ ## t1 ## _ ## t2 (struct f4_ ## t1 ## _ ## t2 v) {     \
     return (double)v.x + (double)v.y;                                   \
   }                                                                     \
-  double f4_sum_pre_double_ ## t1 ## _ ## t2 (double v0, struct f4_ ## t1 ## _ ## t2 v) { \
+  EXPORT double f4_sum_pre_double_ ## t1 ## _ ## t2 (double v0, struct f4_ ## t1 ## _ ## t2 v) { \
     return v0 + (double)v.x + (double)v.y;                              \
   }                                                                     \
-  double f4_sum_ ## t1 ## _ ## t2 ## _post_double (struct f4_ ## t1 ## _ ## t2 v, double v0) { \
+  EXPORT double f4_sum_ ## t1 ## _ ## t2 ## _post_double (struct f4_ ## t1 ## _ ## t2 v, double v0) { \
     return v0 + (double)v.x + (double)v.y;                              \
   }                                                                     \
-  double f4_sum_pre_int_ ## t1 ## _ ## t2 (int v0, struct f4_ ## t1 ## _ ## t2 v) { \
+  EXPORT double f4_sum_pre_int_ ## t1 ## _ ## t2 (int v0, struct f4_ ## t1 ## _ ## t2 v) { \
     return (double)v0 + (double)v.x + (double)v.y;                      \
   }                                                                     \
-  double f4_sum_ ## t1 ## _ ## t2 ## _post_int (struct f4_ ## t1 ## _ ## t2 v, int v0) { \
+  EXPORT double f4_sum_ ## t1 ## _ ## t2 ## _post_int (struct f4_ ## t1 ## _ ## t2 v, int v0) { \
     return (double)v0 + (double)v.x + (double)v.y;                      \
   }                                                                     \
-  double f4_cb_send_ ## t1 ## _ ## t2 (double (*cb)(struct f4_ ## t1 ## _ ## t2)) { \
+  EXPORT double f4_cb_send_ ## t1 ## _ ## t2 (double (*cb)(struct f4_ ## t1 ## _ ## t2)) { \
     struct f4_ ## t1 ## _ ## t2 r = { v1, v2 };                         \
     return cb(r) + 1.0;                                                 \
     }                                                                   \
-  double f4_cb_send_pre_int_ ## t1 ## _ ## t2 (double (*cb)(int, struct f4_ ## t1 ## _ ## t2)) { \
+  EXPORT double f4_cb_send_pre_int_ ## t1 ## _ ## t2 (double (*cb)(int, struct f4_ ## t1 ## _ ## t2)) { \
     struct f4_ ## t1 ## _ ## t2 r = { v1, v2 };                         \
     return cb(8, r) + 1.0;                                              \
     }                                                                   \
-  double f4_cb_send_pre_double_ ## t1 ## _ ## t2 (double (*cb)(double, struct f4_ ## t1 ## _ ## t2)) { \
+  EXPORT double f4_cb_send_pre_double_ ## t1 ## _ ## t2 (double (*cb)(double, struct f4_ ## t1 ## _ ## t2)) { \
     struct f4_ ## t1 ## _ ## t2 r = { v1, v2 };                         \
     return cb(8.25, r) + 1.0;                                           \
     }                                                                   \
-  double f4_sum_cb_ ## t1 ## _ ## t2 (struct f4_ ## t1 ## _ ## t2 (*cb)()) { \
+  EXPORT double f4_sum_cb_ ## t1 ## _ ## t2 (struct f4_ ## t1 ## _ ## t2 (*cb)()) { \
     struct f4_ ## t1 ## _ ## t2 v = cb();                               \
     return (double)v.x + (double)v.y;                                   \
   }                                                                     
@@ -83,38 +85,38 @@ GEN_2(double, double, 4.25, 40.25)
 
 #define GEN_3(t1, t2, t3, v1, v2, v3)                                   \
   struct f4_ ## t1 ## _ ## t2 ## _ ## t3{ t1 x; t2 y; t3 z; };          \
-  struct f4_ ## t1 ## _ ## t2 ## _ ## t3 f4_get_ ## t1 ## _ ## t2 ## _ ## t3 () { \
+  EXPORT struct f4_ ## t1 ## _ ## t2 ## _ ## t3 f4_get_ ## t1 ## _ ## t2 ## _ ## t3 () { \
     struct f4_ ## t1 ## _ ## t2 ## _ ## t3 r = { v1, v2, v3 };          \
     return r;                                                           \
   }                                                                     \
-  double f4_sum_ ## t1 ## _ ## t2 ## _ ## t3 (struct f4_ ## t1 ## _ ## t2 ## _ ## t3 v) { \
+  EXPORT double f4_sum_ ## t1 ## _ ## t2 ## _ ## t3 (struct f4_ ## t1 ## _ ## t2 ## _ ## t3 v) { \
     return (double)v.x + (double)v.y + (double)v.z;                     \
   }                                                                     \
-  double f4_sum_pre_double_ ## t1 ## _ ## t2 ## _ ## t3 (double v0, struct f4_ ## t1 ## _ ## t2 ## _ ## t3 v) { \
+  EXPORT double f4_sum_pre_double_ ## t1 ## _ ## t2 ## _ ## t3 (double v0, struct f4_ ## t1 ## _ ## t2 ## _ ## t3 v) { \
     return v0 + (double)v.x + (double)v.y + (double)v.z;                \
   }                                                                     \
-  double f4_sum_ ## t1 ## _ ## t2 ## _ ## t3 ## _post_double (struct f4_ ## t1 ## _ ## t2 ## _ ## t3 v, double v0) { \
+  EXPORT double f4_sum_ ## t1 ## _ ## t2 ## _ ## t3 ## _post_double (struct f4_ ## t1 ## _ ## t2 ## _ ## t3 v, double v0) { \
     return v0 + (double)v.x + (double)v.y + (double)v.z;                \
   }                                                                     \
-  double f4_sum_pre_int_ ## t1 ## _ ## t2 ## _ ## t3 (int v0, struct f4_ ## t1 ## _ ## t2 ## _ ## t3 v) { \
+  EXPORT double f4_sum_pre_int_ ## t1 ## _ ## t2 ## _ ## t3 (int v0, struct f4_ ## t1 ## _ ## t2 ## _ ## t3 v) { \
     return (double)v0 + (double)v.x + (double)v.y + (double)v.z;        \
   }                                                                     \
-  double f4_sum_ ## t1 ## _ ## t2 ## _ ## t3 ## _post_int (struct f4_ ## t1 ## _ ## t2 ## _ ## t3 v, int v0) { \
+  EXPORT double f4_sum_ ## t1 ## _ ## t2 ## _ ## t3 ## _post_int (struct f4_ ## t1 ## _ ## t2 ## _ ## t3 v, int v0) { \
     return (double)v0 + (double)v.x + (double)v.y + (double)v.z;        \
   }                                                                     \
-  double f4_cb_send_ ## t1 ## _ ## t2 ## _ ## t3 (double (*cb)(struct f4_ ## t1 ## _ ## t2 ## _ ## t3)) { \
+  EXPORT double f4_cb_send_ ## t1 ## _ ## t2 ## _ ## t3 (double (*cb)(struct f4_ ## t1 ## _ ## t2 ## _ ## t3)) { \
     struct f4_ ## t1 ## _ ## t2 ## _ ## t3 r = { v1, v2, v3 };          \
     return cb(r) + 1.0;                                                 \
     }                                                                   \
-  double f4_cb_send_pre_int_ ## t1 ## _ ## t2 ## _ ## t3 (double (*cb)(int, struct f4_ ## t1 ## _ ## t2 ## _ ## t3)) { \
+  EXPORT double f4_cb_send_pre_int_ ## t1 ## _ ## t2 ## _ ## t3 (double (*cb)(int, struct f4_ ## t1 ## _ ## t2 ## _ ## t3)) { \
     struct f4_ ## t1 ## _ ## t2 ## _ ## t3 r = { v1, v2, v3 };          \
     return cb(8, r) + 1.0;                                              \
     }                                                                   \
-  double f4_cb_send_pre_double_ ## t1 ## _ ## t2 ## _ ## t3 (double (*cb)(double, struct f4_ ## t1 ## _ ## t2 ## _ ## t3)) { \
+  EXPORT double f4_cb_send_pre_double_ ## t1 ## _ ## t2 ## _ ## t3 (double (*cb)(double, struct f4_ ## t1 ## _ ## t2 ## _ ## t3)) { \
     struct f4_ ## t1 ## _ ## t2 ## _ ## t3 r = { v1, v2, v3 };          \
     return cb(8.25, r) + 1.0;                                           \
     }                                                                   \
-  double f4_sum_cb_ ## t1 ## _ ## t2 ## _ ## t3 (struct f4_ ## t1 ## _ ## t2 ## _ ## t3 (*cb)()) { \
+  EXPORT double f4_sum_cb_ ## t1 ## _ ## t2 ## _ ## t3 (struct f4_ ## t1 ## _ ## t2 ## _ ## t3 (*cb)()) { \
     struct f4_ ## t1 ## _ ## t2 ## _ ## t3 v = cb();                    \
     return (double)v.x + (double)v.y + (double)v.z;                     \
   }
