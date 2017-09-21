@@ -2648,6 +2648,7 @@
      Scall->indirect-int64
      Scall->indirect-float
      Scall->indirect-double
+     Scall->indirect-copy-one-char
      Scall->indirect-copy-three-chars
      Scall->indirect-copy
      Scall->indirect-sized-int64-int64

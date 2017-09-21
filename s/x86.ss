@@ -2232,9 +2232,12 @@
   (define callee-expects-result-pointer?
     (lambda (result-type)
       (nanopass-case (Ltype Type) result-type
-        [(fp-ftd& ,ftd) (case ($ftd-size ftd)
-                          [(1 2 4 8) #f]
-                          [else #t])]
+        [(fp-ftd& ,ftd) (constant-case machine-type-name
+                          [(i3osx ti3osx)
+                           (case ($ftd-size ftd)
+                             [(1 2 4 8) #f]
+                             [else #t])]
+                          [else ($ftd-compound? ftd)])]
         [else #f])))
   (define callee-pops-result-pointer?
     (lambda (result-type)
@@ -2559,22 +2562,34 @@
                ,e))))
         (define (pick-Scall Scall->result-type result-type)
           (nanopass-case (Ltype Type) result-type
-            [(fp-ftd& ,ftd) (case ($ftd-size ftd)
-                              [(1) (lookup-c-entry Scall->indirect-byte)]
-                              [(2) (lookup-c-entry Scall->indirect-short)]
-                              [(4)
-                               (cond
-                                [(equal? '((float 4 0)) ($ftd->members ftd))
-                                 (lookup-c-entry Scall->indirect-float)]
-                                [else
-                                 (lookup-c-entry Scall->indirect-int32)])]
-                              [(8)
-                               (cond
-                                [(equal? '((float 8 0)) ($ftd->members ftd))
-                                 (lookup-c-entry Scall->indirect-double)]
-                                [else
-                                 (lookup-c-entry Scall->indirect-int64)])]
-                              [else (lookup-c-entry Scall->indirect-copy-three-chars)])]
+            [(fp-ftd& ,ftd)
+             (cond
+              [(callee-expects-result-pointer? result-type)
+               (constant-case machine-type-name
+                 [(i3osx ti3osx)
+                  (lookup-c-entry Scall->indirect-copy-three-chars)]
+                 [else
+                  (lookup-c-entry Scall->indirect-copy-one-char)])]
+              [else
+               ;; For non-osx, we get here only for non-compound types
+               (case ($ftd-size ftd)
+                 [(1) (lookup-c-entry Scall->indirect-byte)]
+                 [(2) (lookup-c-entry Scall->indirect-short)]
+                 [(4)
+                  (cond
+                   [(equal? '((float 4 0)) ($ftd->members ftd))
+                    (lookup-c-entry Scall->indirect-float)]
+                   [else
+                    (lookup-c-entry Scall->indirect-int32)])]
+                 [(8)
+                  (cond
+                   [(equal? '((float 8 0)) ($ftd->members ftd))
+                    (lookup-c-entry Scall->indirect-double)]
+                   [else
+                    (lookup-c-entry Scall->indirect-int64)])]
+                 [else
+                  ;; This case shouldn't happend for non-osx
+                  (lookup-c-entry Scall->indirect-copy-three-chars)])])]
             [else Scall->result-type]))
         (lambda (info)
           (let ([conv (info-foreign-conv info)]

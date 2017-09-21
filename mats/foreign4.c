@@ -98,8 +98,6 @@ EXPORT void free_at_boundary(void *p)
     return sum(v);                                                      \
   }
 
-/* For any sane ABI, a struct containing just a primitive type
-   is the same as just the primitive type */
 #define TO_DOUBLE(x) ((double)(x))
 GEN(i8, 11, TO_DOUBLE)
 GEN(short, 22, TO_DOUBLE)
@@ -108,13 +106,30 @@ GEN(int, 44, TO_DOUBLE)
 GEN(float, 55.0, TO_DOUBLE)
 GEN(double, 66.0, TO_DOUBLE)
 
+/* Some ABIs treat a struct containing a single field different that
+   just the field */
+#define GEN_1(t1, v1)                                                   \
+  typedef struct struct_ ## t1 { t1 x; } struct_ ## t1;                 \
+  static double _f4_sum_struct_ ## t1 (struct_ ## t1 v) {               \
+    return (double)v.x;                                                 \
+  }                                                                     \
+  static struct_ ## t1 init_struct_ ## t1 = { v1 };                     \
+  GEN(struct_ ## t1, init_struct_ ## t1, _f4_sum_struct_ ## t1)
+
+GEN_1(i8, 12)
+GEN_1(short, 23)
+GEN_1(long, 34)
+GEN_1(int, 45)
+GEN_1(float, 56.0)
+GEN_1(double, 67.0)
+
 #define GEN_2(t1, t2, v1, v2)                                           \
-  typedef struct t1 ## _ ## t2 { t1 x; t2 y; } t1 ## _ ## t2;           \
-  static double _f4_sum_ ## t1 ## _ ## t2 (t1 ## _ ## t2 v) {           \
+  typedef struct struct_ ## t1 ## _ ## t2 { t1 x; t2 y; } struct_ ## t1 ## _ ## t2; \
+  static double _f4_sum_struct_ ## t1 ## _ ## t2 (struct_ ## t1 ## _ ## t2 v) { \
     return (double)v.x + (double)v.y;                                   \
   }                                                                     \
-  static t1 ## _ ## t2 init_ ## t1 ## _ ## t2 = { v1, v2 };             \
-  GEN(t1 ## _ ## t2, init_ ## t1 ## _ ## t2, _f4_sum_ ## t1 ## _ ## t2)
+  static struct_ ## t1 ## _ ## t2 init_struct_ ## t1 ## _ ## t2 = { v1, v2 }; \
+  GEN(struct_ ## t1 ## _ ## t2, init_struct_ ## t1 ## _ ## t2, _f4_sum_struct_ ## t1 ## _ ## t2)
 
 #define GEN_2_SET(t, x)                         \
   GEN_2(t, i8, 1+x, 10)                         \
@@ -135,12 +150,12 @@ GEN_2(float, float, 4.5, 40.5)
 GEN_2(double, double, 4.25, 40.25)
 
 #define GEN_3(t1, t2, t3, v1, v2, v3)                                   \
-  typedef struct t1 ## _ ## t2 ## _ ## t3 { t1 x; t2 y; t3 z; } t1 ## _ ## t2 ## _ ## t3; \
-  static double _f4_sum_ ## t1 ## _ ## t2 ## _ ## t3 (t1 ## _ ## t2 ## _ ## t3 v) { \
+  typedef struct struct_ ## t1 ## _ ## t2 ## _ ## t3 { t1 x; t2 y; t3 z; } struct_ ## t1 ## _ ## t2 ## _ ## t3; \
+  static double _f4_sum_struct_ ## t1 ## _ ## t2 ## _ ## t3 (struct_ ## t1 ## _ ## t2 ## _ ## t3 v) { \
     return (double)v.x + (double)v.y + (double)v.z;                     \
   }                                                                     \
-  static t1 ## _ ## t2 ## _ ## t3 init_ ## t1 ## _ ## t2 ## _ ## t3 = { v1, v2, v3 }; \
-  GEN(t1 ## _ ## t2 ## _ ## t3, init_ ## t1 ## _ ## t2 ## _ ## t3, _f4_sum_ ## t1 ## _ ## t2 ## _ ## t3)
+  static struct_ ## t1 ## _ ## t2 ## _ ## t3 init_struct_ ## t1 ## _ ## t2 ## _ ## t3 = { v1, v2, v3 }; \
+  GEN(struct_ ## t1 ## _ ## t2 ## _ ## t3, init_struct_ ## t1 ## _ ## t2 ## _ ## t3, _f4_sum_struct_ ## t1 ## _ ## t2 ## _ ## t3)
 
 #define GEN_3_SET(t, x)                           \
   GEN_3(t, i8, int, 1+x, 10, 100)                 \
@@ -162,16 +177,48 @@ GEN_3(int, int, int, 4, 40, 400)
 GEN_3(float, float, float, 4.5, 40.5, 400.5)
 GEN_3(double, double, double, 4.25, 40.25, 400.25)
 
-typedef struct i8_i8_i8_i8_i8 { i8 x, y, z, w, q; } i8_i8_i8_i8_i8;
-static double _f4_sum_i8_i8_i8_i8_i8 (i8_i8_i8_i8_i8 v) {
+typedef struct struct_i8_i8_i8_i8_i8 { i8 x, y, z, w, q; } struct_i8_i8_i8_i8_i8;
+static double _f4_sum_struct_i8_i8_i8_i8_i8 (struct_i8_i8_i8_i8_i8 v) {
   return (double)v.x + (double)v.y + (double)v.z + (double)v.w + (double)v.q;
 }
-static struct i8_i8_i8_i8_i8 init_i8_i8_i8_i8_i8 = { 1, 2, 3, 4, 5 };
-GEN(i8_i8_i8_i8_i8, init_i8_i8_i8_i8_i8, _f4_sum_i8_i8_i8_i8_i8)
+static struct struct_i8_i8_i8_i8_i8 init_struct_i8_i8_i8_i8_i8 = { 1, 2, 3, 4, 5 };
+GEN(struct_i8_i8_i8_i8_i8, init_struct_i8_i8_i8_i8_i8, _f4_sum_struct_i8_i8_i8_i8_i8)
 
-typedef struct i8_i8_i8_i8_i8_i8_i8 { i8 x, y, z, w, q, r, s; } i8_i8_i8_i8_i8_i8_i8;
-static double _f4_sum_i8_i8_i8_i8_i8_i8_i8 (struct i8_i8_i8_i8_i8_i8_i8 v) {
+typedef struct struct_i8_i8_i8_i8_i8_i8_i8 { i8 x, y, z, w, q, r, s; } struct_i8_i8_i8_i8_i8_i8_i8;
+static double _f4_sum_struct_i8_i8_i8_i8_i8_i8_i8 (struct struct_i8_i8_i8_i8_i8_i8_i8 v) {
   return (double)v.x + (double)v.y + (double)v.z + (double)v.w + (double)v.q + (double)v.r + (double)v.s;
 }
-static struct i8_i8_i8_i8_i8_i8_i8 init_i8_i8_i8_i8_i8_i8_i8 = { 1, 2, 3, 4, 5, 6, 7 };
-GEN(i8_i8_i8_i8_i8_i8_i8, init_i8_i8_i8_i8_i8_i8_i8, _f4_sum_i8_i8_i8_i8_i8_i8_i8)
+static struct struct_i8_i8_i8_i8_i8_i8_i8 init_struct_i8_i8_i8_i8_i8_i8_i8 = { 1, 2, 3, 4, 5, 6, 7 };
+GEN(struct_i8_i8_i8_i8_i8_i8_i8, init_struct_i8_i8_i8_i8_i8_i8_i8, _f4_sum_struct_i8_i8_i8_i8_i8_i8_i8)
+
+/* Some ABIs treat a union containing a single field different that
+   just the field */
+#define GEN_U1(t1, v1)                                                \
+  typedef union union_ ## t1 { t1 x; } union_ ## t1;                  \
+  static double _f4_sum_union_ ## t1 (union_ ## t1 v) {               \
+    return (double)v.x;                                               \
+  }                                                                   \
+  static union_ ## t1 init_union_ ## t1 = { v1 };                     \
+  GEN(union_ ## t1, init_union_ ## t1, _f4_sum_union_ ## t1)
+
+GEN_U1(i8, 17)
+GEN_U1(short, 27)
+GEN_U1(long, 37)
+GEN_U1(int, 47)
+GEN_U1(float, 57.0)
+GEN_U1(double, 77.0)
+
+#define GEN_U2(t1, t2, v1)                                              \
+  typedef union union_ ## t1 ## _ ## t2 { t1 x; t2 y; } union_ ## t1 ## _ ## t2; \
+  static double _f4_sum_union_ ## t1 ## _ ## t2 (union_ ## t1 ## _ ## t2 v) { \
+    return (double)v.x;                                                 \
+  }                                                                     \
+  static union_ ## t1 ## _ ## t2 init_union_ ## t1 ## _ ## t2 = { v1 }; \
+  GEN(union_ ## t1 ## _ ## t2, init_union_ ## t1 ## _ ## t2, _f4_sum_union_ ## t1 ## _ ## t2)
+
+GEN_U2(i8, int, 18)
+GEN_U2(short, int, 28)
+GEN_U2(long, int, 38)
+GEN_U2(int, int, 48)
+GEN_U2(float, int, 58.0)
+GEN_U2(double, int, 68.0)

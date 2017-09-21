@@ -366,7 +366,20 @@ double S_call_indirect_double() {
     return r;
 }
 
-/* On x86, a 3-byte struct covers all configurations that don't return
+/* On x86 other than Mac OS, a 1-byte struct covers all configurations
+   that don't return in registers and that need to pop the
+   result-destination pointer before returning. */
+struct result_one_char S_call_indirect_copy_one_char() {
+    ptr tc = get_thread_context();
+    ptr dest = TS(tc);
+    iptr len = UNFIX(TD(tc));
+    struct result_one_char r;
+    S_call_indirect_help(tc, dest, len);
+    memcpy(&r, dest, sizeof(r)); /* will get copied back onto `dest` */
+    return r;
+}
+
+/* On x86 Mac OS, a 3-byte struct covers all configurations that don't return
    in registers and that need to pop the result-destination pointer
    before returning. */
 struct result_three_chars S_call_indirect_copy_three_chars() {

@@ -942,6 +942,11 @@ ftype operators:
   (set! $ftd-size
     (lambda (x)
       (ftd-size x)))
+  (set! $ftd-compound?
+    (lambda (x)
+      (or (ftd-struct? x)
+          (ftd-union? x)
+          (ftd-array? x))))
   (set! $ftd->members
     (lambda (x)
       ;; Currently used for x86_64 ABI: Returns a list of

@@ -351,6 +351,8 @@ extern I64 S_call_int64 PROTO((void));
 extern U64 S_call_uns64 PROTO((void));
 extern uptr S_call_fptr PROTO((void));
 
+struct result_one_char { char c; };
+extern struct result_one_char S_call_indirect_copy_one_char PROTO((void));
 struct result_three_chars { char c[3]; };
 extern struct result_three_chars S_call_indirect_copy_three_chars PROTO((void));
 

@@ -2648,21 +2648,14 @@
   (begin
     (define-ftype i8 integer-8)
     (define-ftype i64 integer-64)
-    (define-syntax check-n
+    (define-syntax check*
       (syntax-rules ()
-        [(_ [ni ti vi] ...)
+        [(_ T s [vi ...] [T-ref ...] [T-set! ...])
          (let ()
-           (define-ftype T (struct [ni ti] ...))
            (define-ftype callback (function ((& T)) double))
            (define-ftype pre-int-callback (function (int (& T)) double))
            (define-ftype pre-double-callback (function (double (& T)) double))
            (define-ftype callback-r (function () (& T)))
-           (define s (apply string-append
-                            (let loop ([l '(ti ...)])
-                              (cond
-                               [(null? l) '()]
-                               [else (cons (format "_~a" (car l))
-                                           (loop (cdr l)))]))))
            (define get (foreign-procedure (format "f4_get~a" s)
                                           () (& T)))
            (define sum (foreign-procedure (format "f4_sum~a" s)
@@ -2684,14 +2677,13 @@
            (define sum_cb (foreign-procedure (format "f4_sum_cb~a" s)
                                              ((* callback-r)) double))
            (and (let ([v (get)])
-                  (and (or (= (ftype-ref T (ni) (get)) vi)
-                           (error 'check-n "fail ~s in ~s" 'ti (list 'ti ...)))
+                  (and (= (T-ref v) vi)
                        ...
                        (begin
                          (foreign-free (ftype-pointer-address v))
                          #t)))
                 (let ([a (make-ftype-pointer T (malloc_at_boundary (ftype-sizeof T)))])
-                  (ftype-set! T (ni) a vi) ...
+                  (T-set! a) ...
                   (and (= (+ vi ...) (sum a))
                        (= (+ 8 vi ...) (sum_pre_int 8 a))
                        (= (+ 8 vi ...) (sum_post_int a 8))
@@ -2700,7 +2692,7 @@
                        (= (+ 1.0 vi ...) (cb_send (make-ftype-pointer
                                                    callback
                                                    (lambda (r)
-                                                     (let ([n (exact->inexact (+ (ftype-ref T (ni) r) ...))])
+                                                     (let ([n (exact->inexact (+ (T-ref r) ...))])
                                                        (foreign-free (ftype-pointer-address r))
                                                        n)))))
                        (equal? (list vi ...) (let ([saved #f]) ; make sure it's still ok after foreign return
@@ -2709,30 +2701,69 @@
                                                          (lambda (r)
                                                            (set! saved r)
                                                            1.0)))
-                                               (let ([l (list (ftype-ref T (ni) saved) ...)])
+                                               (let ([l (list (T-ref saved) ...)])
                                                  (foreign-free (ftype-pointer-address saved))
                                                  l)))
                        (= (+ 1.0 8 vi ...) (cb_send_pre_int (make-ftype-pointer
                                                              pre-int-callback
                                                              (lambda (v r)
-                                                               (let ([n (exact->inexact (+ v (ftype-ref T (ni) r) ...))])
+                                                               (let ([n (exact->inexact (+ v (T-ref r) ...))])
                                                                  (foreign-free (ftype-pointer-address r))
                                                                  n)))))
                        (= (+ 1.0 8.25 vi ...) (cb_send_pre_double (make-ftype-pointer
                                                                    pre-double-callback
                                                                    (lambda (v r)
-                                                                     (let ([n (exact->inexact (+ v (ftype-ref T (ni) r) ...))])
+                                                                     (let ([n (exact->inexact (+ v (T-ref r) ...))])
                                                                        (foreign-free (ftype-pointer-address r))
                                                                        n)))))
                        (= (+ vi ...) (sum_cb (make-ftype-pointer
                                               callback-r
                                               (lambda ()
                                                 (let ([r (make-ftype-pointer T (foreign-alloc (ftype-sizeof T)))])
-                                                  (ftype-set! T (ni) r vi) ...
+                                                  (T-set! r) ...
                                                   r)))))
                        (begin
                          (free_at_boundary (ftype-pointer-address a))
                          #t)))))]))
+    (define-syntax check-n
+      (syntax-rules ()
+        [(_ [ni ti vi] ...)
+         (let ()
+           (define-ftype T (struct [ni ti] ...))
+           (define s (apply string-append
+                            "_struct"
+                            (let loop ([l '(ti ...)])
+                              (cond
+                               [(null? l) '()]
+                               [else (cons (format "_~a" (car l))
+                                           (loop (cdr l)))]))))
+           (check* T s
+                   [vi ...]
+                   [(lambda (a) (ftype-ref T (ni) a)) ...]
+                   [(lambda (a) (ftype-set! T (ni) a vi)) ...]))]))
+    (define-syntax check
+      (syntax-rules ()
+        [(_ t1 v1)
+         (check* t1 (format "_~a" 't1)
+                 [v1]
+                 [(lambda (a) (ftype-ref t1 () a))]
+                 [(lambda (a) (ftype-set! t1 () a v1))])]))
+    (define-syntax check-union
+      (syntax-rules ()
+        [(_ [n0 t0 v0] [ni ti vi] ...)
+         (let ()
+           (define-ftype T (union [n0 t0] [ni ti] ...))
+           (define s (apply string-append
+                            "_union"
+                            (let loop ([l '(t0 ti ...)])
+                              (cond
+                               [(null? l) '()]
+                               [else (cons (format "_~a" (car l))
+                                           (loop (cdr l)))]))))
+           (check* T s
+                   [v0]
+                   [(lambda (a) (ftype-ref T (n0) a))]
+                   [(lambda (a) (ftype-set! T (n0) a v0))]))]))
     (define-syntax check-1
       (syntax-rules ()
         [(_ t1 v1)
@@ -2774,12 +2805,18 @@
     (define free_at_boundary (foreign-procedure "free_at_boundary"
                                                 (uptr) void))
     #t)
-  (check-1 i8 11)
-  (check-1 short 22)
-  (check-1 long 33)
-  (check-1 int 44)
-  (check-1 float 55.0)
-  (check-1 double 66.0)
+  (check i8 11)
+  (check short 22)
+  (check long 33)
+  (check int 44)
+  (check float 55.0)
+  (check double 66.0)
+  (check-1 i8 12)
+  (check-1 short 23)
+  (check-1 long 34)
+  (check-1 int 45)
+  (check-1 float 56.0)
+  (check-1 double 67.0)
   (check-2-set int 0)
   (check-2-set float 0.5)
   (check-2-set double 0.25)
@@ -2795,4 +2832,16 @@
   (check-3 float float float 4.5 40.5 400.5)
   (check-3 double double double 4.25 40.25 400.25)
   (check-n [x i8 1] [y i8 2] [z i8 3] [w i8 4] [q i8 5])
-  (check-n [x i8 1] [y i8 2] [z i8 3] [w i8 4] [q i8 5] [r i8 6] [s i8 7]))
+  (check-n [x i8 1] [y i8 2] [z i8 3] [w i8 4] [q i8 5] [r i8 6] [s i8 7])
+  (check-union [x i8 17])
+  (check-union [x short 27])
+  (check-union [x long 37])
+  (check-union [x int 47])
+  (check-union [x float 57.0])
+  (check-union [x double 77.0])
+  (check-union [x i8 18] [y int 0])
+  (check-union [x short 28] [y int 0])
+  (check-union [x long 38] [y int 0])
+  (check-union [x int 48] [y int 0])
+  (check-union [x float 58.0] [y int 0])
+  (check-union [x double 68.0] [y int 0]))
