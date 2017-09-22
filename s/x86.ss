@@ -2233,7 +2233,7 @@
     (lambda (result-type)
       (nanopass-case (Ltype Type) result-type
         [(fp-ftd& ,ftd) (constant-case machine-type-name
-                          [(i3osx ti3osx)
+                          [(i3osx ti3osx i3nt ti3nt)
                            (case ($ftd-size ftd)
                              [(1 2 4 8) #f]
                              [else #t])]
@@ -2414,17 +2414,15 @@
                                         ,%ecx ,%zero (immediate ,0) ,%eax)]
                               [(4)
                                (cond
-                                [(equal? '((float 4 0)) ($ftd->members ftd))
-                                 ;; Treat a compound containing just a `float` the same as
-                                 ;; `float`:
+                                [(and (if-feature windows (not ($ftd-compound? ftd)) #t)
+				      (equal? '((float 4 0)) ($ftd->members ftd)))
                                  `(set! ,(%mref ,%ecx 0) ,(%inline fstps))]
                                 [else
                                  `(set! ,(%mref ,%ecx 0) ,%eax)])]
                               [(8)
                                (cond
-                                [(equal? '((float 8 0)) ($ftd->members ftd))
-                                 ;; Treat a compound containing just a `double` the same as
-                                 ;; `double`:
+                                [(and (if-feature windows (not ($ftd-compound? ftd)) #t)
+				      (equal? '((float 8 0)) ($ftd->members ftd)))
                                  `(set! ,(%mref ,%ecx 0) ,(%inline fstpl))]
                                 [else
                                  `(seq
@@ -2566,24 +2564,26 @@
              (cond
               [(callee-expects-result-pointer? result-type)
                (constant-case machine-type-name
-                 [(i3osx ti3osx)
+                 [(i3osx ti3osx i3nt ti3nt)
                   (lookup-c-entry Scall->indirect-copy-three-chars)]
                  [else
                   (lookup-c-entry Scall->indirect-copy-one-char)])]
               [else
-               ;; For non-osx, we get here only for non-compound types
+               ;; For non-osx/nt, we get here only for non-compound types
                (case ($ftd-size ftd)
                  [(1) (lookup-c-entry Scall->indirect-byte)]
                  [(2) (lookup-c-entry Scall->indirect-short)]
                  [(4)
                   (cond
-                   [(equal? '((float 4 0)) ($ftd->members ftd))
+                   [(and (if-feature windows (not ($ftd-compound? ftd)) #t)
+			 (equal? '((float 4 0)) ($ftd->members ftd)))
                     (lookup-c-entry Scall->indirect-float)]
                    [else
                     (lookup-c-entry Scall->indirect-int32)])]
                  [(8)
                   (cond
-                   [(equal? '((float 8 0)) ($ftd->members ftd))
+                   [(and (if-feature windows (not ($ftd-compound? ftd)) #t)
+			 (equal? '((float 8 0)) ($ftd->members ftd)))
                     (lookup-c-entry Scall->indirect-double)]
                    [else
                     (lookup-c-entry Scall->indirect-int64)])]
