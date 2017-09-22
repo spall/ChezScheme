@@ -558,3 +558,38 @@
     prims.ss, primdata.ss, cp0.ss, cpnanopass.ss,
     cmacros.ss, mkheader.ss, gc.c, segment.c, types.h,
     4.ms, smgmt.stex, release_notes.stex
+- fixed broken mats on Windows caused by Bash/WSL changes
+    7.ms, ftype.ms
+- added "ez-grammar" example program
+    examples/ez-grammar.ss, examples/ez-grammar-test.ss,
+    examples/Makefile, examples.ms
+- updated ez-grammar-test to write temp files to current directory and delete them when finished
+    examples/ez-grammar-test.ss
+- added support for Microsoft Visual Studio 2017 on Windows
+    BUILDING, c/Mf-a6nt, c/Mf-ta6nt, c/vs.bat,
+    mats/Mf-a6nt, mats/Mf-ta6nt, mats/ftype.ms
+- added support for building Windows installs with Bash/WSL
+    wininstall/Makefile, candle.bat, light.bat
+- added support for building with Visual Studio 2017's BuildTools
+    c/vs.bat
+- check for git before using to get submodules
+    configure
+- fixed windows installer failure when vcredist is not preinstalled by
+  using the vcredist merge module, split the 32 and 64 bit MSIs and
+  added a wix bundle to combine the MSIs into a single exe installer,
+  added a batch script for locating Visual Studio's vcredist merge
+  modules, updated installer paths and names.
+    wininstall/*
+- fixed np-normalize-context pass to process trivs list in mvset forms
+  in tail and predicate context and added regression tests.  Thanks to
+  @marcomaggi for reporting the bug and @yjqww6 for providing a
+  simplified test and finding the initial solution.
+    cpnanopass.ss,
+    3.ms
+- add (& ftype) argument/result for foreign-procedure, which supports
+  struct arguments and results for foreign calls
+    syntax.ss, ftype.ss, cpnanopass.ss, x86.ss, x86_64.ss,
+    base-lang.ss, np-languages.ss, cprep.ss, primdata.ss,
+    schlib.c, prim.c, externs.h
+    mats/foreign4.c, mats/foreign.ms mats/Mf-*
+    foreign.stex, release_notes.stex
