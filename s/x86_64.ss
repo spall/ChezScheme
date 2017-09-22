@@ -2416,44 +2416,57 @@
         [(fp-ftd& ,ftd) (classify-eightbytes ftd)]
         [else #f]))
 
-    ;; Returns '(memory) or a nonemtpy list of 'integer/'sse
-    (define (classify-eightbytes ftd)
-      (define (merge t1 t2)
-        (cond
-         [(eq? t1 t2) t1]
-         [(eq? t1 'no-class) t2]
-         [(eq? t2 'no-class) t1]
-         [(eq? t1 'memory) 'memory]
-         [(eq? t2 'memory) 'memory]
-         [else 'integer]))
-      (cond
-       [(or (> ($ftd-size ftd) 16) ; more than 2 eightbytes => passed in memory
-            (fx= 0 ($ftd-size ftd)))
-        '(memory)]
-       [else
-        (let ([classes (make-vector (fxsrl (align ($ftd-size ftd) 8) 3) 'no-class)])
-          (let loop ([mbrs ($ftd->members ftd)])
-            (cond
-             [(null? mbrs)
-              (vector->list classes)]
-             [else
-              (let ([kind (caar mbrs)]
-                    [size (cadar mbrs)]
-                    [offset (caddar mbrs)])
-                (cond
-                 [(not (fx= offset (align offset size)))
-                  ;; misaligned
-                  '(memory)]
-                 [else
-                  (let* ([pos (fxsrl offset 3)]
-                         [class (vector-ref classes pos)]
-                         [new-class (merge class (if (eq? kind 'float) 'sse 'integer))])
-                    (cond
-                     [(eq? new-class 'memory)
-                      '(memory)]
-                     [else
-                      (vector-set! classes pos new-class)
-                      (loop (cdr mbrs))]))]))])))]))
+    ;; classify-eightbytes: returns '(memory) or a nonemtpy list of 'integer/'sse
+    (if-feature windows
+      ;; Windows: either passed in one register or not
+      (define (classify-eightbytes ftd)
+	(cond
+	 [($ftd-compound? ftd)
+	  (if (memv ($ftd-size ftd) '(1 2 4 8))
+	      '(integer)
+	      '(memory))]
+	 [(eq? 'float (caar ($ftd->members ftd)))
+	  '(sse)]
+	 [else '(integer)]))
+      ;; Non-Windows: SYSV ABI is a more general classification of
+      ;; 8-byte segments into 'integer, 'sse, or 'memory modes
+      (define (classify-eightbytes ftd)
+	(define (merge t1 t2)
+	  (cond
+	   [(eq? t1 t2) t1]
+	   [(eq? t1 'no-class) t2]
+	   [(eq? t2 'no-class) t1]
+	   [(eq? t1 'memory) 'memory]
+	   [(eq? t2 'memory) 'memory]
+	   [else 'integer]))
+	(cond
+	 [(or (> ($ftd-size ftd) 16) ; more than 2 eightbytes => passed in memory
+	      (fx= 0 ($ftd-size ftd)))
+	  '(memory)]
+	 [else
+	  (let ([classes (make-vector (fxsrl (align ($ftd-size ftd) 8) 3) 'no-class)])
+	    (let loop ([mbrs ($ftd->members ftd)])
+	      (cond
+	       [(null? mbrs)
+		(vector->list classes)]
+	       [else
+		(let ([kind (caar mbrs)]
+		      [size (cadar mbrs)]
+		      [offset (caddar mbrs)])
+		  (cond
+		   [(not (fx= offset (align offset size)))
+		    ;; misaligned
+		    '(memory)]
+		   [else
+		    (let* ([pos (fxsrl offset 3)]
+			   [class (vector-ref classes pos)]
+			   [new-class (merge class (if (eq? kind 'float) 'sse 'integer))])
+		      (cond
+		       [(eq? new-class 'memory)
+			'(memory)]
+		       [else
+			(vector-set! classes pos new-class)
+			(loop (cdr mbrs))]))]))])))])))
 
     (define (count v l)
       (cond
@@ -2462,7 +2475,8 @@
        [else (count v (cdr l))]))
 
     ;; A result is put in registers if it has up to two
-    ;; eightbytes, each 'integer or 'sse
+    ;; eightbytes, each 'integer or 'sse. On Windows,
+    ;; `result-classes` always has only one item.
     (define (result-fits-in-registers? result-classes)
       (and result-classes
            (not (eq? 'memory (car result-classes)))
@@ -2625,6 +2639,44 @@
                                    (loop (cdr types)
                                      (cons (load-single-stack isp) locs)
                                      regs i (fx+ isp 8)))]
+                              [(fp-ftd& ,ftd)
+                               (cond
+                                [(memv ($ftd-size ftd) '(1 2 4 8))
+                                 ;; pass as value in register or as value on the stack
+                                 (cond
+                                  [(< i 4)
+                                   ;; pass as value in register
+                                   (cond
+                                    [(and (not ($ftd-compound? ftd))
+                                          (eq? 'float (caar ($ftd->members ftd))))
+                                     ;; float or double
+                                     (loop (cdr types)
+                                       (cons (load-content-regs '(sse) ($ftd-size ftd) i i vint vfp) locs)
+                                       (add-int-regs 1 i vint regs) (fx+ i 1) isp)]
+                                    [else
+                                     ;; integer
+                                     (loop (cdr types)
+                                       (cons (load-content-regs '(integer) ($ftd-size ftd) i i vint vfp) locs)
+                                       (add-int-regs 1 i vint regs) (fx+ i 1) isp)])]
+                                  [else
+                                   ;; pass as value on the stack
+                                   (loop (cdr types)
+                                     (cons (load-content-stack isp ($ftd-size ftd)) locs)
+                                     regs i (fx+ isp (align ($ftd-size ftd) 8)))])]
+                                [else
+                                 ;; pass by reference in register or by reference on the stack
+                                 (cond
+                                  [(< i 4)
+                                   ;; pass by reference in a register
+                                   (let ([reg (vector-ref vint i)])
+                                     (loop (cdr types)
+                                       (cons (load-int-reg (car types) reg) locs)
+                                       (cons reg regs) (fx+ i 1) isp))]
+                                  [else
+                                   ;; pass by reference on the stack
+                                   (loop (cdr types)
+                                     (cons (load-int-stack isp) locs)
+                                     regs i (fx+ isp 8))])])]
                               [else
                                (if (< i 4)
                                    (let ([reg (vector-ref vint i)])
@@ -2664,7 +2716,7 @@
                                    ;; pass on the stack
                                    (loop (cdr types)
                                          (cons (load-content-stack isp ($ftd-size ftd)) locs)
-                                         regs iint ifp (fx+ isp ($ftd-size ftd)))]
+                                         regs iint ifp (fx+ isp (align ($ftd-size ftd) 8)))]
                                   [else
                                    ;; pass in registers
                                    (loop (cdr types)
@@ -2891,6 +2943,40 @@
                                  ,%sp ,%zero (immediate ,isp))
                                ,(f (cdr types) (fx+ i 1) (fx+ isp 8)))
                              (f (cdr types) i isp))]
+                        [(fp-ftd& ,ftd)
+                         (cond
+                          [(memv ($ftd-size ftd) '(1 2 4 8))
+                           ;; receive as value in register or on the stack
+                           (cond
+                            [(< i 4)
+                             ;; receive in register
+                             (cond
+                              [(and (not ($ftd-compound? ftd))
+                                    (eq? 'float (caar ($ftd->members ftd))))
+                               ;; float or double
+                               `(seq
+                                 (inline ,(make-info-loadfl (vector-ref vfp i)) ,%store-double
+                                         ,%sp ,%zero (immediate ,isp))
+                                 ,(f (cdr types) (fx+ i 1) (fx+ isp 8)))]
+                              [else
+                               ;; integer
+                               `(seq
+                                 (set! ,(%mref ,%sp ,isp) ,(vector-ref vint i))
+                                 ,(f (cdr types) (fx+ i 1) (fx+ isp 8)))])]
+                            [else
+                             ;; receive by value on the stack
+                             (f (cdr types) i isp)])]
+                          [else
+                           ;; receive by reference in register or on the stack
+                           (cond
+                            [(< i 4)
+                             ;; receive by reference in register
+                             `(seq
+                               (set! ,(%mref ,%sp ,isp) ,(vector-ref vint i))
+                               ,(f (cdr types) (fx+ i 1) (fx+ isp 8)))]
+                            [else
+                             ;; receive by reference on the stack
+                             (f (cdr types) i isp)])])]
                         [else
                          (if (< i 4)
                              (%seq
@@ -2957,9 +3043,23 @@
                            (nanopass-case (Ltype Type) (car types)
                              [(fp-double-float) (load-double-stack isp)]
                              [(fp-single-float) (load-single-stack isp)]
+			     [(fp-ftd& ,ftd)
+			      (cond
+			       [(memq ($ftd-size ftd) '(1 2 4 8))
+				;; passed by value
+				(load-stack-address isp)]
+			       [else
+				;; passed by reference
+				(load-int-stack (car types) isp)])]
                              [else (load-int-stack (car types) isp)])
                            locs)
-                         (fx+ isp 8))))
+			 (nanopass-case (Ltype Type) (car types)
+			   [(fp-ftd& ,ftd)
+			    (let ([len ($ftd-size ftd)])
+			      (case len
+				[(1 2 4 8) (fx+ isp 8)]
+				[else (fx+ isp (align len 16))]))]
+			   [else (fx+ isp 8)]))))
                 (let f ([types types]
                         [locs '()]
                         [iint (if first-arg-is-result-dest? 1 0)]
@@ -3010,31 +3110,52 @@
                              (f (cdr types)
                                (cons (load-int-stack (car types) risp) locs)
                                (fx+ iint 1) ifp (fx+ risp 8) sisp))]))))))
-          (define (pick-Scall Scall->result-type result-classes)
+          (define (pick-Scall Scall->result-type result-type result-classes)
             (cond
              [(not result-classes)
               ;; Normal case that's not `fp-ftd&`
               Scall->result-type]
              
              [(result-fits-in-registers? result-classes)
-              ;; Result will use up to two integer registers. It's ok
-              ;; to return extra values that are zeroed out
-              (cond
-               [(equal? result-classes '(integer))
-                (lookup-c-entry Scall->indirect-sized-int64-int64)]
-               [(equal? result-classes '(sse))
-                (lookup-c-entry Scall->indirect-sized-double-double)]
-               
-               [(equal? result-classes '(integer sse))
-                (lookup-c-entry Scall->indirect-sized-int64-double)]
-               [(equal? result-classes '(sse integer))
-                (lookup-c-entry Scall->indirect-sized-double-int64)]
-               [(equal? result-classes '(integer integer))
-                (lookup-c-entry Scall->indirect-sized-int64-int64)]
-               [(equal? result-classes '(sse sse))
-                (lookup-c-entry Scall->indirect-sized-double-double)]
+	      (if-feature windows
+                ;; Windows: result always matches the size of some base type
+		(let ([len (nanopass-case (Ltype Type) result-type
+					  [(fp-ftd& ,ftd) ($ftd-size ftd)])])
+		  (cond
+		   [(equal? result-classes '(sse))
+		    (case len
+		     [(4)
+		      (lookup-c-entry Scall->indirect-float)]
+		     [else
+		      (lookup-c-entry Scall->indirect-double)])]
+		   [else
+		    (case len
+		      [(1)
+		       (lookup-c-entry Scall->indirect-byte)]
+		      [(2)
+		       (lookup-c-entry Scall->indirect-short)]
+		      [(4)
+		       (lookup-c-entry Scall->indirect-int32)]
+		      [else
+		       (lookup-c-entry Scall->indirect-int64)])]))
+		;; Non-Windows: result will use up to two integer registers. It's ok
+		;; to return extra values that are zeroed out
+		(cond
+		 [(equal? result-classes '(integer))
+		  (lookup-c-entry Scall->indirect-sized-int64-int64)]
+		 [(equal? result-classes '(sse))
+		  (lookup-c-entry Scall->indirect-sized-double-double)]
 
-               [else ($oops 'pick-Scall "no case for ~s" result-classes)])]
+		 [(equal? result-classes '(integer sse))
+		  (lookup-c-entry Scall->indirect-sized-int64-double)]
+		 [(equal? result-classes '(sse integer))
+		  (lookup-c-entry Scall->indirect-sized-double-int64)]
+		 [(equal? result-classes '(integer integer))
+		  (lookup-c-entry Scall->indirect-sized-int64-int64)]
+		 [(equal? result-classes '(sse sse))
+		  (lookup-c-entry Scall->indirect-sized-double-double)]
+
+		 [else ($oops 'pick-Scall "no case for ~s" result-classes)]))]
              [else
               ;; Caller supplied a destination to copy into:
               (lookup-c-entry Scall->indirect-copy)]))
@@ -3043,11 +3164,14 @@
                          [(fp-ftd& ,ftd) ($ftd-size ftd)])])
               (cond
                [(result-fits-in-registers? result-classes)
-                ;; Register size
-                (in-context Tail
-                  (%seq
-                   (set! ,(%tc-ref td) (immediate ,(fix len)))
-                   ,e))]
+                (if-feature windows
+                   ;; Nothing to register
+                   e
+                   ;; Register size
+                   (in-context Tail
+                     (%seq
+                       (set! ,(%tc-ref td) (immediate ,(fix len)))
+                       ,e)))]
                [else
                 ;; Register pinter and size
                 (in-context Tail
@@ -3125,6 +3249,9 @@
                              (set! ,%rbp ,(%inline pop))
                              (set! ,%rbx ,(%inline pop))
                              (set! ,%sp ,(%inline + ,%sp (immediate 120)))))
-                        (jump (literal ,(make-info-literal #f 'entry (pick-Scall Scall->result-type result-classes) 0))
+                        (jump (literal ,(make-info-literal #f 'entry (pick-Scall Scall->result-type
+                                                                                 result-type
+                                                                                 result-classes)
+                                                           0))
                           (,%rbx ,%rbp ,%r12 ,%r13 ,%r14 ,%r15 ,fv* ...))))))))))))))
   )
