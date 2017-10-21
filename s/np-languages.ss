@@ -25,7 +25,7 @@
     uvar-in-prefix? uvar-in-prefix!
     uvar-location uvar-location-set!
     uvar-move* uvar-move*-set!
-    uvar-conflict*
+    uvar-conflict* uvar-conflicts-all? uvar-conflicts-all!
     uvar-ref-weight uvar-ref-weight-set! uvar-save-weight uvar-save-weight-set!
     uvar
     fv-offset
@@ -161,6 +161,7 @@
     (loop               #b00001000000)
     (in-prefix          #b00010000000)
     (local-save         #b00100000000)
+    (conflicts-all      #b01000000000)
   )
 
   (define-record-type (uvar $make-uvar uvar?)

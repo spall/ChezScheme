@@ -250,7 +250,7 @@
                                  (bytevector-u16-native-ref bv n))
                             count))))))))
 
-    (module (empty-tree tree-extract tree-for-each tree-fold-left tree-bit-set? tree-bit-set tree-bit-unset tree-bit-count tree-same? tree-merge)
+    (module (empty-tree tree-extract tree-for-each tree-fold-left tree-bit-set? tree-bit-set tree-bit-unset tree-bit-count tree-bit-count>? tree-same? tree-merge)
       ; tree -> fixnum | (tree-node tree tree)
       ; 0 represents any tree or subtree with no bits set, and a tree or subtree
       ; with no bits set is always 0
@@ -391,6 +391,16 @@
               (fxbit-count st)
               (fx+ (tree-bit-count (tree-node-left st))
                    (tree-bit-count (tree-node-right st))))))
+
+      (define tree-bit-count>?
+        (lambda (st n) ; short-circuits so that it does something like O(n) work
+          (fx> 0 (let remain ([st st] [n n])
+                   (cond
+                    [(fixnum? st) (fx- n (fxbit-count st))]
+                    [else (let ([v (remain (tree-node-left st) n)])
+                            (if (fx< v 0)
+                                v
+                                (remain (tree-node-right st) v)))])))))
 
       (define tree-same? ; assumes empty-tree is 0
         (lambda (st1 st2)
@@ -14004,7 +14014,7 @@
         (define extract-conflicts
           (lambda (cset v)
             (tree-extract (cset-tree cset) (cset-size cset) v)))
-        )
+      )
 
       (define do-live-analysis!
         (lambda (live-size entry-block*)
@@ -14210,6 +14220,49 @@
                 (do-live! entry-block)))
             entry-block*)))
 
+      ;; Check live-variable set sizes, and when they get too big,
+      ;; start tagging uvars as conflicts-all. The intent is to avoid
+      ;; excessive compilation times due to too-large conflict sets
+      ;; in the register allocator.
+      (define select-conflicts-alls!
+        (lambda (live-size block*)
+          (define add-var (make-add-var live-size))
+          (define remove-var (make-remove-var live-size))
+          (define (select-conflicts-all! live-info x)
+            (when (and (uvar? x)
+                       (not (uvar-unspillable? x))
+                       (let ([live (live-info-live live-info)])
+                         (and (not (eq? live 'uninitialized))
+                              (tree-bit-count>? live 100)))) ; <- 100 should be a parameter
+              (uvar-conflicts-all! x #t)))
+          (define-who effect-select-conflicts-alls!
+            (lambda (instr)
+              (define Rhs
+                (lambda (live-info rhs)
+                  (nanopass-case (L15a Rhs) rhs
+                    [(inline ,info ,value-prim ,t* ...)
+                     (when (info-kill*? info)
+                       (for-each (lambda (x) (select-conflicts-all! live-info x))
+                                 (info-kill*-kill* info)))]
+                    [else (void)])))
+              (nanopass-case (L15a Effect) instr
+                [(set! ,live-info ,x ,rhs)
+                 (begin
+                   (select-conflicts-all! live-info x)
+                   (Rhs live-info rhs))]
+                [(set! ,live-info ,lvalue ,rhs)
+                 (Rhs live-info rhs)]
+                [(inline ,live-info ,info ,effect-prim ,t* ...)
+                 (when (info-kill*? info)
+                   (for-each (lambda (x) (select-conflicts-all! live-info x))
+                             (info-kill*-kill* info)))]
+                [else (void)])))
+          (for-each (lambda (block)
+                      (safe-assert (block-seen? block))
+                      (for-each effect-select-conflicts-alls!
+                                (block-effect* block)))
+                    block*)))
+
       (define-who check-entry-live!
         ; when enabled, spits out messages about uvars and unexpected registers that are live
         ; on entry.  there should never be any live uvars.  for procedures that started life
@@ -14280,6 +14333,25 @@
 
       (define-who do-spillable-conflict!
         (lambda (kspillable varvec live-size block*)
+          (define (make-initial-csets)
+            (let* ([base-cset
+                    ;; set of variables that conflict with everything:
+                    (let ([cset (make-cset kspillable)])
+                                (let loop ([i 0])
+                                  (unless (= i kspillable)
+                                    (when (uvar-conflicts-all? (vector-ref varvec i))
+                                      (conflict-bit-set! cset i))
+                                    (loop (fx+ 1 i))))
+                                cset)])
+              (values base-cset
+                      (and (positive? (conflict-bit-count base-cset))
+                           ;; set of all spillables:
+                           (let ([cset (make-cset kspillable)])
+                             (let loop ([i 0])
+                               (unless (= i kspillable)
+                                 (conflict-bit-set! cset i)
+                                 (loop (fx+ 1 i))))
+                             cset)))))
           (define remove-var (make-remove-var live-size))
           (define add-move!
             (lambda (x1 x2)
@@ -14288,19 +14360,20 @@
                 ($add-move! x2 x1 2))))
           (define add-conflict!
             (lambda (x out)
-              (let ([x-offset (var-index x)])
-                (when x-offset
-                  (tree-for-each out live-size
-                    (let ([cset (var-spillable-conflict* x)])
-                      (if (fx< x-offset kspillable)
-                              (lambda (y-offset)
-                            ; x is a spillable.  if y is also a spillable, point x at y
-                            (when (fx< y-offset kspillable) (conflict-bit-set! cset y-offset))
-                            ; point y at the spillable x regardless
-                            (conflict-bit-set! (var-spillable-conflict* (vector-ref varvec y-offset)) x-offset))
-                          (lambda (y-offset)
-                            ; x is fixed.  if y is a spillable, point x at y
-                            (when (fx< y-offset kspillable) (conflict-bit-set! cset y-offset))))))))))
+              (unless (and (uvar? x) (uvar-conflicts-all? x))
+                (let ([x-offset (var-index x)])
+                  (when x-offset
+                    (tree-for-each out live-size
+                      (let ([cset (var-spillable-conflict* x)])
+                        (if (fx< x-offset kspillable)
+                            (lambda (y-offset)
+                              ; x is a spillable.  if y is also a spillable, point x at y
+                              (when (fx< y-offset kspillable) (conflict-bit-set! cset y-offset))
+                              ; point y at the spillable x regardless
+                              (conflict-bit-set! (var-spillable-conflict* (vector-ref varvec y-offset)) x-offset))
+                            (lambda (y-offset)
+                              ; x is fixed.  if y is a spillable, point x at y
+                              (when (fx< y-offset kspillable) (conflict-bit-set! cset y-offset)))))))))))
           (define Rhs
             (lambda (rhs live)
               (nanopass-case (L15a Rhs) rhs
@@ -14330,7 +14403,18 @@
                    (for-each (lambda (x) (add-conflict! x live)) (info-kill*-kill* info)))
                  (cons e new-effect*)]
                 [else (cons e new-effect*)])))
-          (vector-for-each (lambda (x) (var-spillable-conflict*-set! x (make-cset kspillable))) varvec)
+          (let-values ([(base-cset cset-conflict-all) (make-initial-csets)])
+            (vector-for-each (lambda (x)
+                               (let ([cset (if (not (and (uvar? x)
+                                                         (uvar-conflicts-all? x)))
+                                               ;; normal variable that doesn't conflict with everything:
+                                               (cset-copy base-cset)
+                                               ;; variable that conflicts with everything, but remove itself:
+                                               (let ([cset (cset-copy cset-conflict-all)])
+                                                 (conflict-bit-unset! cset (var-index x))
+                                                 cset))])
+                                 (var-spillable-conflict*-set! x cset)))
+                             varvec))
           (for-each
             (lambda (block)
               (block-effect*-set! block
@@ -14353,7 +14437,7 @@
           (unless any? (printf " none"))
           (newline)))
 
-      (module (assign-frame! assign-new-frame!)
+      (module (assign-frame! assign-new-frame! assign-conflicts-all-frame!)
         (define update-conflict!
           (lambda (fv spill)
             (let ([cset1 (var-spillable-conflict* fv)]
@@ -14639,7 +14723,29 @@
                   (uvar-location-set! x #f)
                   (uvar-spilled! x #f)))
               spillable*)
-            `(dummy))))
+            `(dummy)))
+
+        ;; Like assign-frame!, but specialized to spillables that conflict with all others
+        (define assign-conflicts-all-frame!
+          (lambda ()
+            (let ([fv-index (fold-left (lambda (fv-index spill)
+                                         (cond
+                                          [(or (not (uvar-conflicts-all? spill))
+                                               (uvar-location spill))
+                                           fv-index]
+                                          [else
+                                           (let loop ([fv-index fv-index])
+                                             (let ([home (get-fv fv-index)])
+                                               (cond
+                                                [(var-spillable-conflict* home) ; anything => conflict
+                                                 (loop (fx+ fv-index 1))]
+                                                [else
+                                                 (uvar-spilled! spill #t)
+                                                 (uvar-location-set! spill home)
+                                                 (update-conflict! home spill)
+                                                 1 fv-index])))]))
+                                       1 spillable*)])
+              (set! max-fv (fxmax max-fv fv-index))))))
 
       (define record-fp-offsets!
         (lambda (block*)
@@ -15534,6 +15640,7 @@
                  (with-live-info-record-writer live-size varvec
                    ; run intra/inter-block live analysis
                    (RApass unparse-L15a do-live-analysis! live-size entry-block*)
+                   (RApass unparse-L15a select-conflicts-alls! live-size block*)
                    ; this is worth enabling from time to time...
                    #;(check-entry-live! (info-lambda-name info) live-size varvec entry-block*)
                    ; rerun intra-block live analysis and record (fv v reg v spillable) x spillable conflicts
@@ -15548,6 +15655,8 @@
                    ; determine frame sizes at nontail-call sites and assign homes to new-frame variables
                    ; adds new fv x spillable conflicts
                    (let ([dummy (RApass unparse-L15b assign-new-frame! (with-output-language (L15a Dummy) `(dummy)) info live-size varvec block*)])
+                     ; spill conflicts-all variables to get them out of the way of `assign-registers!`
+                     (RApass unparse-L15b assign-conflicts-all-frame!)
                      ; record fp offset on entry to each block
                      (RApass unparse-L15b record-fp-offsets! entry-block*)
                      ; on entry to loop, have assigned call-live and new-frame variables to frame homes, determined frame sizes, and computed block-entry fp offsets
@@ -15557,12 +15666,13 @@
                          (for-each
                            (lambda (spill)
                              ; remove each spill from each other spillable's spillable conflict set
-                             (let ([spill-index (var-index spill)] [cset (var-spillable-conflict* spill)])
-                               (cset-for-each cset
-                                 (lambda (i)
-                                   (let ([x (vector-ref varvec i)])
-                                     (unless (uvar-location x)
-                                       (conflict-bit-unset! (var-spillable-conflict* x) spill-index))))))
+                             (unless (uvar-conflicts-all? spill)
+                               (let ([spill-index (var-index spill)] [cset (var-spillable-conflict* spill)])
+                                 (cset-for-each cset
+                                   (lambda (i)
+                                     (let ([x (vector-ref varvec i)])
+                                       (unless (uvar-location x)
+                                         (conflict-bit-unset! (var-spillable-conflict* x) spill-index)))))))
                              ; release the spill's conflict* set
                              (var-spillable-conflict*-set! spill #f))
                            (filter uvar-location spillable*))
