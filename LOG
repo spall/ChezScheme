@@ -593,3 +593,20 @@
     schlib.c, prim.c, externs.h
     mats/foreign4.c, mats/foreign.ms mats/Mf-*
     foreign.stex, release_notes.stex
+- added pass-time tracking for pre-cpnanopass passes to compile.
+    compile.ss
+- added inline handler for fxdiv-and-mod
+    cp0.ss, primdata.ss
+- changed order in which return-point operations are done (adjust
+  sfp first, then store return values, then restore local saves) to
+  avoid storing return values to homes beyond the end of the stack
+  in cases where adjusting sfp might result in a call to dooverflood.
+    cpnanopass.ss, np-languages.ss
+- removed unused {make-,}asm-return-registers bindings
+    cpnanopass.ss
+- corrected the max-fv value field of the lambda produced by the
+  hand-coded bytevector=? handler.
+    cpnanopass.ss
+- reduced live-pointer and inspector free-variable mask computation
+  overhead for live masks.
+    cpnanopass.ss

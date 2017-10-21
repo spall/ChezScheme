@@ -546,12 +546,6 @@
           [else (with-syntax ([%mref (datum->syntax x '%mref)])
                   #'(%mref ,%sfp 0))])))
 
-    ; asm-return-registsrs, L-doargerr, etc., encapsulate registers and must be
-    ; created fresh for each compiler run, so we just define makers here.
-    (define make-asm-return-registers
-      (lambda ()
-        ; these registers are preserved by each hand-coded library routine that returns to its caller
-        (reg-cons* %cp %ret (append arg-registers extra-registers))))
     (define make-Ldoargerr
       (lambda ()
         (make-libspec-label 'doargerr (lookup-libspec doargerr)
@@ -9962,7 +9956,6 @@
         (import (only asm-module asm-foreign-call asm-foreign-callable asm-enter))
         (define newframe-info-for-mventry-point)
         (define Lcall-error (make-Lcall-error))
-        (define asm-return-registers (make-asm-return-registers))
         (define dcl*)
         (define local*)
         (define max-fv)
@@ -10300,6 +10293,7 @@
                                    (safe-assert cnfv)
                                    (%seq
                                      (remove-frame ,newframe-info)
+                                     (restore-local-saves ,newframe-info)
                                      (set! ,(ref-reg %cp) ,cnfv)
                                      ,(build-shift-args newframe-info))))
                               ,(build-consumer-call tc (in-context Triv (ref-reg %cp)) #f))
@@ -10307,9 +10301,10 @@
                               `(seq
                                  ,(build-nontail-call info mdcl t0 t1* tc* '() mrvl #t
                                     (lambda (newframe-info)
-                                      `(seq
-                                         (remove-frame ,newframe-info)
-                                         ,(build-shift-args newframe-info))))
+                                      (%seq
+                                        (remove-frame ,newframe-info)
+                                        (restore-local-saves ,newframe-info)
+                                        ,(build-shift-args newframe-info))))
                                  ,(build-consumer-call tc #f #f))))))))
               (define build-mv-return
                 (lambda (t*)
@@ -11182,20 +11177,22 @@
              (handle-do-rest fixed-args frame-args-offset #f))]
         ; TODO: get internal error when , is missing from ,l
         [(mventry-point (,x* ...) ,l)
-         (let f ([x* x*])
-           (if (null? x*)
-               (%seq
-                 (remove-frame ,newframe-info-for-mventry-point)
-                 (goto ,l))
-               (let ([x (car x*)])
-                 (if (uvar-referenced? x)
-                     `(seq (set! ,x ,(uvar-location x)) ,(f (cdr x*)))
-                     (f (cdr x*))))))]
+         (%seq
+           (remove-frame ,newframe-info-for-mventry-point)
+           ,(let f ([x* x*])
+              (if (null? x*)
+                  (%seq
+                    (restore-local-saves ,newframe-info-for-mventry-point)
+                    (goto ,l))
+                  (let ([x (car x*)])
+                    (if (uvar-referenced? x)
+                        `(seq (set! ,x ,(uvar-location x)) ,(f (cdr x*)))
+                        (f (cdr x*)))))))]
         [(mvcall ,info ,mdcl ,t0? ,t1* ... (,t* ...))
          (let ([mrvl (make-local-label 'mrvl)])
            (build-nontail-call info mdcl t0? t1* t* '() mrvl #f
              (lambda (newframe-info)
-               `(seq (label ,mrvl) (remove-frame ,newframe-info)))))]
+               (%seq (label ,mrvl) (remove-frame ,newframe-info) (restore-local-saves ,newframe-info)))))]
         [(mvset ,info (,mdcl ,t0? ,t1* ...) (,t* ...) ((,x** ...) ...) ,ebody)
          (let* ([frame-x** (map (lambda (x*) (set-formal-registers! x*)) x**)]
                 [nfv** (map (lambda (x*) (map (lambda (x)
@@ -11212,7 +11209,7 @@
         [(set! ,[lvalue] (mvcall ,info ,mdcl ,t0? ,t1* ... (,t* ...)))
          (build-nontail-call info mdcl t0? t1* t* '() #f #f
            (lambda (newframe-info)
-             `(seq (set! ,lvalue ,%ac0) (remove-frame ,newframe-info))))]
+             (%seq (remove-frame ,newframe-info) (set! ,lvalue ,%ac0) (restore-local-saves ,newframe-info))))]
         [(foreign-call ,info ,[t0] ,[t1*] ...)
          (build-foreign-call info t0 t1* #f #t)]
         [(set! ,[lvalue] (foreign-call ,info ,[t0] ,[t1*] ...))
@@ -11275,7 +11272,6 @@
       (definitions
         (import (only asm-module asm-enter))
         (define Ldoargerr (make-Ldoargerr))
-        (define asm-return-registers (make-asm-return-registers))
         (define-$type-check (L13.5 Pred))
         (define make-info
           (lambda (name interface*)
@@ -12073,9 +12069,10 @@
                   (jump ,%ref-ret (,%ac0))))]
            [(bytevector=?)
             (let ([bv1 (make-tmp 'bv1)] [bv2 (make-tmp 'bv2)] [idx (make-tmp 'idx)] [len2 (make-tmp 'len2)])
+              (define (argcnt->max-fv n) (max (- n (length arg-registers)) 0))
               (let ([Ltop (make-local-label 'Ltop)] [Ltrue (make-local-label 'Ltrue)] [Lfail (make-local-label 'Lfail)])
                 (define iptr-bytes (in-context Triv (%constant ptr-bytes)))
-                `(lambda ,(make-info "bytevector=?" '(2)) 0 (,bv1 ,bv2 ,idx ,len2)
+                `(lambda ,(make-info "bytevector=?" '(2)) ,(argcnt->max-fv 2) (,bv1 ,bv2 ,idx ,len2)
                    ,(%seq
                       (set! ,bv1 ,(make-arg-opnd 1))
                       (set! ,bv2 ,(make-arg-opnd 2))
@@ -12492,6 +12489,9 @@
                (values block (cons block block*)))]
             [(remove-frame ,info)
              (add-instr! target (with-output-language (L15a Effect) `(remove-frame ,(make-live-info) ,info)))
+             (values target block*)]
+            [(restore-local-saves ,info)
+             (add-instr! target (with-output-language (L15a Effect) `(restore-local-saves ,(make-live-info) ,info)))
              (values target block*)]
             [(return-point ,info ,rpl ,mrvl (,cnfv* ...))
              (add-instr! target (with-output-language (L15a Effect) `(return-point ,info ,rpl ,mrvl (,cnfv* ...))))
@@ -14089,6 +14089,7 @@
                                  (fold-left add-var out (info-kill*-live*-live* info))
                                  out)))]
                         [(remove-frame ,live-info ,info) (live-info-live-set! live-info out) out]
+                        [(restore-local-saves ,live-info ,info) (live-info-live-set! live-info out) out]
                         [(shift-arg ,live-info ,reg ,imm ,info) (live-info-live-set! live-info out) out]
                         [(overflow-check ,live-info) (live-info-live-set! live-info out) out]
                         [(overflood-check ,live-info) (live-info-live-set! live-info out) out]
@@ -14292,7 +14293,7 @@
                   (tree-for-each out live-size
                     (let ([cset (var-spillable-conflict* x)])
                       (if (fx< x-offset kspillable)
-                          (lambda (y-offset)
+                              (lambda (y-offset)
                             ; x is a spillable.  if y is also a spillable, point x at y
                             (when (fx< y-offset kspillable) (conflict-bit-set! cset y-offset))
                             ; point y at the spillable x regardless
@@ -14485,25 +14486,41 @@
                             (for-each (lambda (nfv*) (set-offsets! nfv* arg-base)) nfv**)
                             base)
                           (loop (fx+ base 1))))))))
+            (define build-mask
+              (lambda (index*)
+                (define bucket-width (if (fx> (fixnum-width) 32) 32 16))
+                (let* ([nbits (fx+ (fold-left (lambda (m index) (fxmax m index)) -1 index*) 1)]
+                       [nbuckets (fxdiv (fx+ nbits (fx- bucket-width 1)) bucket-width)]
+                       [buckets (make-fxvector nbuckets 0)])
+                  (for-each
+                    (lambda (index)
+                      (let-values ([(i j) (fxdiv-and-mod index bucket-width)])
+                        (fxvector-set! buckets i (fxlogbit1 j (fxvector-ref buckets i)))))
+                    index*)
+                  (let f ([base 0] [len nbuckets])
+                    (if (fx< len 2)
+                        (if (fx= len 0)
+                            0
+                            (fxvector-ref buckets base))
+                        (let ([half (fxsrl len 1)])
+                          (logor
+                            (bitwise-arithmetic-shift-left (f (fx+ base half) (fx- len half)) (fx* half bucket-width))
+                            (f base half))))))))
             (define build-live-pointer-mask
               (lambda (live*)
-                (define set-lpm-bit
-                  (lambda (fv lpm)
-                    (let ([i (fv-offset fv)])
-                      (if (fx= i 0)
-                          lpm
-                          (logbit1 (fx- i 1) lpm)))))
-                (fold-left
-                  (lambda (lpm live)
-                    (cond
-                      [(fv? live)
-                       ; assuming call-live frame variables are ptrs for the time being
-                       ; they should all be products of tail-frame optimization on (ptr) arguments
-                       (set-lpm-bit live lpm)]
-                      [(and live (eq? (uvar-type live) 'ptr))
-                       (set-lpm-bit (uvar-location live) lpm)]
-                      [else lpm]))
-                  0 live*)))
+                (build-mask
+                  (fold-left
+                    (lambda (index* live)
+                      (define (cons-fv fv index*)
+                        (let ([offset (fv-offset fv)])
+                          (if (fx= offset 0) ; no bit for fv0
+                              index*
+                              (cons (fx- offset 1) index*))))
+                      (cond
+                        [(fv? live) (cons-fv live index*)]
+                        [(eq? (uvar-type live) 'ptr) (cons-fv (uvar-location live) index*)]
+                        [else index*]))
+                    '() live*))))
             (define (process-info-newframe! info)
               (unless (info-newframe-frame-words info)
                 (let ([call-live* (info-newframe-call-live* info)])
@@ -14519,17 +14536,18 @@
                 (cond
                   [(and call-live* (info-lambda-ctci lambda-info)) =>
                    (lambda (ctci)
-                     (let ([mask (fold-left
-                                   (lambda (mask x)
-                                     (cond
-                                       [(and (uvar? x) (uvar-iii x)) =>
-                                        (lambda (index)
-                                          (let ([name.offset (vector-ref (ctci-live ctci) index)])
-                                            (unless (logbit? (fx- (cdr name.offset) 1) lpm)
-                                              (sorry! who "bit ~s not set for ~s in ~s" (cdr name.offset) (car name.offset) lpm)))
-                                          (logor (ash 1 index) mask))]
-                                       [else mask]))
-                                   0 call-live*)])
+                     (let ([mask (build-mask
+                                   (fold-left
+                                     (lambda (i* x)
+                                       (cond
+                                         [(and (uvar? x) (uvar-iii x)) =>
+                                          (lambda (index)
+                                            (safe-assert
+                                              (let ([name.offset (vector-ref (ctci-live ctci) index)])
+                                                (logbit? (fx- (cdr name.offset) 1) lpm)))
+                                            (cons index i*))]
+                                         [else i*]))
+                                     '() call-live*))])
                        (when (or src sexpr (not (eqv? mask 0)))
                          (ctci-rpi*-set! ctci (cons (make-ctrpi rpl src sexpr mask) (ctci-rpi* ctci))))))]))))
           (Pred : Pred (ir) -> Pred ())
@@ -14549,12 +14567,16 @@
              (process-info-newframe! info)
              (with-output-language (L15b Effect)
                (let ([live (live-info-live live-info)])
+                 (cons*
+                   `(fp-offset ,live-info ,(fx- (fx* (info-newframe-frame-words info) (constant ptr-bytes))))
+                   `(overflood-check ,(make-live-info live))
+                   new-effect*)))]
+            [(restore-local-saves ,live-info ,info)
+             (with-output-language (L15b Effect)
+               (let ([live (live-info-live live-info)])
                  (let loop ([x* (filter (lambda (x) (live? live live-size x)) (info-newframe-local-save* info))]
                             [live live]
-                            [new-effect* (cons*
-                                           `(fp-offset ,live-info ,(fx- (fx* (info-newframe-frame-words info) (constant ptr-bytes))))
-                                           `(overflood-check ,(make-live-info live))
-                                           new-effect*)])
+                            [new-effect* new-effect*])
                    (if (null? x*)
                        new-effect*
                        (let* ([x (car x*)] [live (remove-var live x)])
@@ -15240,8 +15262,8 @@
             (lambda (x)
               (fx- (uvar-ref-weight x) (uvar-save-weight x))))
           (define pick-potential-spill
-            ; x* is already sorted by ref weight, so this effectively picks uvar with
-            ; the highest degree among those with the lowest ref weight
+            ; x* is already sorted by weight, so this effectively picks uvar with
+            ; the highest degree among those with the lowest weight
             (lambda (x*)
               (let ([x (let f ([x* (cdr x*)] [max-degree (uvar-degree (car x*))] [max-x (car x*)])
                          (if (null? x*)
