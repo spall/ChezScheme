@@ -2129,6 +2129,10 @@
     (define align (lambda (b x) (let ([k (- b 1)]) (fxlogand (fx+ x k) (fxlognot k)))))
     (define gp-parameter-regs (lambda () (list %Carg1 %Carg2 %Carg3 %Carg4 %Carg5 %Carg6 %Carg7 %Carg8)))
     (define fp-parameter-regs (lambda () (list %Cfparg1 %Cfparg2 %Cfparg3 %Cfparg4 %Cfparg5 %Cfparg6 %Cfparg7 %Cfparg8)))
+    (define (indirect-result-that-fits-in-registers? result-type)
+      (nanopass-case (Ltype Type) result-type
+        [(fp-ftd& ,ftd) (not ($ftd-compound? ftd))]
+	[else #f]))
     (define-who asm-foreign-call
       (with-output-language (L13 Effect)
         (define load-double-stack
@@ -2259,8 +2263,7 @@
 			 (loop (cons unpacked-type (cdr types)) locs live* int* flt* isp
 			       (lambda (proc)
 				 (lambda (x)
-				   (let ([tmp %Carg1]) ;; can use %Carg1 as tmp, since it's filled last
-				     ;; unpack to u:
+				   (let ([tmp %Carg8]) ;; can use %Carg8 as tmp, since it's filled last
 				     (case category
 				       [(integer)
 					(let ([int-type (case ($ftd-size ftd)
@@ -2314,17 +2317,43 @@
                                (cons (unpack (load-int-reg (car int*))) locs)
                                (cons (car int*) live*) (cdr int*) flt* isp
 			       values (constant flonum-data-disp) #f)))])))))
+	(define do-indirect-result-from-registers
+	  (lambda (ftd offset)
+	    (let ([tmp %Carg8])
+	      (%seq
+	       (set! ,tmp ,(%mref ,%sp ,offset))
+	       ,(cond
+		 [(and (not (constant software-floating-point))
+		       (eq? 'float ($ftd-atomic-category ftd)))
+		  `(inline ,(make-info-loadfl %Cfpretval) ,(if (= 4 ($ftd-size ftd)) %store-single %store-double)
+			   ,tmp ,%zero (immediate 0))]
+		 [else
+		  (case ($ftd-size ftd)
+		    [(1) `(inline ,(make-info-load 'integer-8 #f) ,%store ,tmp ,%zero (immediate 0) ,%Cretval)]
+		    [(2) `(inline ,(make-info-load 'integer-16 #f) ,%store ,tmp ,%zero (immediate 0) ,%Cretval)]
+		    [(4) `(inline ,(make-info-load 'integer-32 #f) ,%store ,tmp ,%zero (immediate 0) ,%Cretval)]
+		    [(8)
+		     (%seq
+		      (inline ,(make-info-load 'integer-32 #f) ,%store ,tmp ,%zero (immediate 0) ,%Cretval-high)
+		      (inline ,(make-info-load 'integer-32 #f) ,%store ,tmp ,%zero (immediate 4) ,%Cretval-low))]
+		    [else (sorry! who "unexpected result size")])])))))
         (lambda (info)
           (safe-assert (reg-callee-save? %tc)) ; no need to save-restore
-          (let ([arg-type* (info-foreign-arg-type* info)]
-                [result-type (info-foreign-result-type info)])
-            (with-values (do-args arg-type*)
+          (let* ([arg-type* (info-foreign-arg-type* info)]
+		 [result-type (info-foreign-result-type info)]
+		 [fill-result-here? (indirect-result-that-fits-in-registers? result-type)])
+            (with-values (do-args (if fill-result-here? (cdr arg-type*) arg-type*))
               (lambda (frame-size locs live*)
                 ;; NB: add 4 to frame size for CR save word
-                (let ([frame-size (align 16 (fx+ frame-size 4))])
+                (let ([frame-size (align 16 (fx+ frame-size 4 (if fill-result-here? 4 0)))])
                   (values
                     (lambda () (%inline store-with-update ,%Csp ,%Csp (immediate ,(fx- frame-size))))
-                    (reverse locs)
+                    (let ([locs (reverse locs)])
+		      (cond
+		       [fill-result-here?
+			;; stash extra argument on the stack to retrieved after call and filled with the result:
+			(cons (load-int-stack frame-size) locs)]
+		       [else locs]))
                     (lambda (t0)
                       (if (constant software-floating-point)
                           (let ()
@@ -2340,11 +2369,21 @@
                                   [(8 16 32) (handle-32-bit)]
                                   [(64) (handle-64-bit)]
                                   [else (sorry! who "unexpected asm-foriegn-procedures fp-integer size ~s" bits)])))
+			    (define (handle-ftd&-case ftd)
+			      (cond
+			       [fill-result-here?
+				(%seq
+				 ,(if (> ($ftd-size ftd) 4)
+				      (handle-64-bit)
+				      (handle-32-bit))
+				 ,(do-indirect-result-from-registers ftd frame-size))]
+			       [else `(inline ,(make-info-kill*-live* (reg-list) live*) ,%c-call ,t0)]))
                             (nanopass-case (Ltype Type) result-type
                               [(fp-double-float) (handle-64-bit)]
                               [(fp-single-float) (handle-32-bit)]
                               [(fp-integer ,bits) (handle-integer-cases bits)]
                               [(fp-integer ,bits) (handle-integer-cases bits)]
+			      [(fp-ftd& ,ftd) (handle-ftd&-case ftd)]
                               [else `(inline ,(make-info-kill*-live* (reg-list %Cretval) live*) ,%c-call ,t0)]))
                           (let ()
                             (define handle-integer-cases
@@ -2352,12 +2391,22 @@
                                 (case bits
                                   [(8 16 32) `(inline ,(make-info-kill*-live* (reg-list %Cretval) live*) ,%c-call ,t0)]
                                   [(64) `(inline ,(make-info-kill*-live* (reg-list %Cretval-high %Cretval-low) live*) ,%c-call ,t0)]
-                                  [else (sorry! who "unexpected asm-foreign-procedures fp-integer size ~s" bits)]))) 
+                                  [else (sorry! who "unexpected asm-foreign-procedures fp-integer size ~s" bits)])))
+			    (define (handle-ftd&-case ftd)
+			      (cond
+			       [fill-result-here?
+				(%seq
+				 ,(if (not (eq? 'float ($ftd-atomic-category ftd)))
+				      (handle-integer-cases (* 8 ($ftd-size ftd)))
+				      `(inline ,(make-info-kill*-live* (reg-list) live*) ,%c-call ,t0))
+				 ,(do-indirect-result-from-registers ftd frame-size))]
+			       [else `(inline ,(make-info-kill*-live* (reg-list) live*) ,%c-call ,t0)]))
                             (nanopass-case (Ltype Type) result-type
                               [(fp-double-float) `(inline ,(make-info-kill*-live* (reg-list) live*) ,%c-call ,t0)]
                               [(fp-single-float) `(inline ,(make-info-kill*-live* (reg-list) live*) ,%c-call ,t0)]
                               [(fp-integer ,bits) (handle-integer-cases bits)]
                               [(fp-unsigned ,bits) (handle-integer-cases bits)]
+			      [(fp-ftd& ,ftd) (handle-ftd&-case ftd)]
                               [else `(inline ,(make-info-kill*-live* (reg-list %Cretval) live*) ,%c-call ,t0)]))))
                     (nanopass-case (Ltype Type) result-type
                       [(fp-double-float)
