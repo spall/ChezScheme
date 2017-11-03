@@ -991,6 +991,20 @@ ftype operators:
                                  (+ offset (ftd-size elem-ftd))
                                  (loop elem-ftd offset accum))])))]
          [else (cons (list 'integer (ftd-size x) offset) accum)]))))
+  (set! $ftd-atomic-category
+    (lambda (x)
+      ;; Currently used for PowerPC32 ABI
+      (cond
+       [(ftd-base? x)
+	(case (ftd-base-type x)
+	  [(double double-float float single-float)
+	   'float]
+	  [(unsigned-short unsigned unsigned-int
+			   unsigned-long unsigned-long-long
+			   unsigned-8 unsigned-16 unsigned-32 unsigned-64)
+	   'unsigned]
+	  [else 'integer])]
+       [else 'integer])))
   (set! $expand-fp-ftype ; for foreign-procedure, foreign-callable
     (lambda (who what r ftype)
       (indirect-ftd-pointer

@@ -2132,16 +2132,16 @@
     (define-who asm-foreign-call
       (with-output-language (L13 Effect)
         (define load-double-stack
-          (lambda (offset)
+          (lambda (offset fp-disp)
             (lambda (x) ; requires var
               (%seq
-                (inline ,(make-info-loadfl %flreg1) ,%load-double ,x ,%zero ,(%constant flonum-data-disp))
+                (inline ,(make-info-loadfl %flreg1) ,%load-double ,x ,%zero (immediate ,fp-disp))
                 (inline ,(make-info-loadfl %flreg1) ,%store-double ,%sp ,%zero (immediate ,offset))))))
         (define load-single-stack
-          (lambda (offset)
+          (lambda (offset fp-disp single?)
             (lambda (x) ; requires var
               (%seq
-                (inline ,(make-info-loadfl %flreg1) ,%load-double->single ,x ,%zero ,(%constant flonum-data-disp))
+                (inline ,(make-info-loadfl %flreg1) ,(if single? %load-single %load-double->single) ,x ,%zero (immediate ,fp-disp))
                 (inline ,(make-info-loadfl %flreg1) ,%store-single ,%sp ,%zero (immediate ,offset))))))
         (define load-int-stack
           (lambda (offset)
@@ -2154,24 +2154,24 @@
                 (set! ,(%mref ,%sp ,(fx+ offset 4)) ,lorhs)
                 (set! ,(%mref ,%sp ,offset) ,hirhs)))))
         (define load-double-reg
-          (lambda (fpreg)
+          (lambda (fpreg fp-disp)
             (lambda (x) ; requires var
-              `(inline ,(make-info-loadfl fpreg) ,%load-double ,x ,%zero ,(%constant flonum-data-disp)))))
+              `(inline ,(make-info-loadfl fpreg) ,%load-double ,x ,%zero (immediate ,fp-disp)))))
         (define load-soft-double-reg
-          (lambda (loreg hireg)
+          (lambda (loreg hireg fp-disp)
             (lambda (x)
                (%seq
-                 (set! ,loreg ,(%mref ,x ,(fx+ (constant flonum-data-disp) 4)))
-                 (set! ,hireg ,(%mref ,x ,(constant flonum-data-disp)))))))
+                 (set! ,loreg ,(%mref ,x ,(fx+ fp-disp 4)))
+                 (set! ,hireg ,(%mref ,x ,fp-disp))))))
         (define load-single-reg
-          (lambda (fpreg)
+          (lambda (fpreg fp-disp single?)
             (lambda (x) ; requires var
-              `(inline ,(make-info-loadfl fpreg) ,%load-double->single ,x ,%zero ,(%constant flonum-data-disp)))))
+              `(inline ,(make-info-loadfl fpreg) ,(if single? %load-single %load-double->single) ,x ,%zero (immediate ,fp-disp)))))
         (define load-soft-single-reg
-          (lambda (ireg)
+          (lambda (ireg fp-disp single?)
             (lambda (x)
               (%seq
-                (inline ,(make-info-loadfl %flreg1) ,%load-double->single ,x ,%zero ,(%constant flonum-data-disp))
+                (inline ,(make-info-loadfl %flreg1) ,(if single? %load-single %load-double->single) ,x ,%zero (immediate ,fp-disp))
                 (inline ,(make-info-loadfl %flreg1) ,%store-single ,%tc ,%zero (immediate ,(constant tc-ac0-disp)))
                 (set! ,ireg ,(%tc-ref ac0))))))
         (define load-int-reg
@@ -2187,7 +2187,9 @@
         (define do-args
           (lambda (types)
             ;; NB: start stack pointer at 8 to put arguments above the linkage area
-            (let loop ([types types] [locs '()] [live* '()] [int* (gp-parameter-regs)] [flt* (fp-parameter-regs)] [isp 8])
+            (let loop ([types types] [locs '()] [live* '()] [int* (gp-parameter-regs)] [flt* (fp-parameter-regs)] [isp 8]
+		       ;; configured for `ftd-fp&` unpacking:
+		       [unpack values] [fp-disp (constant flonum-data-disp)] [single? #f])
               (if (null? types)
                   (values isp locs live*)
                   (nanopass-case (Ltype Type) (car types)
@@ -2197,38 +2199,96 @@
                            (if (null? int*)
                                (let ([isp (align 8 isp)])
                                  (loop (cdr types)
-                                   (cons (load-double-stack isp) locs)
-                                   live* '() flt* (fx+ isp 8)))
+                                   (cons (unpack (load-double-stack isp fp-disp)) locs)
+                                   live* '() flt* (fx+ isp 8)
+				   values (constant flonum-data-disp) #f))
                                (loop (cdr types)
-                                 (cons (load-soft-double-reg (cadr int*) (car int*)) locs)
-                                 (cons* (car int*) (cadr int*) live*) (cddr int*) flt* isp)))
+                                 (cons (load-soft-double-reg (cadr int*) (car int*) fp-disp) locs)
+                                 (cons* (car int*) (cadr int*) live*) (cddr int*) flt* isp
+				 values (constant flonum-data-disp) #f)))
                          (if (null? flt*)
                              (let ([isp (align 8 isp)])
                                (loop (cdr types)
-                                 (cons (load-double-stack isp) locs)
-                                 live* int* '() (fx+ isp 8)))
+                                 (cons (unpack (load-double-stack isp fp-disp)) locs)
+                                 live* int* '() (fx+ isp 8)
+				 values (constant flonum-data-disp) #f))
                              (loop (cdr types)
-                               (cons (load-double-reg (car flt*)) locs)
-                               live* int* (cdr flt*) isp)))]
+                               (cons (load-double-reg (car flt*) fp-disp) locs)
+                               live* int* (cdr flt*) isp
+			       values (constant flonum-data-disp) #f)))]
                     [(fp-single-float)
                      (if (constant software-floating-point)
                          (if (null? int*)
                              ; NB: ABI says singles are passed as doubles on the stack, but gcc/linux doesn't
                              (loop (cdr types)
-                               (cons (load-single-stack isp) locs)
-                               live* '() flt* (fx+ isp 4))
+                               (cons (unpack (load-single-stack isp fp-disp single?)) locs)
+                               live* '() flt* (fx+ isp 4)
+			       values (constant flonum-data-disp) #f)
                              (loop (cdr types)
-                               (cons (load-soft-single-reg (car int*)) locs)
-                               (cons (car int*) live*) (cdr int*) flt* isp))
+                               (cons (unpack (load-soft-single-reg (car int*) fp-disp single?)) locs)
+                               (cons (car int*) live*) (cdr int*) flt* isp
+			       values (constant flonum-data-disp) #f))
                          (if (null? flt*)
                              ; NB: ABI says singles are passed as doubles on the stack, but gcc/linux doesn't
                              (let ([isp (align 4 isp)])
                                (loop (cdr types)
-                                 (cons (load-single-stack isp) locs)
-                                 live* int* '() (fx+ isp 4)))
+                                 (cons (unpack (load-single-stack isp fp-disp single?)) locs)
+                                 live* int* '() (fx+ isp 4)
+				 values (constant flonum-data-disp) #f))
                              (loop (cdr types)
-                               (cons (load-single-reg (car flt*)) locs)
-                               live* int* (cdr flt*) isp)))]
+                               (cons (unpack (load-single-reg (car flt*) fp-disp single?)) locs)
+                               live* int* (cdr flt*) isp
+			       values (constant flonum-data-disp) #f)))]
+                    [(fp-ftd& ,ftd)
+                     (cond
+                      [($ftd-compound? ftd)
+                       ;; pass as pointer
+		       (let ([pointer-type (with-output-language (Ltype Type) `(fp-integer 32))])
+			 (loop (cons pointer-type (cdr types)) locs live* int* flt* isp
+			       values (constant flonum-data-disp) #f))]
+                      [else
+                       ;; extract content and pass that content
+		       (let* ([category ($ftd-atomic-category ftd)]
+			      [unpacked-type (with-output-language (Ltype Type)
+					       (case category
+						 [(integer unsigned) `(fp-integer 32)]
+						 [else
+						  (case ($ftd-size ftd)
+						    [(4) `(fp-single-float)]
+						    [else `(fp-double-float)])]))])
+			 (loop (cons unpacked-type (cdr types)) locs live* int* flt* isp
+			       (lambda (proc)
+				 (lambda (x)
+				   (let ([tmp %Carg1]) ;; can use %Carg1 as tmp, since it's filled last
+				     ;; unpack to u:
+				     (case category
+				       [(integer)
+					(let ([int-type (case ($ftd-size ftd)
+							  [(1) 'integer-8]
+							  [(2) 'integer-16]
+							  [else 'integer-32])])
+					  (%seq
+					   (set! ,tmp (inline ,(make-info-load int-type #f) ,%load
+							      ,x ,%zero (immediate ,0)))
+					   ,(proc tmp)))]
+				       [(unsigned)
+					(let ([int-type (case ($ftd-size ftd)
+							  [(1) 'unsigned-8]
+							  [(2) 'unsigned-16]
+							  [else 'unsigned-32])])
+					  (%seq
+					   (set! ,tmp (inline ,(make-info-load int-type #f) ,%load
+							      ,x ,%zero (immediate ,0)))
+					   ,(proc tmp)))]
+				       [(float)
+					;; the 0 floating-point displacement to `loop` performs
+					;; the unpacking operation
+					(proc x)]
+				       [else (sorry! who "unexpected fp-ftd& content ~s" ftd)]))))
+			       ;; in case of float/double, no floating displacement:
+			       0
+			       ;; in case of float, load as single-float:
+			       (= ($ftd-size ftd) 4)))])]
                     [else
                      (if (nanopass-case (Ltype Type) (car types)
                            [(fp-integer ,bits) (fx= bits 64)]
@@ -2238,18 +2298,22 @@
                            (if (null? int*)
                                (let ([isp (align 8 isp)])
                                  (loop (cdr types)
-                                   (cons (load-int64-stack isp) locs)
-                                   live* '() flt* (fx+ isp 8)))
+                                   (cons (unpack (load-int64-stack isp)) locs)
+                                   live* '() flt* (fx+ isp 8)
+				   values (constant flonum-data-disp) #f))
                                (loop (cdr types)
-                                 (cons (load-int64-reg (cadr int*) (car int*)) locs)
-                                 (cons* (car int*) (cadr int*) live*) (cddr int*) flt* isp)))
+                                 (cons (unpack (load-int64-reg (cadr int*) (car int*))) locs)
+                                 (cons* (car int*) (cadr int*) live*) (cddr int*) flt* isp
+				 values (constant flonum-data-disp) #f)))
                          (if (null? int*)
                              (loop (cdr types)
-                               (cons (load-int-stack isp) locs)
-                               live* '() flt* (fx+ isp 4))
+                               (cons (unpack (load-int-stack isp)) locs)
+                               live* '() flt* (fx+ isp 4)
+			       values (constant flonum-data-disp) #f)
                              (loop (cdr types)
-                               (cons (load-int-reg (car int*)) locs)
-                               (cons (car int*) live*) (cdr int*) flt* isp)))])))))
+                               (cons (unpack (load-int-reg (car int*))) locs)
+                               (cons (car int*) live*) (cdr int*) flt* isp
+			       values (constant flonum-data-disp) #f)))])))))
         (lambda (info)
           (safe-assert (reg-callee-save? %tc)) ; no need to save-restore
           (let ([arg-type* (info-foreign-arg-type* info)]
