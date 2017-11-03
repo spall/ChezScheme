@@ -2133,6 +2133,10 @@
       (nanopass-case (Ltype Type) result-type
         [(fp-ftd& ,ftd) (not ($ftd-compound? ftd))]
 	[else #f]))
+    (define (indirect-result-to-pointer? result-type)
+      (nanopass-case (Ltype Type) result-type
+        [(fp-ftd& ,ftd) ($ftd-compound? ftd)]
+	[else #f]))
     (define-who asm-foreign-call
       (with-output-language (L13 Effect)
         (define load-double-stack
@@ -2615,8 +2619,8 @@
 		 (inline ,(make-info-loadfl %flreg1) ,%store-single ,%sp ,%zero (immediate ,offset))
 		 (set! ,lvalue ,(%inline + ,%sp (immediate ,offset)))))))
           (define count-reg-args
-            (lambda (types gp-reg-count fp-reg-count)
-              (let f ([types types] [iint 0] [iflt 0])
+            (lambda (types gp-reg-count fp-reg-count first-arg-is-result-dest?)
+              (let f ([types types] [iint (if first-arg-is-result-dest? (fxmin 1 gp-reg-count) 0)] [iflt 0])
                 (if (null? types)
                     (values iint iflt)
                     (cond
@@ -2644,12 +2648,13 @@
             ; all of the args are on the stack at this point, though not contiguous since
             ; we push all of the int reg args with one push instruction and all of the
             ; float reg args with another (v)push instruction
-            (lambda (types gp-reg-count fp-reg-count int-reg-offset float-reg-offset stack-arg-offset)
+            (lambda (types gp-reg-count fp-reg-count int-reg-offset float-reg-offset stack-arg-offset
+			   first-arg-is-result-dest?)
               (let loop ([types types]
                          [locs '()]
-                         [iint 0]
+                         [iint (if first-arg-is-result-dest? 1 0)]
                          [iflt 0]
-                         [int-reg-offset int-reg-offset]
+                         [int-reg-offset (if first-arg-is-result-dest? (fx+ int-reg-offset 4) int-reg-offset)]
                          [float-reg-offset float-reg-offset]
                          [stack-arg-offset stack-arg-offset])
                 (if (null? types)
@@ -2787,20 +2792,55 @@
                         (if (null? regs)
                             inline
                             (%seq ,inline ,(f regs (fx+ offset 4))))))))))
+	  (define register-result-copy
+	    (lambda (result-type first-arg-is-result-dest? int-reg-offset e)
+	      (nanopass-case (Ltype Type) result-type
+	        [(fp-ftd& ,ftd)
+		 (cond
+		  [first-arg-is-result-dest?
+		   (in-context Tail
+		     (%seq
+		      (set! ,(%tc-ref ts) ,(%mref ,%sp ,int-reg-offset)) ; destination was the first argument
+		      (set! ,(%tc-ref td) (immediate ,(fix ($ftd-size ftd))))
+		      ,e))]
+		  [else e])]
+		[else e])))
+	  (define pick-Scall
+	    (lambda (Scall->result-type result-type)
+	      (nanopass-case (Ltype Type) result-type
+		[(fp-ftd& ,ftd)
+		 (case ($ftd-atomic-category ftd)
+		   [(float)
+		    (case ($ftd-size ftd)
+		      [(4) (lookup-c-entry Scall->indirect-float)]
+		      [else (lookup-c-entry Scall->indirect-double)])]
+		   [else
+		    (cond
+		     [($ftd-compound? ftd)
+		      (lookup-c-entry Scall->indirect-copy)]
+		     [else
+		      (case ($ftd-size ftd)
+			[(1) (lookup-c-entry Scall->indirect-byte)]
+			[(2) (lookup-c-entry Scall->indirect-short)]
+			[(4) (lookup-c-entry Scall->indirect-int32)]
+			[else (lookup-c-entry Scall->indirect-int64)])])])]
+		[else Scall->result-type])))
           (lambda (info)
             (define callee-save-regs (list %r14 %r15 %r16 %r17 %r18 %r19 %r20 %r21 %r22 %r23 %r24 %r25 %r26 %r27 %r28 %r29 %r30 %r31))
             (define isaved (length callee-save-regs))
             (let ([arg-type* (info-foreign-arg-type* info)]
+		  [result-type (info-foreign-result-type info)]
                   [gp-reg-count (length (gp-parameter-regs))]
                   [fp-reg-count (length (fp-parameter-regs))])
-              (let-values ([(iint iflt) (count-reg-args arg-type* gp-reg-count fp-reg-count)])
+              (let-values ([(iint iflt) (count-reg-args arg-type* gp-reg-count fp-reg-count (indirect-result-to-pointer? result-type))])
                 (let* ([int-reg-offset 8]       ; initial offset for calling conventions
                        [float-reg-offset (fx+ (fx* gp-reg-count 4) int-reg-offset)]
                        [callee-save-offset (if (constant software-floating-point)
                                                float-reg-offset
                                                (fx+ (fx* fp-reg-count 8) float-reg-offset))]
                        [stack-size (align 16 (fx+ (fx* isaved 4) callee-save-offset))]
-                       [stack-arg-offset (fx+ stack-size 8)])
+                       [stack-arg-offset (fx+ stack-size 8)]
+		       [first-arg-is-result-dest? (indirect-result-to-pointer? result-type)])
                   (values
                     (lambda ()
                       (%seq
@@ -2818,17 +2858,19 @@
                            `(set! ,%tc (literal ,(make-info-literal #f 'entry (lookup-c-entry thread-context) 0))))))
                     ; list of procedures that marshal arguments from their C stack locations
                     ; to the Scheme argument locations
-                    (do-stack arg-type* gp-reg-count fp-reg-count int-reg-offset float-reg-offset stack-arg-offset)
+                    (do-stack arg-type* gp-reg-count fp-reg-count int-reg-offset float-reg-offset stack-arg-offset
+			      first-arg-is-result-dest?)
                     (lambda (fv* Scall->result-type)
-                      (in-context Tail
-                        (%seq
-                          ; restore the lr
-                          (inline ,null-info ,%restore-lr (immediate ,(fx+ stack-size 4)))
-                          ; restore the callee save registers
-                          ,(restore-regs callee-save-regs callee-save-offset)
-                          ; deallocate space for pad & arg reg values
-                          (set! ,%Csp ,(%inline + ,%Csp (immediate ,stack-size)))
-                          ; tail call the C helper that calls the Scheme procedure
-                          (jump (literal ,(make-info-literal #f 'entry Scall->result-type 0))
-                            (,callee-save-regs ... ,fv* ...))))))))))))))
+		      (register-result-copy result-type first-arg-is-result-dest? int-reg-offset
+                        (in-context Tail
+                          (%seq
+                            ; restore the lr
+                            (inline ,null-info ,%restore-lr (immediate ,(fx+ stack-size 4)))
+                            ; restore the callee save registers
+                            ,(restore-regs callee-save-regs callee-save-offset)
+                            ; deallocate space for pad & arg reg values
+                            (set! ,%Csp ,(%inline + ,%Csp (immediate ,stack-size)))
+                            ; tail call the C helper that calls the Scheme procedure
+                            (jump (literal ,(make-info-literal #f 'entry (pick-Scall Scall->result-type result-type) 0))
+                              (,callee-save-regs ... ,fv* ...)))))))))))))))
 )
