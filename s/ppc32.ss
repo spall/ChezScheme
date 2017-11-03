@@ -2601,6 +2601,19 @@
                 (%seq
                   (set! ,lolvalue ,(%mref ,%sp ,(fx+ offset 4)))
                   (set! ,hilvalue ,(%mref ,%sp ,offset))))))
+          (define load-stack-address
+            (lambda (offset)
+              (lambda (lvalue)
+		`(set! ,lvalue ,(%inline + ,%sp (immediate ,offset))))))
+          (define load-stack-address/convert-float
+            (lambda (offset)
+              (lambda (lvalue)
+		(%seq
+		 ;; Overwrite argument on stack with single-precision version
+		 ;; FIXME: is the callee allowed to do this if the argument is passed on the stack?
+		 (inline ,(make-info-loadfl %flreg1) ,%load-double->single ,%sp ,%zero (immediate ,offset))
+		 (inline ,(make-info-loadfl %flreg1) ,%store-single ,%sp ,%zero (immediate ,offset))
+		 (set! ,lvalue ,(%inline + ,%sp (immediate ,offset)))))))
           (define count-reg-args
             (lambda (types gp-reg-count fp-reg-count)
               (let f ([types types] [iint 0] [iflt 0])
@@ -2611,11 +2624,14 @@
                             (nanopass-case (Ltype Type) (car types)
                               [(fp-double-float) #t]
                               [(fp-single-float) #t]
+			      [(fp-ftd& ,ftd) (eq? 'float ($ftd-atomic-category ftd))]
                               [else #f]))
                        (f (cdr types) iint (if (fx< iflt fp-reg-count) (fx+ iflt 1) iflt))]
                       [(or (nanopass-case (Ltype Type) (car types)
                              [(fp-integer ,bits) (fx= bits 64)]
                              [(fp-unsigned ,bits) (fx= bits 64)]
+			     [(fp-ftd& ,ftd) (and (not ($ftd-compound? ftd))
+						  (= 8 ($ftd-size ftd)))]
                              [else #f])
                            (and (constant software-floating-point)
                                 (nanopass-case (Ltype Type) (car types)
@@ -2677,7 +2693,49 @@
                            (loop (cdr types)
                              (cons (load-soft-single-stack stack-arg-offset) locs)
                              iint iflt int-reg-offset float-reg-offset (fx+ stack-arg-offset 4)))]
-                      [(nanopass-case (Ltype Type) (car types)
+		      [(nanopass-case (Ltype Type) (car types)
+			 [(fp-ftd& ,ftd) (not ($ftd-compound? ftd))]
+			 [else #f])
+		       ;; load pointer to address on the stack
+		       (let ([ftd (nanopass-case (Ltype Type) (car types)
+				    [(fp-ftd& ,ftd) ftd])])
+			 (case (and (not (constant software-floating-point))
+				    ($ftd-atomic-category ftd))
+			   [(float)
+			    (let ([load-address (case ($ftd-size ftd)
+						  [(4) load-stack-address/convert-float]
+						  [else load-stack-address])])
+			      (if (fx< iflt fp-reg-count)
+				  (loop (cdr types)
+				    (cons (load-address float-reg-offset) locs)
+				    iint (fx+ iflt 1) int-reg-offset (fx+ float-reg-offset 8) stack-arg-offset)
+				  (let ([stack-arg-offset (align 8 stack-arg-offset)])
+				    (loop (cdr types)
+				      (cons (load-address stack-arg-offset) locs)
+				      iint iflt int-reg-offset float-reg-offset (fx+ stack-arg-offset 8)))))]
+			   [else
+			    (case ($ftd-size ftd)
+			      [(8)
+			       (let ([iint (align 2 iint)])
+				 (if (fx< iint gp-reg-count)
+				     (let ([int-reg-offset (align 8 int-reg-offset)])
+				       (loop (cdr types)
+					 (cons (load-stack-address int-reg-offset) locs)
+					 (fx+ iint 2) iflt (fx+ int-reg-offset 8) float-reg-offset stack-arg-offset))
+				     (let ([stack-arg-offset (align 8 stack-arg-offset)])
+				       (loop (cdr types)
+					 (cons (load-stack-address stack-arg-offset) locs)
+					 iint iflt int-reg-offset float-reg-offset (fx+ stack-arg-offset 8)))))]
+			      [else
+			       (let ([byte-offset (- 4 ($ftd-size ftd))])
+				 (if (fx< iint gp-reg-count)
+				     (loop (cdr types)
+				       (cons (load-stack-address (+ int-reg-offset byte-offset)) locs)
+				       (fx+ iint 1) iflt (fx+ int-reg-offset 4) float-reg-offset stack-arg-offset)
+				     (loop (cdr types)
+                                       (cons (load-stack-address (+ stack-arg-offset byte-offset)) locs)
+				       iint iflt int-reg-offset float-reg-offset (fx+ stack-arg-offset 4))))])]))]
+		      [(nanopass-case (Ltype Type) (car types)
                          [(fp-integer ,bits) (fx= bits 64)]
                          [(fp-unsigned ,bits) (fx= bits 64)]
                          [else #f])
