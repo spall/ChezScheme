@@ -2655,6 +2655,8 @@
      Scall->indirect-sized-double-double
      Scall->indirect-sized-int64-double
      Scall->indirect-sized-double-int64
+     Scall->indirect-sized-int64
+     Scall->indirect-sized-double-double-double-double
      Scopy-argument
   ))
 )

@@ -375,6 +375,11 @@ struct result_double_int64 S_call_indirect_sized_double_int64 PROTO((void));
 struct result_double_double { double a; double b; };
 struct result_double_double S_call_indirect_sized_double_double PROTO((void));
 
+I64 S_call_indirect_sized_int64 PROTO((void));
+
+struct result_double_double_double_double { double a; double b; double c; double d; };
+struct result_double_double_double_double S_call_indirect_sized_double_double_double_double PROTO((void));
+
 ptr S_call_indirect_copy PROTO((void));
 
 extern void S_copy_argument PROTO((void));

@@ -428,6 +428,27 @@ struct result_double_double S_call_indirect_sized_double_double() {
   return r;
 }
 
+/* On arm32, returns can be returned in up to two integer registers or
+   up to four floating-point registers --- but the result may have
+   fewer bytes than that, so we pass the actual size and zero-pad the
+   rest. */
+
+I64 S_call_indirect_sized_int64() {
+  ptr tc = get_thread_context();
+  iptr len = UNFIX(TD(tc));
+  I64 r = 0;
+  S_call_indirect_help(tc, &r, len);
+  return r;
+}
+
+struct result_double_double_double_double S_call_indirect_sized_double_double_double_double() {
+  ptr tc = get_thread_context();
+  iptr len = UNFIX(TD(tc));
+  struct result_double_double_double_double  r = { 0, 0, 0, 0 };
+  S_call_indirect_help(tc, &r, len);
+  return r;
+}
+
 /* For results not returned in registers on x86_64 and PPC32, copy
    bytes to the result-destination and return that same destination
    pointer. */
