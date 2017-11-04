@@ -157,8 +157,8 @@ static void create_c_entry_vector() {
     install_c_entry(CENTRY_Scall_indirect_sized_int64_double, proc2ptr(S_call_indirect_sized_int64_double));
     install_c_entry(CENTRY_Scall_indirect_sized_double_int64, proc2ptr(S_call_indirect_sized_double_int64));
     install_c_entry(CENTRY_Scall_indirect_sized_double_double, proc2ptr(S_call_indirect_sized_double_double));
-    //install_c_entry(CENTRY_Scall_indirect_sized_int64, proc2ptr(S_call_indirect_sized_int64));
-    //install_c_entry(CENTRY_Scall_indirect_sized_double_double_double_double, proc2ptr(S_call_indirect_sized_double_double_double_double));
+    install_c_entry(CENTRY_Scall_indirect_sized_int64, proc2ptr(S_call_indirect_sized_int64));
+    install_c_entry(CENTRY_Scall_indirect_sized_double_double_double_double, proc2ptr(S_call_indirect_sized_double_double_double_double));
     install_c_entry(CENTRY_Scall_indirect_copy, proc2ptr(S_call_indirect_copy));
     install_c_entry(CENTRY_Scopy_argument, proc2ptr(S_copy_argument));
 

@@ -2846,11 +2846,11 @@
 			     (if (fx<= (fx+ idbl num-members) 8)
 				 (loop (cdr types)
                                    (cons (load-stack-address float-reg-offset) locs)
-				   iint (fx+ idbl num-members) bsgl-offset int-reg-offset (fx+ float-reg-offset size) stack-arg-offset)
+				   iint (fx+ idbl num-members) #f int-reg-offset (fx+ float-reg-offset size) stack-arg-offset)
 				 (let ([stack-arg-offset (align 8 stack-arg-offset)])
 				   (loop (cdr types)
                                      (cons (load-stack-address stack-arg-offset) locs)
-                                     iint 8 #f int-reg-offset float-reg-offset (fx+ stack-arg-offset size))))]
+                                     iint 8 #f int-reg-offset #f (fx+ stack-arg-offset size))))]
 			    [(and (fx<= num-members 4)
 				  (andmap float-member? members))
 			     ;; floats are either in registers or all on stack
@@ -2873,24 +2873,28 @@
                                      iint 8 #f int-reg-offset float-reg-offset (fx+ stack-arg-offset size))))]
 			    [(fx= 8 ($ftd-alignment ftd))
                              (let ([int-reg-offset (if (fxeven? iint) int-reg-offset (fx+ int-reg-offset 4))]
-				   [iint (align 2 iint)])
-                               (if (fx= iint 4)
+				   [iint (align 2 iint)]
+				   [amt (fxsrl size 2)])
+                               (if (fx< iint 4) ; argument starts in registers, may continue on stack
+                                   (loop (cdr types)
+                                     (cons (load-stack-address int-reg-offset) locs)
+                                     (fxmin 4 (fx+ iint amt)) idbl bsgl-offset (fx+ int-reg-offset size) float-reg-offset
+				     (fx+ stack-arg-offset (fxmax 0 (fx* 4 (fx- (fx+ iint amt) 4)))))
                                    (let ([stack-arg-offset (align 8 stack-arg-offset)])
                                      (loop (cdr types)
                                        (cons (load-stack-address stack-arg-offset) locs)
-                                       iint idbl bsgl-offset int-reg-offset float-reg-offset (fx+ stack-arg-offset size)))
-                                   (loop (cdr types)
-                                     (cons (load-stack-address int-reg-offset) locs)
-                                     (fxmin 4 (fx+ iint (fxsrl size 2))) idbl bsgl-offset (fx+ int-reg-offset size) float-reg-offset stack-arg-offset)))]
+                                       iint idbl bsgl-offset int-reg-offset float-reg-offset (fx+ stack-arg-offset size)))))]
 			    [else
-			     (let ([size (align 4 size)])
-			       (if (fx= iint 4)
+			     (let* ([size (align 4 size)]
+				    [amt (fxsrl size 2)])
+			       (if (fx< iint 4) ; argument starts in registers, may continue on stack
+				   (loop (cdr types)
+                                     (cons (load-stack-address int-reg-offset) locs)
+				     (fxmin 4 (fx+ iint amt)) idbl bsgl-offset (fx+ int-reg-offset size) float-reg-offset
+				     (fx+ stack-arg-offset (fxmax 0 (fx* 4 (fx- (fx+ iint amt) 4)))))
 				   (loop (cdr types)
 				     (cons (load-stack-address stack-arg-offset) locs)
-				     iint idbl bsgl-offset int-reg-offset float-reg-offset (fx+ stack-arg-offset size))
-				   (loop (cdr types)
-                                     (cons (load-stack-address int-reg-offset) locs)
-				     (fxmin 4 (fx+ iint (fxsrl size 2))) idbl bsgl-offset (fx+ int-reg-offset size) float-reg-offset stack-arg-offset)))]))]
+				     iint idbl bsgl-offset int-reg-offset float-reg-offset (fx+ stack-arg-offset size))))]))]
                         [else
                          (if (nanopass-case (Ltype Type) (car types)
                                [(fp-integer ,bits) (fx= bits 64)]
@@ -2943,17 +2947,17 @@
 		   ;; or up to four floating-point registers
 		   (let ([members ($ftd->members ftd)])
 		     (cond
-		      [(and (pair? members) (eq? 'float (car members)))
-		       (lookup-c-entry Scall->sized-indirect-double-double-double-double)]
+		      [(and (pair? members) (eq? 'float (caar members)))
+		       (lookup-c-entry Scall->indirect-sized-double-double-double-double)]
 		      [else
-		       (lookup-c-entry Scall->sized-indirect-int64)]))])]
+		       (lookup-c-entry Scall->indirect-sized-int64)]))])]
 		[else Scall->result-type])))
           (lambda (info)
             (define callee-save-regs+lr (list %r4 %r5 %r6 %r7 %r8 %r9 %r10 %r11 %lr))
             (define isaved (length callee-save-regs+lr))
-            (let ([arg-type* (info-foreign-arg-type* info)]
-                  [result-type (info-foreign-result-type info)]
-		  [first-arg-is-result-dest? (indirect-result-to-pointer? result-type)])
+            (let* ([arg-type* (info-foreign-arg-type* info)]
+		   [result-type (info-foreign-result-type info)]
+		   [first-arg-is-result-dest? (indirect-result-to-pointer? result-type)])
               (let-values ([(iint idbl) (count-reg-args arg-type* first-arg-is-result-dest?)])
                 (let ([saved-reg-bytes (fx* isaved 4)]
                       [pre-pad-bytes (if (fxeven? isaved) 0 4)]
