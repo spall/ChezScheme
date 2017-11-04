@@ -17,7 +17,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-typedef char i8;
+typedef signed char i8;
 typedef unsigned char u8;
 typedef unsigned short u16;
 #ifdef _WIN32
@@ -107,7 +107,7 @@ EXPORT void free_at_boundary(void *p)
   }                                                                     \
   EXPORT double f4_cb_send_ ## ts (double (*cb)(ts)) {                  \
     ts r = init;                                                        \
-    return cb(r) + 1.0;                                                 \
+    return cb(r) + 1.0;							\
   }                                                                     \
   EXPORT double f4_cb_send_two_ ## ts (double (*cb)(ts, ts)) {          \
     ts r1 = init;                                                       \
