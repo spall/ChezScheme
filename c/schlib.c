@@ -428,8 +428,9 @@ struct result_double_double S_call_indirect_sized_double_double() {
   return r;
 }
 
-/* For results not returned in registers on x86_64, coy bytes to the
-   result-destination and return that same destination pointer. */
+/* For results not returned in registers on x86_64 and PPC32, copy
+   bytes to the result-destination and return that same destination
+   pointer. */
 ptr S_call_indirect_copy() {
     ptr tc = get_thread_context();
     ptr dest = TS(tc);

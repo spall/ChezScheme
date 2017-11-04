@@ -18,6 +18,8 @@
 #include <stdlib.h>
 
 typedef char i8;
+typedef unsigned char u8;
+typedef unsigned short u16;
 #ifdef _WIN32
 typedef __int64 i64;
 # define EXPORT extern __declspec (dllexport)
@@ -151,10 +153,13 @@ EXPORT void free_at_boundary(void *p)
   }
 
 #define TO_DOUBLE(x) ((double)(x))
-GEN(i8, 11, TO_DOUBLE)
-GEN(short, 22, TO_DOUBLE)
+GEN(i8, -11, TO_DOUBLE)
+GEN(u8, 129, TO_DOUBLE)
+GEN(short, -22, TO_DOUBLE)
+GEN(u16, 33022, TO_DOUBLE)
 GEN(long, 33, TO_DOUBLE)
 GEN(int, 44, TO_DOUBLE)
+GEN(i64, 49, TO_DOUBLE)
 GEN(float, 55.0, TO_DOUBLE)
 GEN(double, 66.0, TO_DOUBLE)
 
@@ -168,10 +173,13 @@ GEN(double, 66.0, TO_DOUBLE)
   static struct_ ## t1 init_struct_ ## t1 = { v1 };                     \
   GEN(struct_ ## t1, init_struct_ ## t1, _f4_sum_struct_ ## t1)
 
-GEN_1(i8, 12)
-GEN_1(short, 23)
+GEN_1(i8, -12)
+GEN_1(u8, 212)
+GEN_1(short, -23)
+GEN_1(u16, 33023)
 GEN_1(long, 34)
 GEN_1(int, 45)
+GEN_1(i64, 48)
 GEN_1(float, 56.0)
 GEN_1(double, 67.0)
 
@@ -253,10 +261,13 @@ GEN(struct_i8_i8_i8_i8_i8_i8_i8, init_struct_i8_i8_i8_i8_i8_i8_i8, _f4_sum_struc
   static union_ ## t1 init_union_ ## t1 = { v1 };                     \
   GEN(union_ ## t1, init_union_ ## t1, _f4_sum_union_ ## t1)
 
-GEN_U1(i8, 17)
-GEN_U1(short, 27)
+GEN_U1(i8, -17)
+GEN_U1(u8, 217)
+GEN_U1(short, -27)
+GEN_U1(u16, 33027)
 GEN_U1(long, 37)
 GEN_U1(int, 47)
+GEN_U1(i64, 49)
 GEN_U1(float, 57.0)
 GEN_U1(double, 77.0)
 
@@ -272,5 +283,6 @@ GEN_U2(i8, int, 18)
 GEN_U2(short, int, 28)
 GEN_U2(long, int, 38)
 GEN_U2(int, int, 48)
+GEN_U2(i64, int, 43)
 GEN_U2(float, int, 58.0)
 GEN_U2(double, int, 68.0)

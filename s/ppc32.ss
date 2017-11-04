@@ -686,10 +686,11 @@
   (safe-assert (reg-callee-save? %tc)) ; no need to save-restore
   (define-instruction effect (c-simple-call)
     [(op)
-     (let ([u (make-tmp 'u)])
+     (let ([u (make-tmp 'u)]
+           [save-caller-saved? (info-c-simple-call-save-caller-saved? info)])
        (seq
          `(set! ,(make-live-info) ,u (asm ,null-info ,asm-kill))
-         `(asm ,info ,(asm-c-simple-call (info-c-simple-call-entry info) #t) ,u)))])
+         `(asm ,info ,(asm-c-simple-call (info-c-simple-call-entry info) save-caller-saved? #t) ,u)))])
 
   (define-instruction pred (eq? < > <= >=)
     [(op (y integer16) (x ur))
@@ -1840,11 +1841,38 @@
             (asm-helper-call code* target save-ra? tmp))))))
 
   (define asm-c-simple-call
-    (lambda (entry save-ra?)
+    (lambda (entry save-caller-saved? save-ra?)
       (let ([target `(ppc32-call 0 (entry ,entry))])
         (rec asm-c-simple-call-internal
           (lambda (code* tmp . ignore)
-            (asm-helper-call code* target save-ra? tmp))))))
+            (asm-helper-save-caller-saved
+             save-caller-saved?
+             code*
+             (lambda (code*)
+               (asm-helper-call code* target save-ra? tmp))))))))
+
+  (define asm-helper-save-caller-saved
+    (lambda (save-caller-saved? code* p)
+      (cond
+       [save-caller-saved?
+        ;; assumes 0 arguments to function
+        (let* ([caller-saved (list %r3 %r4 %r5 %r6 %r7 %r8 %r9 %r10 %r11 %r12)]
+               [size (fx* (length caller-saved) 4)]
+               [code* (p (cdr (fold-left (lambda (pos+code* reg)
+                                           (cons (fx+ pos 4)
+                                                 (emit stw (cons 'reg reg) (cons 'reg %sp) `(imm ,pos)
+                                                       (cdr pos+code*))))
+                                         (cons 0
+                                               (emit addi (cons 'reg %sp) (cons 'reg %sp) `(imm ,(- size))
+                                                     code*))
+                                         caller-saved)))])
+          (emit addi (cons 'reg %sp) (cons 'reg %sp) `(imm ,size)
+                (cdr (fold-left (lambda (pos+code* reg)
+                                  (cons (fx+ pos 4)
+                                        (emit ldw (cons 'reg reg) (cons 'reg %sp) `(imm ,pos)
+                                              (cdr pos+code*))))
+                                (cons 0 code*)))))]
+       [else (p code*)])))
 
   (define-who asm-indirect-call
     (lambda (code* dest . ignore)

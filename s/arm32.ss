@@ -771,16 +771,17 @@
   (safe-assert (reg-callee-save? %tc)) ; no need to save-restore
   (define-instruction effect (c-simple-call)
     [(op)
-     (let ([u (make-tmp 'u)])
+     (let ([u (make-tmp 'u)]
+           [save-caller-saved? (info-c-simple-call-save-caller-saved? info)])
        (if (info-c-simple-call-save-ra? info)
            (seq
              `(set! ,(make-live-info) ,u (asm ,null-info ,asm-kill))
-             `(asm ,info ,(asm-c-simple-call (info-c-simple-call-entry info) #t) ,u))
+             `(asm ,info ,(asm-c-simple-call (info-c-simple-call-entry info) #t save-caller-saved?) ,u))
            (let ([ulr (make-precolored-unspillable 'ulr %lr)])
              (seq
                `(set! ,(make-live-info) ,u (asm ,null-info ,asm-kill))
                `(set! ,(make-live-info) ,ulr (asm ,null-info ,asm-kill))
-               `(asm ,info ,(asm-c-simple-call (info-c-simple-call-entry info) #f) ,u ,ulr)))))])
+               `(asm ,info ,(asm-c-simple-call (info-c-simple-call-entry info) #f save-caller-saved?) ,u ,ulr)))))])
 
   (define-instruction pred (eq? u< < > <= >=)
     [(op (y funky12) (x ur))
@@ -2046,12 +2047,25 @@
             (asm-helper-call code* target save-ra? jmp-tmp))))))
 
   (define asm-c-simple-call
-    (lambda (entry save-ra?)
+    (lambda (entry save-ra? save-caller-saved?)
       (let ([target `(arm32-call 0 (entry ,entry))])
         (rec asm-c-simple-call-internal
           (lambda (code* jmp-tmp . ignore)
-            (asm-helper-call code* target save-ra? jmp-tmp))))))
+            (asm-helper-save-caller-saved
+             save-caller-saved?
+             code*
+             (lambda (code*)
+               (asm-helper-call code* target save-ra? jmp-tmp))))))))
 
+  (define asm-helper-save-caller-saved
+    (lambda (save-caller-saved? code* p)
+      (cond
+       [save-caller-saved?
+        (let ([caller-saved (map (lambda (r) (cons 'reg r)) (list %r0 %r1 %r2 %r3))])
+          (emit popm caller-saved
+                (p (emit pushm caller-saved code*))))]
+       [else (p code*)])))
+    
   (define-who asm-indirect-call
     (lambda (code* dest lr . ignore)
       (safe-assert (eq? lr %lr))

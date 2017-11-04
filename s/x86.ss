@@ -783,7 +783,7 @@
 
   (safe-assert (reg-callee-save? %tc)) ; no need to save-restore
   (define-instruction effect (c-simple-call)
-    [(op) `(asm ,info ,(asm-c-simple-call (info-c-simple-call-entry info)))])
+    [(op) `(asm ,info ,(asm-c-simple-call (info-c-simple-call-entry info) (info-c-simple-call-save-caller-saved? info)))])
 
   (define-instruction value pop
     [(op (z ur)) `(set! ,(make-live-info) ,z (asm ,info ,asm-pop))])
@@ -2063,11 +2063,29 @@
             (emit bsr target code*))))))
 
   (define asm-c-simple-call
-    (lambda (entry)
+    (lambda (entry save-caller-saved?)
       (let ([target `(literal 0 (entry ,entry))])
         (rec asm-c-simple-call-internal
-          (lambda (code*)
-            (emit bsr target code*))))))
+             (lambda (code*)
+               (asm-helper-save-caller-saved
+                save-caller-saved?
+                code*
+                (lambda (code*)
+                  (emit bsr target code*))))))))
+  
+  (define asm-helper-save-caller-saved
+    (lambda (save-caller-saved? code* p)
+      (cond
+       [save-caller-saved?
+        ;; Assumes no arguments to function
+        (let ([caller-save-regs (list %edx %ecx %eax %eax)])
+          (fold-left (lambda (code* reg)
+                       (emit push (cons 'reg reg) code*))
+                     (p (fold-left (lambda (code* reg)
+                                     (emit pop (cons 'reg reg) code*))
+                                   code* caller-save-regs))
+                     caller-save-regs))]
+       [else (p code*)])))
 
   (define asm-get-tc
     (let ([target `(literal 0 (entry ,(lookup-c-entry get-thread-context)))])

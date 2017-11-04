@@ -845,7 +845,7 @@
      (let ([urax (make-precolored-unspillable 'urax %rax)]) ; rax is assumed by linker's x86_64_set_jump
        (seq
          `(set! ,(make-live-info) ,urax (asm ,null-info ,asm-kill))
-         `(asm ,info ,(asm-c-simple-call (info-c-simple-call-entry info)) ,urax)))])
+         `(asm ,info ,(asm-c-simple-call (info-c-simple-call-entry info) (info-c-simple-call-save-caller-saved? info)) ,urax)))])
 
   (define-instruction value pop
     [(op (z ur)) `(set! ,(make-live-info) ,z (asm ,info ,asm-pop))])
@@ -2193,7 +2193,7 @@
             (asm-helper-call code* target jmp-reg))))))
 
   (define asm-c-simple-call
-    (lambda (entry)
+    (lambda (entry save-caller-saved?)
       (rec asm-c-simple-call-internal
         (lambda (code* jmp-reg)
           (let ([sp-opnd (cons 'reg %sp)])
@@ -2203,12 +2203,37 @@
                 (emit addi '(imm 8) sp-opnd
                   (asm-helper-jump code* `(x86_64-jump 0 (entry ,entry))))
                 (let ([target `(x86_64-call 0 (entry ,entry))])
-                  (if-feature windows
-                    ; must leave room for callee to store argument registers,
-                    ; even if there are no arguments
-                    (emit subi '(imm 32) sp-opnd
-                      (asm-helper-call (emit addi '(imm 32) sp-opnd code*) target jmp-reg))
-                    (asm-helper-call code* target jmp-reg)))))))))
+                  (asm-helper-save-caller-saved
+                   save-caller-saved?
+                   code*
+                   (lambda (code*)
+                     (if-feature windows
+                      ; must leave room for callee to store argument registers,
+                      ; even if there are no arguments
+                      (emit subi '(imm 32) sp-opnd
+                        (asm-helper-call (emit addi '(imm 32) sp-opnd code*) target jmp-reg))
+                      (asm-helper-call code* target jmp-reg)))))))))))
+
+  (define asm-helper-save-caller-saved
+    (lambda (save-caller-saved? code* p)
+      (cond
+       [save-caller-saved?
+        ;; Assumes no arguments to function on the stack
+        (let loop ([i (vector-length regvec)] [count 0] [code* code*])
+          (cond
+           [(fx= i 0)
+            (if (fxodd? count)
+                ;; maintain 16-byte alignment:
+                (emit push (cons 'reg %rax)
+                      (p (emit pop (cons 'reg %rax) code*)))
+                (p code*))]
+           [else
+            (let* ([i (fx- i 1)] [reg (vector-ref regvec i)])
+              (if (reg-callee-save? reg)
+                  (loop i count code*)
+                  (emit push (cons 'reg reg)
+                        (loop i (fx+ count 1) (emit pop (cons 'reg reg) code*)))))]))]
+       [else (p code*)])))
 
   (define asm-get-tc
     (let ([target `(x86_64-call 0 (entry ,(lookup-c-entry get-thread-context)))])
