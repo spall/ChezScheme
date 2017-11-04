@@ -1967,6 +1967,7 @@
   ($fptr-unlock! [flags])
   ($fp-type->pred [flags])
   ($ftd? [flags])
+  ($ftd-alignment [flags])
   ($ftd-as-box? [flags])
   ($ftd-atomic-category [flags])
   ($ftd-compound? [flags])

@@ -946,6 +946,9 @@ ftype operators:
   (set! $ftd-size
     (lambda (x)
       (ftd-size x)))
+  (set! $ftd-alignment
+    (lambda (x)
+      (ftd-alignment x)))
   (set! $ftd-compound?
     (lambda (x)
       (or (ftd-struct? x)
@@ -953,7 +956,7 @@ ftype operators:
           (ftd-array? x))))
   (set! $ftd->members
     (lambda (x)
-      ;; Currently used for x86_64 ABI: Returns a list of
+      ;; Currently used for x86_64 and arm32 ABI: Returns a list of
       ;;  (list 'integer/'float size offset)
       (let loop ([x x] [offset 0] [accum '()])
         (cond

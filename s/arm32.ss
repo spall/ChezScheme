@@ -2327,7 +2327,7 @@
                    (lambda (offset)
                      (lambda (x) ; requires var
                        (%seq
-                         (inline ,(make-info-loadfl %flreg1) ,%load-double->single ,x ,%zero ,(%constant flonum-data-disp))
+			 (inline ,(make-info-loadfl %flreg1) ,%load-double->single ,x ,%zero ,(%constant flonum-data-disp))
                          (inline ,(make-info-loadfl %flreg1) ,%store-single ,%sp ,%zero (immediate ,offset)))))]
                  [load-int-stack
                    (lambda (offset)
@@ -2339,14 +2339,33 @@
                        (%seq
                          (set! ,(%mref ,%sp ,offset) ,lorhs)
                          (set! ,(%mref ,%sp ,(fx+ offset 4)) ,hirhs))))]
+                 [load-int-indirect-stack
+                   (lambda (offset from-offset size)
+                     (lambda (x) ; requires var
+		       (case size
+			 [(3)
+			  (%seq
+			   (set! ,(%mref ,%sp ,offset) (inline ,(make-info-load 'integer-16 #f) ,%load ,x ,%zero (immediate ,from-offset)))
+			   (set! ,(%mref ,%sp ,(fx+ offset 2)) (inline ,(make-info-load 'integer-8 #f) ,%load ,x ,%zero (immediate ,(fx+ from-offset 2)))))]
+			 [else
+			  `(set! ,(%mref ,%sp ,offset) ,(case size
+							  [(1) `(inline ,(make-info-load 'integer-8 #f) ,%load ,x ,%zero (immediate ,from-offset))]
+							  [(2) `(inline ,(make-info-load 'integer-16 #f) ,%load ,x ,%zero (immediate ,from-offset))]
+							  [(4) (%mref ,x ,from-offset)]))])))]
+                 [load-int64-indirect-stack
+                   (lambda (offset from-offset)
+                     (lambda (x) ; requires var
+                       (%seq
+			(set! ,(%mref ,%sp ,offset) ,(%mref ,x ,from-offset))
+			(set! ,(%mref ,%sp ,(fx+ offset 4)) ,(%mref ,x ,(fx+ from-offset 4))))))]
                  [load-double-reg
-                   (lambda (fpreg)
+                   (lambda (fpreg fp-disp)
                      (lambda (x) ; requires var
-                       `(inline ,(make-info-loadfl fpreg) ,%load-double ,x ,%zero ,(%constant flonum-data-disp))))]
+                       `(inline ,(make-info-loadfl fpreg) ,%load-double ,x ,%zero (immediate ,fp-disp))))]
                  [load-single-reg
-                   (lambda (fpreg)
+                   (lambda (fpreg fp-disp single?)
                      (lambda (x) ; requires var
-                       `(inline ,(make-info-loadfl fpreg) ,%load-double->single ,x ,%zero ,(%constant flonum-data-disp))))]
+                       `(inline ,(make-info-loadfl fpreg) ,(if single? %load-single %load-double->single) ,x ,%zero (immediate ,fp-disp))))]
                  [load-int-reg
                    (lambda (ireg)
                      (lambda (x)
@@ -2357,6 +2376,28 @@
                        (%seq
                          (set! ,loreg ,lo)
                          (set! ,hireg ,hi))))]
+                 [load-int-indirect-reg
+                   (lambda (ireg from-offset size)
+                     (lambda (x)
+		       (case size
+			 [(3)
+			  (let ([tmp %lr])
+			    (%seq
+			     (set! ,ireg (inline ,(make-info-load 'integer-16 #f) ,%load ,x ,%zero (immediate ,from-offset)))
+			     (set! ,tmp (inline ,(make-info-load 'integer-8 #f) ,%load ,x ,%zero (immediate ,(fx+ from-offset 2))))
+			     (set! ,tmp ,(%inline sll ,tmp (immediate 16)))
+			     (set! ,ireg ,(%inline + ,ireg ,tmp))))]
+			 [else
+			  `(set! ,ireg ,(case size
+					  [(1) `(inline ,(make-info-load 'integer-8 #f) ,%load ,x ,%zero (immediate ,from-offset))]
+					  [(2) `(inline ,(make-info-load 'integer-16 #f) ,%load ,x ,%zero (immediate ,from-offset))]
+					  [(4) (%mref ,x ,from-offset)]))])))]
+                 [load-int64-indirect-reg
+                   (lambda (loreg hireg from-offset)
+                     (lambda (x)
+                       (%seq
+                         (set! ,loreg ,(%mref ,x ,from-offset))
+                         (set! ,hireg ,(%mref ,x ,(fx+ from-offset 4))))))]
                  [do-args
                   (lambda (types)
                     ; sgl* is always of even-length, i.e., has a sgl/dbl reg first
@@ -2372,21 +2413,101 @@
                                      (cons (load-double-stack isp) locs)
                                      live* int* '() #f (fx+ isp 8)))
                                  (loop (cdr types)
-                                   (cons (load-double-reg (car sgl*)) locs)
+                                   (cons (load-double-reg (car sgl*) (constant flonum-data-disp)) locs)
                                    live* int* (cddr sgl*) bsgl isp))]
                             [(fp-single-float)
                              (if bsgl
                                  (loop (cdr types)
-                                   (cons (load-single-reg bsgl) locs)
+                                   (cons (load-single-reg bsgl (constant flonum-data-disp) #f) locs)
                                    live* int* sgl* #f isp)
                                  (if (null? sgl*)
                                      (loop (cdr types)
                                        (cons (load-single-stack isp) locs)
                                        live* int* '() #f (fx+ isp 4))
                                      (loop (cdr types)
-                                       (cons (load-single-reg (car sgl*)) locs)
+                                       (cons (load-single-reg (car sgl*) (constant flonum-data-disp) #f) locs)
                                        live* int* (cddr sgl*) (cadr sgl*) isp)))]
-                            [else
+			    [(fp-ftd& ,ftd)
+			     (let ([size ($ftd-size ftd)]
+				   [members ($ftd->members ftd)]
+				   [combine-loc (lambda (loc f)
+						  (if loc
+						      (lambda (x) (%seq ,(loc x) ,(f x)))
+						      f))])
+			       (case ($ftd-alignment ftd)
+				 [(8)
+				  (let* ([int* (if (even? (length int*)) int* (cdr int*))]
+					 [num-members (length members)]
+					 [doubles? (and (fx<= num-members 4)
+							(andmap (lambda (m) (and (eq? (car m) 'float)
+										 (fx= (cadr m) 8)))
+								members))])
+				    ;; Sequence of up to 4 doubles that fits in registers?
+				    (cond
+				     [(and doubles?
+					   (fx>= (length sgl*) (fx* 2 num-members)))
+				      ;; Allocate each double to a register
+				      (let dbl-loop ([size size] [offset 0] [sgl* sgl*] [loc #f])
+					(cond
+					 [(fx= size 0)
+					  (loop (cdr types) (cons loc locs) live* int* sgl* #f isp)]
+					 [else
+					  (dbl-loop (fx- size 8) (fx+ offset 8) (cddr sgl*)
+						    (combine-loc loc (load-double-reg (car sgl*) offset)))]))]
+				     [else
+				      ;; General case; for non-doubles, use integer registers while available,
+				      ;;  possibly splitting between registers and stack
+				      (let obj-loop ([size size] [offset 0] [loc #f]
+						     [live* live*] [int* int*] [isp isp])
+					(cond
+					 [(fx= size 0)
+					  (loop (cdr types) (cons loc locs) live* int* sgl* bsgl isp)]
+					 [else
+					  (if (or (null? int*) doubles?)
+					      (let ([isp (align 8 isp)])
+						(obj-loop (fx- size 8) (fx+ offset 8)
+							  (combine-loc loc (load-int64-indirect-stack isp offset))
+							  live* int* (fx+ isp 8)))
+					      (obj-loop (fx- size 8) (fx+ offset 8)
+							(combine-loc loc (load-int64-indirect-reg (car int*) (cadr int*) offset))
+							(cons* (car int*) (cadr int*) live*) (cddr int*) isp))]))]))]
+				 [else
+				    (let* ([num-members (length members)]
+					   [floats? (and (fx<= num-members 4)
+							 (andmap (lambda (m) (and (eq? (car m) 'float)
+										  (fx= (cadr m) 4)))
+								 members))])
+				      ;; Sequence of up to 4 floats that fits in registers?
+				      (cond
+				       [(and floats?
+					     (fx>= (fx+ (length sgl*) (if bsgl 1 0)) num-members))
+					;; Allocate each float to register
+					(let flt-loop ([size size] [offset 0] [sgl* sgl*] [bsgl bsgl] [loc #f])
+					  (cond
+					   [(fx= size 0)
+					    (loop (cdr types) (cons loc locs) live* int* sgl* bsgl isp)]
+					   [else
+					    (flt-loop (fx- size 4) (fx+ offset 4)
+						      (if bsgl sgl* (cddr sgl*))
+						      (if bsgl #f (cadr sgl*))
+						      (combine-loc loc (load-single-reg (or bsgl (car sgl*)) offset #t)))]))]
+				       [else
+					;; General case; use integer registers while available,
+					;;  possibly splitting between registers and stack
+					(let obj-loop ([size size] [offset 0] [loc #f]
+						       [live* live*] [int* int*] [isp isp])
+					  (cond
+					   [(fx<= size 0)
+					    (loop (cdr types) (cons loc locs) live* int* sgl* bsgl isp)]
+					   [else
+					    (if (or (null? int*) floats?)
+						(obj-loop (fx- size 4) (fx+ offset 4)
+							  (combine-loc loc (load-int-indirect-stack isp offset (fxmin size 4)))
+							  live* int* (fx+ isp 4))
+						(obj-loop (fx- size 4) (fx+ offset 4)
+							  (combine-loc loc (load-int-indirect-reg (car int*) offset (fxmin size 4)))
+							  (cons (car int*) live*) (cdr int*) isp))]))]))]))]
+			    [else
                              (if (nanopass-case (Ltype Type) (car types)
                                    [(fp-integer ,bits) (fx= bits 64)]
                                    [(fp-unsigned ,bits) (fx= bits 64)]
