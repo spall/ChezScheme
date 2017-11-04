@@ -2398,6 +2398,12 @@
                        (%seq
                          (set! ,loreg ,(%mref ,x ,from-offset))
                          (set! ,hireg ,(%mref ,x ,(fx+ from-offset 4))))))]
+		 [double-member?
+		  (lambda (m) (and (eq? (car m) 'float)
+				   (fx= (cadr m) 8)))]
+		 [float-member?
+		  (lambda (m) (and (eq? (car m) 'float)
+				   (fx= (cadr m) 4)))]
                  [do-args
                   (lambda (types)
                     ; sgl* is always of even-length, i.e., has a sgl/dbl reg first
@@ -2439,9 +2445,7 @@
 				  (let* ([int* (if (even? (length int*)) int* (cdr int*))]
 					 [num-members (length members)]
 					 [doubles? (and (fx<= num-members 4)
-							(andmap (lambda (m) (and (eq? (car m) 'float)
-										 (fx= (cadr m) 8)))
-								members))])
+							(andmap double-member? members))])
 				    ;; Sequence of up to 4 doubles that fits in registers?
 				    (cond
 				     [(and doubles?
@@ -2474,9 +2478,7 @@
 				 [else
 				    (let* ([num-members (length members)]
 					   [floats? (and (fx<= num-members 4)
-							 (andmap (lambda (m) (and (eq? (car m) 'float)
-										  (fx= (cadr m) 4)))
-								 members))])
+							 (andmap float-member? members))])
 				      ;; Sequence of up to 4 floats that fits in registers?
 				      (cond
 				       [(and floats?
@@ -2527,14 +2529,74 @@
                                        live* '() sgl* bsgl (fx+ isp 4))
                                      (loop (cdr types)
                                        (cons (load-int-reg (car int*)) locs)
-                                       (cons (car int*) live*) (cdr int*) sgl* bsgl isp)))]))))])
+                                       (cons (car int*) live*) (cdr int*) sgl* bsgl isp)))]))))]
+		 [indirect-result-that-fits-in-registers?
+		  (lambda (result-type)
+		    (nanopass-case (Ltype Type) result-type
+		      [(fp-ftd& ,ftd)
+		       (let* ([members ($ftd->members ftd)]
+			      [num-members (length members)])
+			 (or (fx<= ($ftd-size ftd) 4)
+			     (fx= num-members 1)
+			     (and (fx<= num-members 4)
+				  (or (andmap double-member? members)
+				      (andmap float-member? members)))))]
+		      [else #f]))]
+		 [add-fill-result
+		  (lambda (fill-result-here? result-type args-frame-size e)
+		    (cond
+		     [fill-result-here?
+		      (nanopass-case (Ltype Type) result-type
+		        [(fp-ftd& ,ftd)
+			 (let* ([members ($ftd->members ftd)]
+				[num-members (length members)]
+				;; result pointer is stashed on the stack after all arguments:
+				[dest-x %r2]
+				[init-dest-e `(seq ,e (set! ,dest-x ,(%mref ,%sp ,args-frame-size)))])
+			   (cond
+			    [(and (fx<= num-members 4)
+				  (or (andmap double-member? members)
+				      (andmap float-member? members)))
+			     ;; double/float results are in floating-point registers
+			     (let ([double? (and (pair? members) (double-member? (car members)))])
+			       (let loop ([members members] [sgl* (sgl-regs)] [offset 0] [e init-dest-e])
+				 (cond
+				  [(null? members) e]
+				  [else
+				   (loop (cdr members)
+					 (if double? (cddr sgl*) (cdr sgl*))
+					 (fx+ offset (if double? 8 4))
+					 `(seq
+					   ,e
+					   (inline ,(make-info-loadfl (car sgl*)) ,(if double? %store-double %store-single)
+						   ,dest-x ,%zero (immediate ,offset))))])))]
+			    [else
+			     ;; result is in %Cretval and maybe %r1
+			     `(seq
+			       ,init-dest-e
+			       ,(case ($ftd-size ftd)
+				  [(1) `(inline ,(make-info-load 'integer-8 #f) ,%store ,dest-x ,%zero (immediate 0) ,%Cretval)]
+				  [(2) `(inline ,(make-info-load 'integer-16 #f) ,%store ,dest-x ,%zero (immediate 0) ,%Cretval)]
+				  [(3) (%seq
+					(inline ,(make-info-load 'integer-16 #f) ,%store ,dest-x ,%zero (immediate 0) ,%Cretval)
+					(set! ,%Cretval ,(%inline srl ,%Cretval (immediate 16)))
+					(inline ,(make-info-load 'integer-8 #f) ,%store ,dest-x ,%zero (immediate 2) ,%Cretval))]
+				  [(4) `(set! ,(%mref ,dest-x ,0) ,%Cretval)]
+				  [(8) `(seq
+					 (set! ,(%mref ,dest-x ,0) ,%Cretval)
+					 (set! ,(%mref ,dest-x ,4) ,%r1))]))]))])]
+		     [else e]))])
           (lambda (info)
             (safe-assert (reg-callee-save? %tc)) ; no need to save-restore
-            (let ([arg-type* (info-foreign-arg-type* info)]
-                  [result-type (info-foreign-result-type info)])
-              (with-values (do-args arg-type*)
-                (lambda (frame-size locs live*)
-                  (let* ([frame-size (align 8 frame-size)]
+            (let* ([arg-type* (info-foreign-arg-type* info)]
+		   [result-type (info-foreign-result-type info)]
+		   [fill-result-here? (indirect-result-that-fits-in-registers? result-type)])
+              (with-values (do-args (if fill-result-here? (cdr arg-type*) arg-type*))
+                (lambda (args-frame-size locs live*)
+                  (let* ([frame-size (align 8 (+ args-frame-size
+						 (if fill-result-here?
+						     4
+						     0)))]
                          [adjust-frame (lambda (op)
                                          (lambda ()
                                            (if (fx= frame-size 0)
@@ -2542,9 +2604,15 @@
                                                `(set! ,%sp (inline ,null-info ,op ,%sp (immediate ,frame-size))))))])
                     (values
                       (adjust-frame %-)
-                      (reverse locs)
+                      (let ([locs (reverse locs)])
+			(cond
+			 [fill-result-here?
+			  ;; stash extra argument on the stack to be retrieved after call and filled with the result:
+			  (cons (load-int-stack args-frame-size) locs)]
+			 [else locs]))
                       (lambda (t0)
-                        `(inline ,(make-info-kill*-live* (reg-list %r0) live*) ,%c-call ,t0))
+			(add-fill-result fill-result-here? result-type args-frame-size
+			  `(inline ,(make-info-kill*-live* (reg-list %r0) live*) ,%c-call ,t0)))
                       (nanopass-case (Ltype Type) result-type
                         [(fp-double-float)
                          (lambda (lvalue)

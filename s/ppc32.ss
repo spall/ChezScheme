@@ -2355,7 +2355,7 @@
                     (let ([locs (reverse locs)])
 		      (cond
 		       [fill-result-here?
-			;; stash extra argument on the stack to retrieved after call and filled with the result:
+			;; stash extra argument on the stack to be retrieved after call and filled with the result:
 			(cons (load-int-stack frame-size) locs)]
 		       [else locs]))
                     (lambda (t0)
