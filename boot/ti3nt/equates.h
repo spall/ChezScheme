@@ -88,8 +88,8 @@ typedef unsigned __int64 U64;
 #define bytevector_length_offset 0x3
 #define bytevector_pad_disp 0x5
 #define bytevector_type_disp 0x1
-#define c_entry_name_vector #(thread-context get-thread-context handle-apply-overflood handle-docall-error handle-overflow handle-overflood handle-nonprocedure-symbol thread-list split-and-resize raw-collect-cond raw-tc-mutex handle-values-error handle-mvlet-error handle-arg-error foreign-entry install-library-entry get-more-room scan-remembered-set instantiate-code-object Sreturn Scall->ptr Scall->fptr Scall->bytevector Scall->fixnum Scall->int32 Scall->uns32 Scall->double Scall->single Scall->int64 Scall->uns64 Scall->void Scall->indirect-byte Scall->indirect-short Scall->indirect-int32 Scall->indirect-int64 Scall->indirect-float Scall->indirect-double Scall->indirect-copy-one-char Scall->indirect-copy-three-chars Scall->indirect-copy Scall->indirect-sized-int64-int64 Scall->indirect-sized-double-double Scall->indirect-sized-int64-double Scall->indirect-sized-double-int64 Scopy-argument)
-#define c_entry_vector_size 0x2D
+#define c_entry_name_vector #(thread-context get-thread-context handle-apply-overflood handle-docall-error handle-overflow handle-overflood handle-nonprocedure-symbol thread-list split-and-resize raw-collect-cond raw-tc-mutex handle-values-error handle-mvlet-error handle-arg-error foreign-entry install-library-entry get-more-room scan-remembered-set instantiate-code-object Sreturn Scall->ptr Scall->fptr Scall->bytevector Scall->fixnum Scall->int32 Scall->uns32 Scall->double Scall->single Scall->int64 Scall->uns64 Scall->void Scall->indirect-byte Scall->indirect-short Scall->indirect-int32 Scall->indirect-int64 Scall->indirect-float Scall->indirect-double Scall->indirect-copy-one-char Scall->indirect-copy-three-chars Scall->indirect-copy Scall->indirect-sized-int64-int64 Scall->indirect-sized-double-double Scall->indirect-sized-int64-double Scall->indirect-sized-double-int64 Scall->indirect-sized-int64 Scall->indirect-sized-double-double-double-double Scopy-argument)
+#define c_entry_vector_size 0x2F
 #define cached_stack_link_disp 0x4
 #define cached_stack_size_disp 0x0
 #define card_offset_bits 0x8
@@ -706,7 +706,9 @@ typedef unsigned __int64 U64;
 #define CENTRY_Scall_indirect_int64 34
 #define CENTRY_Scall_indirect_short 32
 #define CENTRY_Scall_indirect_sized_double_double 41
+#define CENTRY_Scall_indirect_sized_double_double_double_double 45
 #define CENTRY_Scall_indirect_sized_double_int64 43
+#define CENTRY_Scall_indirect_sized_int64 44
 #define CENTRY_Scall_indirect_sized_int64_double 42
 #define CENTRY_Scall_indirect_sized_int64_int64 40
 #define CENTRY_Scall_int32 24
@@ -716,7 +718,7 @@ typedef unsigned __int64 U64;
 #define CENTRY_Scall_uns32 25
 #define CENTRY_Scall_uns64 29
 #define CENTRY_Scall_void 30
-#define CENTRY_Scopy_argument 44
+#define CENTRY_Scopy_argument 46
 #define CENTRY_Sreturn 19
 #define CENTRY_foreign_entry 14
 #define CENTRY_get_more_room 16
