@@ -981,6 +981,11 @@
           [(save-ra? entry) ((new '() '()) save-ra? entry)]
           [(live* save-ra? entry) ((new '() live*) save-ra? entry)]))))
 
+    (define-record-type info-c-return (nongenerative)
+      (parent info)
+      (sealed #t)
+      (fields offset))
+
     (module ()
       (record-writer (record-type-descriptor info-load)
         (lambda (x p wr)
@@ -12512,6 +12517,10 @@
              (let ([block (make-tail-block)])
                (tail-block-tail-set! block (with-output-language (L15a Tail) `(asm-return ,reg* ...)))
                (values block (cons block block*)))]
+            [(asm-c-return ,info ,reg* ...)
+             (let ([block (make-tail-block)])
+               (tail-block-tail-set! block (with-output-language (L15a Tail) `(asm-c-return ,info ,reg* ...)))
+               (values block (cons block block*)))]
             [else ($oops who "unexpected Tail ~s" ir)])
           (Effect : Effect (ir target block*) -> * (target block*)
             [(nop) (values target block*)]
@@ -13825,6 +13834,7 @@
                 [else (sorry! who "unrecognized block ~s" block)]))))
         (Tail : Tail (ir chunk* offset) -> * (code* chunk* offset)
           [(asm-return) (values (asm-return) chunk* offset)]
+          [(asm-c-return ,info) (values (asm-c-return info) chunk* offset)]
           [(jump (label-ref ,l ,offset0))
            (values (asm-direct-jump l offset0) chunk* offset)]
           [(jump (literal ,info))
@@ -14108,6 +14118,9 @@
                      (safe-assert (libspec-label? l))
                      (fold-left add-var no-live* (libspec-label-live-reg* l))]
                     [(asm-return ,reg* ...)
+                     (safe-assert (eq? out no-live*))
+                     (fold-left add-var no-live* reg*)]
+                    [(asm-c-return ,info ,reg* ...)
                      (safe-assert (eq? out no-live*))
                      (fold-left add-var no-live* reg*)]
                     [(jump ,live-info ,t (,var* ...))
@@ -14680,7 +14693,8 @@
           (Pred : Pred (ir) -> Pred ())
           (Tail : Tail (ir) -> Tail ()
             [(jump ,live-info ,[t] (,var* ...)) `(jump ,live-info ,t)]
-            [(asm-return ,reg* ...) `(asm-return)])
+            [(asm-return ,reg* ...) `(asm-return)]
+            [(asm-c-return ,info ,reg* ...) `(asm-c-return ,info)])
           (Effect : Effect (ir) -> Effect ())
           (foldable-Effect : Effect (ir new-effect*) -> * (new-effect*)
             [(return-point ,info ,rpl ,mrvl (,cnfv* ...))
@@ -15079,7 +15093,8 @@
           (Tail : Tail (ir) -> Tail ()
             [(jump ,live-info ,t) (handle-jump t (live-info-live live-info))]
             [(goto ,l) (values '() `(goto ,l))]
-            [(asm-return) (values '() `(asm-return))])
+            [(asm-return) (values '() `(asm-return))]
+            [(asm-c-return ,info) (values '() `(asm-c-return ,info))])
           (Effect : Effect (ir new-effect*) -> * (new-effect*)
             [(set! ,live-info ,lvalue ,rhs) (Rhs rhs lvalue new-effect* (live-info-live live-info))]
             [(inline ,live-info ,info ,effect-prim ,t* ...)

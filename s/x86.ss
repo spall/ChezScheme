@@ -791,9 +791,6 @@
   (define-instruction effect (c-simple-call)
     [(op) `(asm ,info ,(asm-c-simple-call (info-c-simple-call-entry info)))])
 
-  (define-instruction effect (c-simple-return)
-    [(op (d imm32)) `(asm ,info ,asm-c-simple-return ,d)])
-
   (define-instruction value pop
     [(op (z ur)) `(set! ,(make-live-info) ,z (asm ,info ,asm-pop))])
 
@@ -922,8 +919,8 @@
                      asm-lea1 asm-lea2 asm-indirect-call asm-fstpl asm-fstps asm-fldl asm-flds asm-condition-code
                      asm-fl-cvt asm-fl-store asm-fl-load asm-flt asm-trunc asm-div
                      asm-exchange asm-pause asm-locked-incr asm-locked-decr
-                     asm-flop-2 asm-flsqrt asm-c-simple-call asm-c-simple-return
-                     asm-save-flrv asm-restore-flrv asm-return asm-size
+                     asm-flop-2 asm-flsqrt asm-c-simple-call
+                     asm-save-flrv asm-restore-flrv asm-return asm-c-return asm-size
                      asm-enter asm-foreign-call asm-foreign-callable
                      asm-inc-profile-counter
                      asm-inc-cc-counter asm-read-time-stamp-counter asm-read-performance-monitoring-counter
@@ -1886,6 +1883,14 @@
         [(i3osx ti3osx) (emit addi '(imm 12) (cons 'reg %sp) (emit ret '()))]
         [else (emit ret '())])))
 
+  (define asm-c-return
+    (lambda (info)
+      (if (info-c-return? info)
+          (let ([offset (info-c-return-offset info)])
+            (safe-assert (<= 0 offset #xFFFF))
+            (emit retl `(imm ,offset) '()))
+          (emit ret '()))))
+
   (define asm-locked-incr
     (lambda (code* base index offset)
       (let ([dest (build-mem-opnd base index offset)])
@@ -2096,13 +2101,6 @@
         (rec asm-c-simple-call-internal
           (lambda (code*)
             (emit bsr target code*))))))
-
-  (define asm-c-simple-return
-    (lambda (code* t)
-      (Trivit (t)
-        (safe-assert (eq? (car t) 'imm))
-        (safe-assert (<= 0 (cadr t) #xFFFF))
-        (emit retl t code*))))
 
   (define asm-get-tc
     (let ([target `(literal 0 (entry ,(lookup-c-entry get-thread-context)))])
@@ -2716,15 +2714,10 @@
                                         ,e)
                                        e))
                                  e))
-                           (%seq
-                            ,(%inline c-simple-return (immediate
-                                                       ,(if (callee-pops-result-pointer? result-type)
-                                                            ;; remove the pointer argument provided by the caller
-                                                            ;; after popping the return address
-                                                            4
-                                                            0)))
-                            ;; We don't actually reach this return, but it makes the
-                            ;; sequence look like a tail sequence and with the right
-                            ;; live variables:
-                            (asm-return ,result-regs ...))))))))))))))))
+                             `(asm-c-return ,(if (callee-pops-result-pointer? result-type)
+                                                 ;; remove the pointer argument provided by the caller
+                                                 ;; after popping the return address
+                                                 (make-info-c-return 4)
+                                                 null-info)
+                                            ,result-regs ...)))))))))))))))
   )

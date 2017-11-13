@@ -853,6 +853,7 @@
       (jump t (var* ...))
       (joto l (nfv* ...))
       (asm-return reg* ...)
+      (asm-c-return info reg* ...)
       (if p0 tl1 tl2)
       (seq e0 tl1)
       (goto l)))
@@ -965,7 +966,8 @@
     (Tail (tl)
       (goto l)
       (jump live-info t (var* ...))
-      (asm-return reg* ...)))
+      (asm-return reg* ...)
+      (asm-c-return info reg* ...)))
 
   (define-language L15b (extends L15a)
     (terminals
@@ -983,9 +985,11 @@
       (+ (fp-offset live-info imm)))
     (Tail (tl)
       (- (jump live-info t (var* ...))
-         (asm-return reg* ...))
+         (asm-return reg* ...)
+         (asm-c-return info reg* ...))
       (+ (jump live-info t)
-         (asm-return))))
+         (asm-return)
+         (asm-c-return info))))
 
   (define ur?
     (lambda (x)

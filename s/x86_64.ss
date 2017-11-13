@@ -977,7 +977,7 @@
                      asm-fl-cvt asm-fl-store asm-fl-load asm-flt asm-trunc asm-div
                      asm-exchange asm-pause asm-locked-incr asm-locked-decr
                      asm-flop-2 asm-flsqrt asm-c-simple-call
-                     asm-save-flrv asm-restore-flrv asm-return asm-size
+                     asm-save-flrv asm-restore-flrv asm-return asm-c-return asm-size
                      asm-enter asm-foreign-call asm-foreign-callable
                      asm-inc-profile-counter
                      asm-inc-cc-counter asm-read-time-stamp-counter asm-read-performance-monitoring-counter
@@ -1990,6 +1990,10 @@
     (lambda ()
       (emit addi '(imm 8) (cons 'reg %sp)
         (emit ret '()))))
+
+  (define asm-c-return
+    (lambda (info)
+      (emit ret '())))
 
   (define asm-locked-incr
     (lambda (code* base index offset)
@@ -3145,7 +3149,7 @@
                  (values (lambda ()
                            ;; Return pointer that was filled; destination was the first argument
                            `(set! ,%Cretval ,(%mref ,%sp ,(if-feature windows 80 48))))
-                         %Cretval)])]
+                         (list %Cretval))])]
               [(fp-double-float)
                (values
                 (lambda (x)
@@ -3226,6 +3230,5 @@
                              (set! ,%rbp ,(%inline pop))
                              (set! ,%rbx ,(%inline pop))
                              (set! ,%sp ,(%inline + ,%sp (immediate 136)))))
-                        (set! ,%sp ,(%inline - ,%sp (immediate 8))) ; counteract pad word removal by asm-return
-                        (asm-return ,result-regs ...)))))))))))))
+                        (asm-c-return ,null-info ,result-regs ...)))))))))))))
   )

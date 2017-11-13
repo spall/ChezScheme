@@ -810,7 +810,7 @@
                      asm-lock asm-lock+/-
                      asm-fl-load/store
                      asm-flop-2 asm-c-simple-call
-                     asm-save-flrv asm-restore-flrv asm-return asm-size
+                     asm-save-flrv asm-restore-flrv asm-return asm-c-return asm-size
                      asm-enter asm-foreign-call asm-foreign-callable
                      asm-read-counter
                      asm-read-time-base
@@ -2077,6 +2077,10 @@
     (lambda () 
       (emit blr '())))
 
+  (define asm-c-return 
+    (lambda (info) 
+      (emit blr '())))
+
   (define asm-lognot
     (lambda (code* dest src)
       (Trivit (dest src)
@@ -2927,5 +2931,5 @@
                            ; deallocate space for pad & arg reg values
                            (set! ,%Csp ,(%inline + ,%Csp (immediate ,stack-size)))
                            ; done
-                           (asm-return ,callee-save-regs ... ,result-regs ...))))))))))))))
+                           (asm-c-return ,null-info ,callee-save-regs ... ,result-regs ...))))))))))))))
 )
