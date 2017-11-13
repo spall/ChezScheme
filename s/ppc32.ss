@@ -686,11 +686,10 @@
   (safe-assert (reg-callee-save? %tc)) ; no need to save-restore
   (define-instruction effect (c-simple-call)
     [(op)
-     (let ([u (make-tmp 'u)]
-           [save-caller-saved? (info-c-simple-call-save-caller-saved? info)])
+     (let ([u (make-tmp 'u)])
        (seq
          `(set! ,(make-live-info) ,u (asm ,null-info ,asm-kill))
-         `(asm ,info ,(asm-c-simple-call (info-c-simple-call-entry info) save-caller-saved? #t) ,u)))])
+         `(asm ,info ,(asm-c-simple-call (info-c-simple-call-entry info) #t) ,u)))])
 
   (define-instruction pred (eq? < > <= >=)
     [(op (y integer16) (x ur))
@@ -1841,41 +1840,11 @@
             (asm-helper-call code* target save-ra? tmp))))))
 
   (define asm-c-simple-call
-    (lambda (entry save-caller-saved? save-ra?)
+    (lambda (entry save-ra?)
       (let ([target `(ppc32-call 0 (entry ,entry))])
         (rec asm-c-simple-call-internal
           (lambda (code* tmp . ignore)
-            (asm-helper-save-caller-saved
-             save-caller-saved?
-             code*
-             (lambda (code*)
-               (asm-helper-call code* target save-ra? tmp))))))))
-
-  (define asm-helper-save-caller-saved
-    (lambda (save-caller-saved? code* p)
-      (cond
-       [save-caller-saved?
-        ;; assumes 0 arguments to function
-        (let* ([caller-saved (list %r3 %r4 %r5 %r6 %r7 %r8 %r9 %r10 %r11 %r12)]
-               [size (fx* (length caller-saved) 4)]
-               [code* (p (cdr (fold-left (lambda (pos+code* reg)
-					   (let ([pos (car pos+code*)])
-					     (cons (fx+ pos 4)
-						   (emit stw (cons 'reg reg) (cons 'reg %sp) `(imm ,pos)
-							 (cdr pos+code*)))))
-                                         (cons 0
-                                               (emit addi (cons 'reg %sp) (cons 'reg %sp) `(imm ,size)
-                                                     code*))
-                                         caller-saved)))])
-          (emit addi (cons 'reg %sp) (cons 'reg %sp) `(imm ,(- size))
-                (cdr (fold-left (lambda (pos+code* reg)
-				  (let ([pos (car pos+code*)])
-				    (cons (fx+ pos 4)
-					  (emit lwz (cons 'reg reg) (cons 'reg %sp) `(imm ,pos)
-						(cdr pos+code*)))))
-                                (cons 0 code*)
-				caller-saved))))]
-       [else (p code*)])))
+            (asm-helper-call code* target save-ra? tmp))))))
 
   (define-who asm-indirect-call
     (lambda (code* dest . ignore)
@@ -2573,40 +2542,36 @@
                    +---------------------------+
                    |                           |
                    |            lr             | 1 word
-           sp+184: |                           |
+           sp+X+4: |                           |
                    +---------------------------+
                    |                           |
                    |        back chain         | 1 word
-           sp+180: |                           |
+             sp+X: |                           |
                    +---------------------------+
+                   +---------------------------+ <- 16-byte aligned
+                   |                           |
+                   |       &-return space      | 2 words, if needed
+                   |                           |
+                   +---------------------------+ <- 8-byte aligned
+                   |                           |
+                   |      callee-save regs     |
+                   |                           |
                    +---------------------------+
                    |                           |
-                   |    floating-point regs    | 0 words
-           sp+180: |                           |
-                   +---------------------------+
+                   |  floating-point arg regs  | 
                    |                           |
-                   |       integer regs        | 18 words
-           sp+108: |                           |
-                   +---------------------------+
+                   +---------------------------+ <- 8-byte aligned
                    |                           |
-                   |     control register      | 1 word
-           sp+104: |                           |
-                   +---------------------------+
+                   |   integer argument regs   |
                    |                           |
-                   |   local variable space    | 24 words: 8 words for gp arg regs, 8 double words for fp arg regs, 0 for padding
-             sp+8: |       (and padding)       |
-                   +---------------------------+
-                   |                           |
-                   |      parameter list       | 0 words
-             sp+8: |                           |
-                   +---------------------------+
+             sp+8: +---------------------------+  <-- 8-byte aligned
                    |                           |
                    |            lr             | 1 word (place for get-thread-context to store lr)
-             sp+4: |                           |
+                   |                           |
                    +---------------------------+
                    |                           |
                    |        back chain         | 1 word
-             sp+0: |         [sp+176]          |
+             sp+0: |         [sp+X-4]          |
                    +---------------------------+
 
        FOR foreign callable (nb: assuming flreg1 & flreg2 are caller-save):
@@ -2615,14 +2580,14 @@
                  save fp arg regs (based on number declared by foreign-callable form) at sp+40
                  don't bother saving cr
                  save callee-save gp registers at sp+108 (could avoid those we don't use during argument conversion, if we knew what they were)
-                 save lr at sp[180] (actually sp 4, before sp is moved)
+                 save lr at sp[188] (actually sp 4, before sp is moved)
                  if threaded:
                    call get-thread-context
                  else
                    tc <- thread-context
                  endif
                  ...
-                 restore lr from sp[180]
+                 restore lr from sp[188]
 
        INVARIANTS
          stack grows down
@@ -2679,8 +2644,8 @@
 		 (inline ,(make-info-loadfl %flreg1) ,%store-single ,%sp ,%zero (immediate ,offset))
 		 (set! ,lvalue ,(%inline + ,%sp (immediate ,offset)))))))
           (define count-reg-args
-            (lambda (types gp-reg-count fp-reg-count first-arg-is-result-dest?)
-              (let f ([types types] [iint (if first-arg-is-result-dest? (fxmin 1 gp-reg-count) 0)] [iflt 0])
+            (lambda (types gp-reg-count fp-reg-count synthesize-first-argument?)
+              (let f ([types types] [iint (if synthesize-first-argument? -1 0)] [iflt 0])
                 (if (null? types)
                     (values iint iflt)
                     (cond
@@ -2709,16 +2674,20 @@
             ; we push all of the int reg args with one push instruction and all of the
             ; float reg args with another (v)push instruction
             (lambda (types gp-reg-count fp-reg-count int-reg-offset float-reg-offset stack-arg-offset
-			   first-arg-is-result-dest?)
-              (let loop ([types types]
+			   synthesize-first-argument? return-space-offset)
+              (let loop ([types (if synthesize-first-argument? (cdr types) types)]
                          [locs '()]
-                         [iint (if first-arg-is-result-dest? 1 0)]
+                         [iint 0]
                          [iflt 0]
-                         [int-reg-offset (if first-arg-is-result-dest? (fx+ int-reg-offset 4) int-reg-offset)]
+                         [int-reg-offset int-reg-offset]
                          [float-reg-offset float-reg-offset]
                          [stack-arg-offset stack-arg-offset])
                 (if (null? types)
-                    (reverse locs)
+                    (let ([locs (reverse locs)])
+                      (if synthesize-first-argument?
+                          (cons (load-stack-address return-space-offset)
+                                locs)
+                          locs))
                     (cond
                       [(and (not (constant software-floating-point))
                             (nanopass-case (Ltype Type) (car types)
@@ -2852,39 +2821,62 @@
                         (if (null? regs)
                             inline
                             (%seq ,inline ,(f regs (fx+ offset 4))))))))))
-	  (define register-result-copy
-	    (lambda (result-type first-arg-is-result-dest? int-reg-offset e)
-	      (nanopass-case (Ltype Type) result-type
-	        [(fp-ftd& ,ftd)
-		 (cond
-		  [first-arg-is-result-dest?
-		   (in-context Tail
-		     (%seq
-		      (set! ,(%tc-ref ts) ,(%mref ,%sp ,int-reg-offset)) ; destination was the first argument
-		      (set! ,(%tc-ref td) (immediate ,(fix ($ftd-size ftd))))
-		      ,e))]
-		  [else e])]
-		[else e])))
-	  (define pick-Scall
-	    (lambda (Scall->result-type result-type)
-	      (nanopass-case (Ltype Type) result-type
+          (define do-result
+            (lambda (result-type return-space-offset int-reg-offset)
+              (nanopass-case (Ltype Type) result-type
 		[(fp-ftd& ,ftd)
 		 (case ($ftd-atomic-category ftd)
 		   [(float)
-		    (case ($ftd-size ftd)
-		      [(4) (lookup-c-entry Scall->indirect-float)]
-		      [else (lookup-c-entry Scall->indirect-double)])]
+		    (values
+		     (lambda ()
+		       (case ($ftd-size ftd)
+			 [(4) `(inline ,(make-info-loadfl %Cfpretval) ,%load-single ,%sp ,%zero (immediate ,return-space-offset))]
+			 [else `(inline ,(make-info-loadfl %Cfpretval) ,%load-double ,%sp ,%zero (immediate ,return-space-offset))]))
+		     '())]
 		   [else
 		    (cond
 		     [($ftd-compound? ftd)
-		      (lookup-c-entry Scall->indirect-copy)]
+		      ;; return pointer
+		      (values
+		       (lambda () `(set! ,%Cretval ,(%mref ,%sp ,int-reg-offset)))
+		       (list %Cretval))]
+		     [(fx= 8 ($ftd-size ftd))
+		      (values (lambda ()
+				(%seq
+				 (set! ,%Cretval-high ,(%mref ,%sp ,return-space-offset))
+				 (set! ,%Cretval-low ,(%mref ,%sp ,(fx+ return-space-offset 4)))))
+			      (list %Cretval-high %Cretval-low))]
 		     [else
-		      (case ($ftd-size ftd)
-			[(1) (lookup-c-entry Scall->indirect-byte)]
-			[(2) (lookup-c-entry Scall->indirect-short)]
-			[(4) (lookup-c-entry Scall->indirect-int32)]
-			[else (lookup-c-entry Scall->indirect-int64)])])])]
-		[else Scall->result-type])))
+		      (values
+		       (lambda ()
+			 (case ($ftd-size ftd)
+			   [(1) `(set! ,%Cretval (inline ,(make-info-load 'integer-8 #f) ,%load ,%sp ,%zero (immediate ,return-space-offset)))]
+			   [(2) `(set! ,%Cretval (inline ,(make-info-load 'integer-16 #f) ,%load ,%sp ,%zero (immediate ,return-space-offset)))]
+			   [else `(set! ,%Cretval ,(%mref ,%sp ,return-space-offset))]))
+		       (list %Cretval))])])]
+                [(fp-double-float)
+                 (values (lambda (x)
+			   `(inline ,(make-info-loadfl %Cfpretval) ,%load-double ,x ,%zero ,(%constant flonum-data-disp)))
+			 '())]
+                [(fp-single-float)
+                 (values (lambda (x)
+			   `(inline ,(make-info-loadfl %Cfpretval) ,%load-double->single ,x ,%zero ,(%constant flonum-data-disp)))
+			 '())]
+		[else
+		 (cond
+		  [(nanopass-case (Ltype Type) result-type
+                     [(fp-integer ,bits) (fx= bits 64)]
+		     [(fp-unsigned ,bits) (fx= bits 64)]
+		     [else #f])
+		   (values (lambda (lo-rhs hi-rhs)
+			     (%seq
+			      (set! ,%Cretval-low ,lo-rhs)
+			      (set! ,%Cretval-high ,hi-rhs)))
+			   (list %Cretval-high %Cretval-low))]
+		  [else
+		   (values (lambda (rhs)
+			     `(set! ,%Cretval ,rhs))
+			   (list %Cretval))])])))
           (lambda (info)
             (define callee-save-regs (list %r14 %r15 %r16 %r17 %r18 %r19 %r20 %r21 %r22 %r23 %r24 %r25 %r26 %r27 %r28 %r29 %r30 %r31))
             (define isaved (length callee-save-regs))
@@ -2892,45 +2884,48 @@
 		  [result-type (info-foreign-result-type info)]
                   [gp-reg-count (length (gp-parameter-regs))]
                   [fp-reg-count (length (fp-parameter-regs))])
-              (let-values ([(iint iflt) (count-reg-args arg-type* gp-reg-count fp-reg-count (indirect-result-to-pointer? result-type))])
+              (let-values ([(iint iflt) (count-reg-args arg-type* gp-reg-count fp-reg-count (indirect-result-that-fits-in-registers? result-type))])
                 (let* ([int-reg-offset 8]       ; initial offset for calling conventions
-                       [float-reg-offset (fx+ (fx* gp-reg-count 4) int-reg-offset)]
+                       [float-reg-offset (align 8 (fx+ (fx* gp-reg-count 4) int-reg-offset))]
                        [callee-save-offset (if (constant software-floating-point)
                                                float-reg-offset
                                                (fx+ (fx* fp-reg-count 8) float-reg-offset))]
-                       [stack-size (align 16 (fx+ (fx* isaved 4) callee-save-offset))]
-                       [stack-arg-offset (fx+ stack-size 8)]
-		       [first-arg-is-result-dest? (indirect-result-to-pointer? result-type)])
-                  (values
-                    (lambda ()
-                      (%seq
-                        ,(%inline save-lr (immediate 4))
-                        ,(%inline store-with-update ,%Csp ,%Csp (immediate ,(fx- stack-size)))
-                        ,(save-regs (list-head (gp-parameter-regs) iint) int-reg-offset)
-                        ,(save-fp-regs (list-head (fp-parameter-regs) iflt) float-reg-offset)
-                        ; not bothering with callee-save floating point regs right now
-                        ; not bothering with cr, because we don't update nonvolatile fields
-                        ,(save-regs callee-save-regs callee-save-offset)
-                        ,(if-feature pthreads
-                           (%seq 
-                             (set! ,%Cretval ,(%inline get-tc))
-                             (set! ,%tc ,%Cretval))
-                           `(set! ,%tc (literal ,(make-info-literal #f 'entry (lookup-c-entry thread-context) 0))))))
-                    ; list of procedures that marshal arguments from their C stack locations
-                    ; to the Scheme argument locations
-                    (do-stack arg-type* gp-reg-count fp-reg-count int-reg-offset float-reg-offset stack-arg-offset
-			      first-arg-is-result-dest?)
-                    (lambda (fv* Scall->result-type)
-		      (register-result-copy result-type first-arg-is-result-dest? int-reg-offset
-                        (in-context Tail
-                          (%seq
-                            ; restore the lr
-                            (inline ,null-info ,%restore-lr (immediate ,(fx+ stack-size 4)))
-                            ; restore the callee save registers
-                            ,(restore-regs callee-save-regs callee-save-offset)
-                            ; deallocate space for pad & arg reg values
-                            (set! ,%Csp ,(%inline + ,%Csp (immediate ,stack-size)))
-                            ; tail call the C helper that calls the Scheme procedure
-                            (jump (literal ,(make-info-literal #f 'entry (pick-Scall Scall->result-type result-type) 0))
-                              (,callee-save-regs ... ,fv* ...)))))))))))))))
+		       [synthesize-first-argument? (indirect-result-that-fits-in-registers? result-type)]
+                       [return-space-offset (align 8 (fx+ (fx* isaved 4) callee-save-offset))]
+                       [stack-size (align 16 (if synthesize-first-argument?
+						 (fx+ return-space-offset 8)
+						 return-space-offset))]
+                       [stack-arg-offset (fx+ stack-size 8)])
+		  (let-values ([(get-result result-regs) (do-result result-type return-space-offset int-reg-offset)])
+		    (values
+		     (lambda ()
+		       (%seq
+                         ,(%inline save-lr (immediate 4))
+			 ,(%inline store-with-update ,%Csp ,%Csp (immediate ,(fx- stack-size)))
+			 ,(save-regs (list-head (gp-parameter-regs) iint) int-reg-offset)
+			 ,(save-fp-regs (list-head (fp-parameter-regs) iflt) float-reg-offset)
+			 ; not bothering with callee-save floating point regs right now
+                         ; not bothering with cr, because we don't update nonvolatile fields
+			 ,(save-regs callee-save-regs callee-save-offset)
+			 ,(if-feature pthreads
+                            (%seq 
+                              (set! ,%Cretval ,(%inline get-tc))
+                              (set! ,%tc ,%Cretval))
+                            `(set! ,%tc (literal ,(make-info-literal #f 'entry (lookup-c-entry thread-context) 0))))))
+		     ; list of procedures that marshal arguments from their C stack locations
+                     ; to the Scheme argument locations
+                     (do-stack arg-type* gp-reg-count fp-reg-count int-reg-offset float-reg-offset stack-arg-offset
+			       synthesize-first-argument? return-space-offset)
+		     get-result
+		     (lambda ()
+		       (in-context Tail
+                         (%seq
+                           ; restore the lr
+                           (inline ,null-info ,%restore-lr (immediate ,(fx+ stack-size 4)))
+                           ; restore the callee save registers
+                           ,(restore-regs callee-save-regs callee-save-offset)
+                           ; deallocate space for pad & arg reg values
+                           (set! ,%Csp ,(%inline + ,%Csp (immediate ,stack-size)))
+                           ; done
+                           (asm-return ,callee-save-regs ... ,result-regs ...))))))))))))))
 )
