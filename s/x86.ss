@@ -2602,77 +2602,60 @@
                        (do-stack (cdr types)
                          (cons (load-stack (car types) n) locs)
                          (fx+ n 4)))]))))
-          (define (do-result result-type init-stack-offset)
+          (define (do-result result-type init-stack-offset indirect-result-to-registers?)
             (nanopass-case (Ltype Type) result-type
               [(fp-ftd& ,ftd)
                (cond
-                [(fill-result-pointer-from-registers? result-type)
-                 (lambda ()
-                   (cond
-                    [(and (if-feature windows (not ($ftd-compound? ftd)) #t)
-                          (equal? '((float 4 0)) ($ftd->members ftd)))
-                     (%inline flds ,(%mref ,%sp 0))]
-                    [(and (if-feature windows (not ($ftd-compound? ftd)) #t)
-                          (equal? '((float 8 0)) ($ftd->members ftd)))
-                     (%inline fldl ,(%mref ,%sp 0))]
-                    [(fx= ($ftd-size ftd) 8)
-                     `(seq
-                       (set! ,%eax ,(%mref ,%sp 0))
-                       (set! ,%edx ,(%mref ,%sp 4)))]
-                    [else
-                     `(set! ,%eax ,(%mref ,%sp 0))]))]
-                [else
-                 (lambda ()
-                   ;; Return pointer that was filled; destination was the first argument
-                   `(set! ,%eax ,(%mref ,%sp ,init-stack-offset)))])]
-              [(fp-double-float)
-               (lambda (x)
-                 (%inline fldl ,(%mref ,x ,(constant flonum-data-disp))))]
-              [(fp-single-float)
-               (lambda (x)
-                 (%inline fldl ,(%mref ,x ,(constant flonum-data-disp))))]
-              [else
-               (cond
-                [(nanopass-case (Ltype Type) result-type
-                   [(fp-integer ,bits) (fx= bits 64)]
-                   [(fp-unsigned ,bits) (fx= bits 64)]
-                   [else #f])
-                 (lambda (lorhs hirhs) ; requires rhs
-                    (%seq
-                     (set! ,%eax ,lorhs)
-                     (set! ,%edx ,hirhs)))]
-                [else
-                 (lambda (x)
-                   `(set! ,%eax ,x))])]))
-          (define (result-registers result-type)
-            (nanopass-case (Ltype Type) result-type
-              [(fp-ftd& ,ftd)
-               (cond
-                [(fill-result-pointer-from-registers? result-type)
+                [indirect-result-to-registers?
                  (cond
                   [(and (if-feature windows (not ($ftd-compound? ftd)) #t)
-                        (let ([members ($ftd->members ftd)])
-                          (or (equal? members '((float 4 0)))
-                              (equal? members '((float 8 0))))))
-                   ;; result goes into a floating-pointer register
-                   '()]
+                        (equal? '((float 4 0)) ($ftd->members ftd)))
+                   (values (lambda ()
+                             (%inline flds ,(%mref ,%sp 0)))
+                           '())]
+                  [(and (if-feature windows (not ($ftd-compound? ftd)) #t)
+                        (equal? '((float 8 0)) ($ftd->members ftd)))
+                   (values (lambda ()
+                             (%inline fldl ,(%mref ,%sp 0)))
+                           '())]
+                  [(fx= ($ftd-size ftd) 8)
+                   (values (lambda ()
+                             `(seq
+                               (set! ,%eax ,(%mref ,%sp 0))
+                               (set! ,%edx ,(%mref ,%sp 4))))
+                           (list %eax %edx))]
                   [else
-                   (case ($ftd-size ftd)
-                     [(8) (list %eax %edx)]
-                     [else (list %eax)])])]
+                   (values (lambda ()
+                             `(set! ,%eax ,(%mref ,%sp 0)))
+                           (list %eax))])]
                 [else
-                 ;; returning pointer that was filled
-                 (list %eax)])]
-              [(fp-double-float) '()]
-              [(fp-single-float) '()]
+                 (values (lambda ()
+                           ;; Return pointer that was filled; destination was the first argument
+                           `(set! ,%eax ,(%mref ,%sp ,init-stack-offset)))
+                         (list %eax))])]
+              [(fp-double-float)
+               (values (lambda (x)
+                         (%inline fldl ,(%mref ,x ,(constant flonum-data-disp))))
+                       '())]
+              [(fp-single-float)
+               (values (lambda (x)
+                         (%inline fldl ,(%mref ,x ,(constant flonum-data-disp))))
+                       '())]
               [else
                (cond
                 [(nanopass-case (Ltype Type) result-type
                    [(fp-integer ,bits) (fx= bits 64)]
                    [(fp-unsigned ,bits) (fx= bits 64)]
                    [else #f])
-                 (list %eax %edx)]
-                [else (list %eax)])]))
+                 (values (lambda (lorhs hirhs) ; requires rhs
+                           (%seq
+                            (set! ,%eax ,lorhs)
+                            (set! ,%edx ,hirhs)))
+                         (list %eax %edx))]
+                [else
+                 (values (lambda (x)
+                           `(set! ,%eax ,x))
+                         (list %eax))])]))
         (lambda (info)
           (let ([conv (info-foreign-conv info)]
                 [arg-type* (info-foreign-arg-type* info)]
@@ -2685,44 +2668,44 @@
                                           ;; 8 of these bytes are used for &-return space, if needed
                                           12]
                                          [else 8])])
-            (let ([result-regs (result-registers result-type)]
-                  [indirect-result-to-registers? (fill-result-pointer-from-registers? result-type)])
-              (with-values (do-stack (if indirect-result-to-registers?
-                                         (cdr arg-type*)
-                                         arg-type*)
-                                     '()
-                                     init-stack-offset)
-                (lambda (frame-size locs)
-                  (values
-                    (lambda ()
-                      (%seq
-                        ,(%inline push ,%ebp)
-                        ,(%inline push ,%esi)
-                        ,(%inline push ,%edi)
-                        ,(%inline push ,%ebx)
-                        (set! ,%sp ,(%inline - ,%sp (immediate ,indirect-result-space)))
-                        ,(if-feature pthreads
+            (let ([indirect-result-to-registers? (fill-result-pointer-from-registers? result-type)])
+              (let-values ([(get-result result-regs) (do-result result-type init-stack-offset indirect-result-to-registers?)])
+                (with-values (do-stack (if indirect-result-to-registers?
+                                           (cdr arg-type*)
+                                           arg-type*)
+                                       '()
+                                       init-stack-offset)
+                  (lambda (frame-size locs)
+                    (values
+                     (lambda ()
+                       (%seq
+                         ,(%inline push ,%ebp)
+                         ,(%inline push ,%esi)
+                         ,(%inline push ,%edi)
+                         ,(%inline push ,%ebx)
+                         (set! ,%sp ,(%inline - ,%sp (immediate ,indirect-result-space)))
+                         ,(if-feature pthreads
                             `(seq
                                (set! ,%eax ,(%inline get-tc))
                                (set! ,%tc ,%eax))
                             `(set! ,%tc (literal ,(make-info-literal #f 'entry (lookup-c-entry thread-context) 0))))))
-                    (let ([locs (reverse locs)])
-                      (if indirect-result-to-registers?
-                          (cons (load-stack-address 0) ; use the &-return space
-                                locs)
-                          locs))
-                    (do-result result-type init-stack-offset)
-                    (lambda ()
-                      (in-context Tail
-                        (%seq
-                          (set! ,%sp ,(%inline + ,%sp (immediate ,indirect-result-space)))
-                          (set! ,%ebx ,(%inline pop))
-                          (set! ,%edi ,(%inline pop))
-                          (set! ,%esi ,(%inline pop))
-                          (set! ,%ebp ,(%inline pop))
-                          ; Windows __stdcall convention requires callee to clean up
-                          ,((lambda (e)
-                             (if (memq conv '(i3nt-stdcall i3nt-com))
+                     (let ([locs (reverse locs)])
+                       (if indirect-result-to-registers?
+                           (cons (load-stack-address 0) ; use the &-return space
+                                 locs)
+                           locs))
+                     get-result
+                     (lambda ()
+                       (in-context Tail
+                         (%seq
+                           (set! ,%sp ,(%inline + ,%sp (immediate ,indirect-result-space)))
+                           (set! ,%ebx ,(%inline pop))
+                           (set! ,%edi ,(%inline pop))
+                           (set! ,%esi ,(%inline pop))
+                           (set! ,%ebp ,(%inline pop))
+                           ; Windows __stdcall convention requires callee to clean up
+                           ,((lambda (e)
+                               (if (memq conv '(i3nt-stdcall i3nt-com))
                                  (let ([arg-size (fx- frame-size 20)])
                                    (if (fx> arg-size 0)
                                        (%seq
@@ -2744,3 +2727,4 @@
                             ;; sequence look like a tail sequence and with the right
                             ;; live variables:
                             (asm-return ,result-regs ...))))))))))))))))
+  )

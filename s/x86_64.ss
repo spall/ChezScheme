@@ -3112,61 +3112,54 @@
               [(fp-ftd& ,ftd)
                (cond
                 [(result-fits-in-registers? result-classes)
-                 (lambda ()
-                   ;; Copy content of result area on stack into
-                   ;; the integer and floating-point registers
-                   (let loop ([result-classes result-classes]
-                              [offset (if-feature windows 0 160)]
-                              [int* (list %rax %rdx)]
-                              [fp* (list %Cfpretval %Cfparg2)]
-                              [accum '()])
-                     (cond
-                      [(null? result-classes)
-                       (if (pair? (cdr accum)) `(seq ,(car accum) ,(cadr accum)) (car accum))]
-                      [(eq? (car result-classes) 'integer)
-                       (loop (cdr result-classes)
-                             (fx+ offset 8)
-                             (cdr int*)
-                             fp*
-                             (cons `(set! ,(car int*) ,(%mref ,%sp ,offset))
-                                   accum))]
-                      [(eq? (car result-classes) 'sse)
-                       (loop (cdr result-classes)
-                             (fx+ offset 8)
-                             int*
-                             (cdr fp*)
-                             (cons `(inline ,(make-info-loadfl (car fp*)) ,%load-double ,%sp ,%zero (immediate ,offset))
-                                   accum))])))]
+                 ;; Copy content of result area on stack into
+                 ;; the integer and floating-point registers
+                 (let loop ([result-classes result-classes]
+                            [offset (if-feature windows 0 160)]
+                            [int* (list %rax %rdx)]
+                            [fp* (list %Cfpretval %Cfparg2)]
+                            [accum '()]
+                            [live* '()])
+                   (cond
+                    [(null? result-classes)
+                     (values (lambda ()
+                               (if (pair? (cdr accum)) `(seq ,(car accum) ,(cadr accum)) (car accum)))
+                             live*)]
+                    [(eq? (car result-classes) 'integer)
+                     (loop (cdr result-classes)
+                           (fx+ offset 8)
+                           (cdr int*)
+                           fp*
+                           (cons `(set! ,(car int*) ,(%mref ,%sp ,offset))
+                                 accum)
+                           (cons (car int*) live*))]
+                    [(eq? (car result-classes) 'sse)
+                     (loop (cdr result-classes)
+                           (fx+ offset 8)
+                           int*
+                           (cdr fp*)
+                           (cons `(inline ,(make-info-loadfl (car fp*)) ,%load-double ,%sp ,%zero (immediate ,offset))
+                                 accum)
+                           live*)]))]
                 [else
-                 (lambda ()
-                   ;; Return pointer that was filled; destination was the first argument
-                   `(set! ,%Cretval ,(%mref ,%sp ,(if-feature windows 80 48))))])]
+                 (values (lambda ()
+                           ;; Return pointer that was filled; destination was the first argument
+                           `(set! ,%Cretval ,(%mref ,%sp ,(if-feature windows 80 48))))
+                         %Cretval)])]
               [(fp-double-float)
-               (lambda (x)
-                 `(inline ,(make-info-loadfl %Cfpretval) ,%load-double ,x ,%zero ,(%constant flonum-data-disp)))]
+               (values
+                (lambda (x)
+                  `(inline ,(make-info-loadfl %Cfpretval) ,%load-double ,x ,%zero ,(%constant flonum-data-disp)))
+                '())]
               [(fp-single-float)
-               (lambda (x)
-                 `(inline ,(make-info-loadfl %Cfpretval) ,%load-double->single ,x ,%zero ,(%constant flonum-data-disp)))]
+               (values
+                (lambda (x)
+                  `(inline ,(make-info-loadfl %Cfpretval) ,%load-double->single ,x ,%zero ,(%constant flonum-data-disp)))
+                '())]
               [else
-               (lambda (x)
-                 `(set! ,%Cretval ,x))]))
-          (define (result-registers result-type result-classes)
-            (nanopass-case (Ltype Type) result-type
-              [(fp-ftd& ,ftd)
-               (cond
-                [(result-fits-in-registers? result-classes)
-                 (cond
-                  [(equal? result-classes '(integer integer))
-                   (list %rax %rdx)]
-                  [(memq 'integer result-classes)
-                   (list %rax)]
-                  [else '()])]
-                [else
-                 ;; returning pointer that was filled
-                 (list %Cretval)])]
-              [(fp-double-float) '()]
-              [(fp-single-float) '()]
-              [else (list %Cretval)]))
+               (values(lambda (x)
+                        `(set! ,%Cretval ,x))
+                      (list %Cretval))]))
           (lambda (info)
             (let ([conv (info-foreign-conv info)]
                   [arg-type* (info-foreign-arg-type* info)]
@@ -3174,10 +3167,10 @@
               (let* ([result-classes (classify-type result-type)]
                      [synthesize-first? (and result-classes
                                              (result-fits-in-registers? result-classes))]
-                     [locs (do-stack (if synthesize-first? (cdr arg-type*) arg-type*))]
-                     [result-regs (result-registers result-type result-classes)])
-                (values
-                 (lambda ()
+                     [locs (do-stack (if synthesize-first? (cdr arg-type*) arg-type*))])
+                (let-values ([(get-result result-regs) (do-result result-type result-classes)])
+                  (values
+                   (lambda ()
                      (%seq
                       ,(if-feature windows
                          (%seq
@@ -3205,14 +3198,14 @@
                            (set! ,%rax ,(%inline get-tc))
                            (set! ,%tc ,%rax))
                          `(set! ,%tc (literal ,(make-info-literal #f 'entry (lookup-c-entry thread-context) 0))))))
-                  (let ([locs (reverse locs)])
-                    (if synthesize-first?
-                        (cons (load-stack-address (if-feature windows 0 160)) ; space on stack for results to be returned via registers
-                              locs)
-                        locs))
-                  (do-result result-type result-classes)
-                  (lambda ()
-                    (in-context Tail
+                   (let ([locs (reverse locs)])
+                     (if synthesize-first?
+                         (cons (load-stack-address (if-feature windows 0 160)) ; space on stack for results to be returned via registers
+                               locs)
+                         locs))
+                   get-result
+                   (lambda ()
+                     (in-context Tail
                       (%seq
                         ,(if-feature windows
                            (%seq
@@ -3234,5 +3227,5 @@
                              (set! ,%rbx ,(%inline pop))
                              (set! ,%sp ,(%inline + ,%sp (immediate 136)))))
                         (set! ,%sp ,(%inline - ,%sp (immediate 8))) ; counteract pad word removal by asm-return
-                        (asm-return ,result-regs ...))))))))))))
+                        (asm-return ,result-regs ...)))))))))))))
   )
