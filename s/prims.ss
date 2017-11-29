@@ -150,6 +150,11 @@
     (scheme-object)
     scheme-object))
 
+(define string->uninterned-symbol
+  (foreign-procedure "(cs)s_uninterned"
+    (scheme-object)
+    scheme-object))
+
 (define $intern2
   (foreign-procedure "(cs)s_intern2"
     (scheme-object scheme-object)
@@ -1163,6 +1168,8 @@
 (define symbol? (lambda (x) (symbol? x)))
 
 (define gensym? (lambda (x) (gensym? x)))
+
+(define uninterned-symbol? (lambda (x) (uninterned-symbol? x)))
 
 (define fixnum? (lambda (x) (fixnum? x)))
 
