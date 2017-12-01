@@ -215,7 +215,10 @@
 (define-who procedure-arity-mask
   (lambda (x)
     (unless (procedure? x) ($oops who "~s is not a procedure" x))
-    ($code-arity-mask ($closure-code x))))
+    (let ([c ($closure-code x)])
+      (if ($code-arity-in-closure? c)
+          ($closure-ref x 1)
+          ($code-arity-mask c)))))
 
 (let ()
   (define-syntax frob-proc
@@ -403,6 +406,16 @@
   (lambda (x)
     (unless ($code? x) ($oops who "~s is not code" x))
     ($code-pinfo* x)))
+
+(define-who $code-arity-in-closure?
+  (lambda (x)
+    (unless ($code? x) ($oops who "~s is not code" x))
+    ($code-arity-in-closure? x)))
+
+(define-who $code-wrapper-closure?
+  (lambda (x)
+    (unless ($code? x) ($oops who "~s is not code" x))
+    ($code-wrapper-closure? x)))
 
 (define $object-address ; not safe and can't be
   (lambda (x offset)
@@ -2236,3 +2249,37 @@
         (unless (string? str) ($oops who "~s is not a string" str))
         (wctmb cp (string->utf16 str 'little))))))
 )
+
+;; like `make-arity-wrapper-procedure`, but for system use and immutable
+(define-who $make-arity-wrapper-procedure
+  (lambda (proc arity-mask)
+    (unless (procedure? proc) ($oops who "~s is not a procedure" proc))
+    (unless (or (fixnum? arity-mask) (bignum? arity-mask)) ($oops who "~s is not an arity mask" arity-mask))
+    (#3%$make-arity-wrapper-procedure proc arity-mask)))
+
+(define-who make-arity-wrapper-procedure
+  (lambda (proc arity-mask data)
+    (unless (procedure? proc) ($oops who "~s is not a procedure" proc))
+    (unless (or (fixnum? arity-mask) (bignum? arity-mask)) ($oops who "~s is not an arity mask" arity-mask))
+    (#3%make-arity-wrapper-procedure proc arity-mask data)))
+
+(define-who arity-wrapper-procedure?
+  (lambda (x)
+    (and (procedure? x)
+         ($code-wrapper-closure? ($closure-code x)))))
+
+(define-who set-arity-wrapper-procedure!
+  (lambda (x proc)
+    (unless (arity-wrapper-procedure? x) ($oops who "~s is not an arity wrapper procedure" x))
+    (unless (procedure? proc)  ($oops who "~s is not a procedure" proc))
+    (set-car! ($closure-ref x 0) proc)))
+
+(define-who arity-wrapper-procedure-data
+  (lambda (x)
+    (unless (arity-wrapper-procedure? x) ($oops who "~s is not an arity wrapper procedure" x))
+    (cdr ($closure-ref x 0))))
+
+(define-who set-arity-wrapper-procedure-data!
+  (lambda (x v)
+    (unless (arity-wrapper-procedure? x) ($oops who "~s is not an arity wrapper procedure" x))
+    (set-cdr! ($closure-ref x 0) v)))

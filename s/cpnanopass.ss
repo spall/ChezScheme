@@ -4782,6 +4782,10 @@
                   ,(%constant code-data-disp))])
         (define-inline 3 $code-free-count
           [(e) (build-fix (%mref ,e ,(constant code-closure-length-disp)))])
+        (define-inline 3 $code-arity-in-closure?
+          [(e) (%typed-object-check mask-code-arity-in-closure type-code-arity-in-closure ,e)])
+        (define-inline 3 $code-wrapper-closure?
+          [(e) (%typed-object-check mask-code-wrapper-closure type-code-wrapper-closure ,e)])
         (define-inline 2 $unbound-object
           [() `(quote ,($unbound-object))])
         (define-inline 2 void
@@ -5247,7 +5251,8 @@
         (let ()
           (define hand-coded-closure?
             (lambda (name)
-              (not (memq name '(nuate nonprocedure-code error-invoke invoke)))))
+              (not (memq name '(nuate nonprocedure-code error-invoke invoke
+                                      arity-wrapper-apply $arity-wrapper-apply)))))
           (define-inline 2 $hand-coded
             [(name)
              (nanopass-case (L7 Expr) name
@@ -5336,6 +5341,28 @@
           (define-tc-parameter $current-stack-link stack-link)
           (define-tc-parameter $current-winders winders)
           )
+
+        (let ()
+          (define (make-wrapper-closure-alloc e-proc e-arity-mask libspec)
+            (bind #t ([c (%constant-alloc type-closure (fx* 3 (constant ptr-bytes)))])
+              (%seq
+                (set! ,(%mref ,c ,(constant closure-code-disp))
+                      (literal ,(make-info-literal #f 'library libspec (constant code-data-disp))))
+                (set! ,(%mref ,c ,(constant closure-data-disp)) ,e-proc)
+                (set! ,(%mref ,c ,(fx+ (constant ptr-bytes) (constant closure-data-disp))) ,e-arity-mask)
+                ,c)))
+          (define-inline 3 make-arity-wrapper-procedure
+            [(e-proc e-arity-mask e-data)
+             (bind #t ([t (%constant-alloc type-pair (constant size-pair))])
+               (%seq
+                 (set! ,(%mref ,t ,(constant pair-car-disp)) ,e-proc)
+                 (set! ,(%mref ,t ,(constant pair-cdr-disp)) ,e-data)
+                 ,(bind #f (e-arity-mask)
+                    (make-wrapper-closure-alloc t e-arity-mask (lookup-libspec arity-wrapper-apply)))))])
+          (define-inline 3 $make-arity-wrapper-procedure
+            [(e-proc e-arity-mask)
+             (bind #f (e-proc e-arity-mask)
+               (make-wrapper-closure-alloc e-proc e-arity-mask (lookup-libspec $arity-wrapper-apply)))]))
 
         (define-inline 3 $install-guardian
           [(e-obj e-rep e-tconc)
@@ -12101,6 +12128,38 @@
                           (out %ac0 %ac1 %cp %xp %yp %ts %td scheme-args extra-regs))))
                   (set! ,%ac0 ,(%constant svoid))
                   (jump ,%ref-ret (,%ac0))))]
+           [($arity-wrapper-apply arity-wrapper-apply)
+            (let ([info (make-info (symbol->string sym) '())])
+              (define (finish-jump reg jump-e)
+                (with-output-language (L13.5 Tail)
+                  (if (eq? sym 'arity-wrapper-apply)
+                      (%seq
+                        (set! ,reg ,(%mref ,reg ,(constant pair-car-disp)))
+                        ,jump-e)
+                      jump-e)))
+              (info-lambda-fv*-set! info '(proc arity-mask))
+              (info-lambda-flags-set! info (fxior (constant code-flag-arity-in-closure)
+                                                  (if (eq? sym 'arity-wrapper-apply)
+                                                      (constant code-flag-wrapper-closure)
+                                                      0)))
+              `(lambda ,info 0 ()
+                ,(%seq
+                  ,(meta-cond
+                    [(real-register? '%cp)
+                     (%seq
+                       (set! ,%cp ,(%mref ,%cp ,(constant closure-data-disp)))
+                       ,(finish-jump %cp
+                                     `(jump ,(%mref ,%cp ,(constant closure-code-disp))
+                                            (,%ac0 ,%cp ,(reg-cons* %ret arg-registers) ...))))]
+                    [else
+                     (%seq
+                       (set! ,%td ,(ref-reg %cp))
+                       (set! ,%td ,(%mref ,%td ,(constant closure-data-disp)))
+                       ,(finish-jump %td
+                                     (%seq
+                                       (set! ,(ref-reg %cp) ,%td)
+                                       (jump ,(%mref ,%td ,(constant closure-code-disp))
+                                             (,%ac0 ,(reg-cons* %ret arg-registers) ...)))))]))))]
            [(bytevector=?)
             (let ([bv1 (make-tmp 'bv1)] [bv2 (make-tmp 'bv2)] [idx (make-tmp 'idx)] [len2 (make-tmp 'len2)])
               (define (argcnt->max-fv n) (max (- n (length arg-registers)) 0))
