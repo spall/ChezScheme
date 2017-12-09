@@ -375,9 +375,9 @@ typedef unsigned __int64 U64;
 #define mask_vector 0x3
 #define max_float_alignment 0x8
 #define max_integer_alignment 0x8
-#define max_real_space 0xB
-#define max_space 0xC
-#define max_sweep_space 0xA
+#define max_real_space 0xD
+#define max_space 0xE
+#define max_sweep_space 0xC
 #define maximum_bignum_length (iptr)0x3FFFFFF
 #define maximum_bytevector_length (iptr)0x1FFFFFFF
 #define maximum_fxvector_length (iptr)0xFFFFFFF
@@ -431,7 +431,7 @@ typedef unsigned __int64 U64;
 #define ratnum_denominator_disp 0x9
 #define ratnum_numerator_disp 0x5
 #define ratnum_type_disp 0x1
-#define real_space_alist ((new . 0) (impure . 1) (symbol . 2) (port . 3) (weakpair . 4) (ephemeron . 5) (pure . 6) (continuation . 7) (code . 8) (pure-typed-object . 9) (impure-record . 10) (data . 11))
+#define real_space_alist ((new . 0) (impure . 1) (symbol . 2) (port . 3) (weakpair . 4) (ephemeron . 5) (pure . 6) (continuation . 7) (code . 8) (pure-typed-object . 9) (impure-record . 10) (impure-typed-object . 11) (closure . 12) (data . 13))
 #define record_data_disp 0x5
 #define record_type_counts_disp 0x25
 #define record_type_disp 0x1
@@ -508,15 +508,17 @@ typedef unsigned __int64 U64;
 #define size_typed_object 0x8
 #define size_t_bits 0x20
 #define snil (ptr)0x26
-#define space_char_list (#\n #\i #\x #\q #\w #\e #\p #\k #\c #\r #\s #\d #\e)
-#define space_cname_list ("new" "impure" "symbol" "port" "weakpr" "emph" "pure" "cont" "code" "p-tobj" "ip-rec" "data" "empty")
+#define space_char_list (#\n #\i #\x #\q #\w #\e #\p #\k #\c #\r #\s #\t #\l #\d #\e)
+#define space_closure 0xC
+#define space_cname_list ("new" "impure" "symbol" "port" "weakpr" "emph" "pure" "cont" "code" "p-tobj" "ip-rec" "ip-tobj" "closure" "data" "empty")
 #define space_code 0x8
 #define space_continuation 0x7
-#define space_data 0xB
-#define space_empty 0xC
+#define space_data 0xD
+#define space_empty 0xE
 #define space_ephemeron 0x5
 #define space_impure 0x1
 #define space_impure_record 0xA
+#define space_impure_typed_object 0xB
 #define space_locked 0x20
 #define space_new 0x0
 #define space_old 0x40
@@ -890,10 +892,10 @@ typedef unsigned __int64 U64;
 #define machine_type_names {"any", "i3le", "ti3le", "i3nt", "ti3nt", "i3fb", "ti3fb", "i3ob", "ti3ob", "i3osx", "ti3osx", "a6le", "ta6le", "a6osx", "ta6osx", "a6ob", "ta6ob", "a6s2", "ta6s2", "i3s2", "ti3s2", "a6fb", "ta6fb", "i3nb", "ti3nb", "a6nb", "ta6nb", "a6nt", "ta6nt", "i3qnx", "ti3qnx", "arm32le", "tarm32le", "ppc32le", "tppc32le"}
 
 /* allocation-space names */
-#define alloc_space_names "new", "impure", "symbol", "port", "weakpr", "emph", "pure", "cont", "code", "p-tobj", "ip-rec", "data", "empty"
+#define alloc_space_names "new", "impure", "symbol", "port", "weakpr", "emph", "pure", "cont", "code", "p-tobj", "ip-rec", "ip-tobj", "closure", "data", "empty"
 
 /* allocation-space characters */
-#define alloc_space_chars 'n', 'i', 'x', 'q', 'w', 'e', 'p', 'k', 'c', 'r', 's', 'd', 'e'
+#define alloc_space_chars 'n', 'i', 'x', 'q', 'w', 'e', 'p', 'k', 'c', 'r', 's', 't', 'l', 'd', 'e'
 
 /* threads */
 #define THREADTC(x) (*((uptr *)((uptr)(x)+5)))
