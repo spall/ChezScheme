@@ -973,3 +973,8 @@
     Mf-base
 - Fix tests for cp0 procedure-name change
     misc.ms, patch-compile-0-f-t-f
+- keep call-live in tree form, which allows more efficient computation
+  of live-pointer masks when many live variables span many calls
+    cpnanopass.ss, inspect.ss, np-languages.ss, primdata.ss,
+    tree.ss (added), types.ss,
+    x86_64.ss, cmacros.ss, gc.c, s/Mf-base
