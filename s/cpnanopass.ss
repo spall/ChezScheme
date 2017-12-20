@@ -14107,6 +14107,8 @@
                                       (values move (cons move2 move*)))))))))
                   cons))))))
 
+      (define poison-spillable-threshold 1000) ; NB: parameter?
+
       (define-who identify-poison!
         (lambda (kspillable varvec live-size block*)
           (define kpoison 0)
@@ -14138,6 +14140,31 @@
                 (unless (or (fx= stride 16) (< (* (fx- kspillable kpoison) (fx* stride 2)) 1000000))
                   (refine (fxsrl skip 1) skip)))))))
 
+      (define (make-get-non-poison varvec live-size kspillable keep-nonspillable?)
+        (cond
+         [(fx> kspillable poison-spillable-threshold)
+          ;; It's probably worth pruning trees to non-poison when
+          ;; iterating through spillables. This pays off when there
+          ;; are enough iterations through spillables for non-poison
+          ;; spillables and unspillables:
+          (make-memoized-tree-reduce live-size
+                                     (lambda (non-poison-out y-offset)
+                                       (cond
+                                        [(< y-offset kspillable)
+                                         (let ([y (vector-ref varvec y-offset)])
+                                           (if (uvar-poison? y)
+                                               non-poison-out
+                                               (tree-bit-set non-poison-out live-size y-offset)))]
+                                        [keep-nonspillable?
+                                         (tree-bit-set non-poison-out live-size y-offset)]
+                                        [else
+                                         non-poison-out]))
+                                     (lambda (t1 t2) (tree-merge t1 t2 live-size))
+                                     empty-tree)]
+         [else
+          ;; Probably not worthwhile:
+          (lambda (out) out)]))
+
       (define-who do-spillable-conflict!
         (lambda (kspillable kfv varvec live-size block*)
           (define remove-var (make-remove-var live-size))
@@ -14146,6 +14173,8 @@
               (when (var-index x2)
                 ($add-move! x1 x2 2)
                 ($add-move! x2 x1 2))))
+          (define get-non-poison
+            (make-get-non-poison varvec live-size kspillable #f))
           (define add-conflict!
             (lambda (x out)
               ; invariants:
@@ -14158,10 +14187,11 @@
                         (lambda (y-offset)
                           ; frame y -> poison spillable x
                           (conflict-bit-set! (var-spillable-conflict* (vector-ref varvec y-offset)) x-offset)))
-                      (let ([cset (var-spillable-conflict* x)])
+                      (let ([cset (var-spillable-conflict* x)]
+                            [non-poison-out (get-non-poison out)])
                         (if (fx< x-offset kspillable)
                             (begin
-                              (tree-for-each out live-size 0 kspillable
+                              (tree-for-each non-poison-out live-size 0 kspillable
                                 (lambda (y-offset)
                                   (let ([y (vector-ref varvec y-offset)])
                                     (unless (uvar-poison? y)
@@ -14179,7 +14209,7 @@
                                   (lambda (y-offset)
                                     ; frame x -> poison or non-poison spillable y
                                     (conflict-bit-set! cset y-offset)))
-                                (tree-for-each out live-size 0 kspillable
+                                (tree-for-each non-poison-out live-size 0 kspillable
                                   (lambda (y-offset)
                                     (unless (uvar-poison? (vector-ref varvec y-offset))
                                       ; register x -> non-poison spillable y
@@ -14906,6 +14936,8 @@
       (define-who do-unspillable-conflict!
         (lambda (kfv kspillable varvec live-size kunspillable unvarvec block*)
           (define remove-var (make-remove-var live-size))
+          (define get-non-poison
+            (make-get-non-poison varvec live-size kspillable #t))
           (define unspillable?
             (lambda (x)
               (and (uvar? x) (uvar-unspillable? x))))
@@ -14991,7 +15023,7 @@
                   (Effect* (cdr e*)
                     (nanopass-case (L15d Effect) (car e*)
                       [(set! ,live-info ,x ,rhs)
-                       (let ([spillable-live (live-info-live live-info)])
+                       (let ([spillable-live (get-non-poison (live-info-live live-info))])
                          (if (unspillable? x)
                              (let ([unspillable* (remq x unspillable*)])
                                (safe-assert (uvar-seen? x))
@@ -15409,7 +15441,7 @@
                    ; this is worth enabling from time to time...
                    #;(check-entry-live! (info-lambda-name info) live-size varvec entry-block*)
                    ;; NB: we could just use (vector-length varvec) to get live-size
-                   (when (fx> kspillable 1000) ; NB: parameter?
+                   (when (fx> kspillable poison-spillable-threshold)
                      (RApass unparse-L15a identify-poison! kspillable varvec live-size block*))
                    (RApass unparse-L15a record-call-live! block* varvec)
                    ; rerun intra-block live analysis and record (fv v reg v spillable) x spillable conflicts
