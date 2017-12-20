@@ -250,7 +250,8 @@
                                  (bytevector-u16-native-ref bv n))
                             count))))))))
 
-    (module (empty-tree full-tree tree-extract tree-for-each tree-fold-left tree-bit-set? tree-bit-set tree-bit-unset tree-bit-count tree-same? tree-merge)
+    (module (empty-tree full-tree tree-extract tree-for-each tree-fold-left tree-bit-set? tree-bit-set tree-bit-unset tree-bit-count tree-same? tree-merge
+                        make-memoized-tree-reduce)
       ; tree -> fixnum | (tree-node tree tree)
       ; 0 represents any tree or subtree with no bits set, and a tree or subtree
       ; with no bits set is always 0
@@ -478,7 +479,56 @@
                    [(and (eq? l lst1) (eq? r rst1)) st1]
                    [(and (eq? l lst2) (eq? r rst2)) st2]
                    [(and (eq? l full-tree) (eq? r full-tree)) full-tree]
-                   [else (make-tree-node l r)]))))]))))
+                   [else (make-tree-node l r)]))))])))
+
+      (define make-memoized-tree-reduce
+        ;; Memoizing reduces over multiple trees is useful when the
+        ;; tree are likely to share nodes.
+        (lambda (size leaf-proc merge-proc init)
+          (cond
+           [(< size (* 8 (fixnum-width)))
+            ;; Memoizing probably isn't worthwhile
+            (case-lambda
+             [(st)
+              (tree-fold-left leaf-proc size init st)]
+             [(st . extra-leaf-args)
+              (tree-fold-left (lambda (init offset)
+                                (apply leaf-proc init offset extra-leaf-args))
+                              size init st)])]
+           [else
+            ;; Memoizing could be worthwhile...
+            (let ([cache (make-eq-hashtable)] ; maps st to an assoc list that is keyed by offset or pair
+                  [apply-leaf-proc (lambda (init offset extra-leaf-args)
+                                     (if (null? extra-leaf-args)
+                                         (leaf-proc init offset)
+                                         (apply leaf-proc init offset extra-leaf-args)))])
+              (lambda (st . extra-leaf-args)
+                (let f ([st st] [size size] [offset 0])
+                  (let ([cell (eq-hashtable-cell cache st '())]
+                        [key (if (fixnum? st)
+                                 offset       ; shortcut for fixnum, where only the offset matters
+                                 (cons offset size))]) ; both offset and size matter for full-tree
+                    (cond
+                     [(assoc key (cdr cell))
+                      => (lambda (a) (cdr a))]
+                     [else
+                      (let ([v (cond
+                                [(fixnum? st)
+                                 (do ([st st (fxsrl st 1)]
+                                      [offset offset (fx+ offset 1)]
+                                      [init init (if (fxodd? st) (apply-leaf-proc init offset extra-leaf-args) init)])
+                                     ((fx= st 0) init))]
+                                [(eq? st full-tree)
+                                 (do ([size size (fx- size 1)]
+                                      [offset offset (fx+ offset 1)]
+                                      [init init (apply-leaf-proc init offset extra-leaf-args)])
+                                     ((fx= size 0) init))]
+                                [else
+                                 (let ([split (compute-split size)])
+                                   (merge-proc (f (tree-node-left st) split offset)
+                                               (f (tree-node-right st) (fx- size split) (fx+ offset split))))])])
+                        (set-cdr! cell (cons (cons key v) (cdr cell)))
+                        v)])))))]))))
 
     (define-syntax tc-disp
       (lambda (x)
@@ -809,7 +859,7 @@
         nfv*
         nfv**
         (mutable weight)
-        (mutable call-live*)
+        (mutable call-live*) ; a tree
         (mutable frame-words)
         (mutable local-save*))
       (protocol
@@ -14281,24 +14331,37 @@
 
       (define-who record-call-live!
         (lambda (block* varvec)
-          (for-each
-            (lambda (block)
-              (when (newframe-block? block)
-                (let ([newframe-info (newframe-block-info block)])
-                  (let ([call-live* (get-live-vars (newframe-block-live-call block) (vector-length varvec) varvec)])
-                    (for-each
-                      (lambda (x)
-                        (define fixnum (lambda (x) (if (fixnum? x) x (most-positive-fixnum))))
-                        (when (uvar? x)
-                          (uvar-spilled! x #t)
-                          (unless (block-pariah? block)
-                            (uvar-save-weight-set! x
-                              (fixnum
-                                (+ (uvar-save-weight x)
-                                   (* (info-newframe-weight newframe-info) 2)))))))
-                      call-live*)
-                    (info-newframe-call-live*-set! newframe-info call-live*)))))
-              block*)))
+          (let ([spill-and-get-non-poison
+                 (make-memoized-tree-reduce (vector-length varvec)
+                                            ;; handle one var from tree:
+                                            (lambda (v offset)
+                                              (let ([x (vector-ref varvec offset)])
+                                                (cond
+                                                 [(uvar? x)
+                                                  (uvar-spilled! x #t)
+                                                  (if (uvar-poison? x)
+                                                      v
+                                                      (cons x v))]
+                                                 [else v])))
+                                            ;; merge results from two trees:
+                                            append
+                                            '())])
+            (for-each
+              (lambda (block)
+                (when (newframe-block? block)
+                  (let ([newframe-info (newframe-block-info block)])
+                    (let ([non-poison-live* (spill-and-get-non-poison (newframe-block-live-call block))])
+                      (unless (block-pariah? block)
+                        (for-each
+                         (lambda (x)
+                           (define fixnum (lambda (x) (if (fixnum? x) x (most-positive-fixnum))))
+                           (uvar-save-weight-set! x
+                               (fixnum
+                                 (+ (uvar-save-weight x)
+                                    (* (info-newframe-weight newframe-info) 2)))))
+                         non-poison-live*))
+                      (info-newframe-call-live*-set! newframe-info (newframe-block-live-call block))))))
+                block*))))
 
       ; maintain move sets as (var . weight) lists, sorted by weight (largest first)
       ; 2014/06/26: allx move set size averages .79 elements with a max of 12, so no
@@ -14563,11 +14626,57 @@
           (definitions
             (define remove-var (make-remove-var live-size))
             (define find-max-fv
-              (lambda (call-live*)
-                (fold-left
-                  (lambda (call-max-fv x)
-                    (fxmax (fv-offset (if (uvar? x) (uvar-location x) x)) call-max-fv))
-                  -1 call-live*)))
+              (make-memoized-tree-reduce (vector-length varvec)
+                                         (lambda (call-max-fv offset)
+                                           (let ([x (vector-ref varvec offset)])
+                                             (fxmax (fv-offset (if (uvar? x) (uvar-location x) x)) call-max-fv)))
+                                         fxmax -1))
+            (define add-to-live-pointer-mask
+              (lambda (lpm live)
+                (define (add-fv fv lpm)
+                  (let ([offset (fv-offset fv)])
+                    (if (fx= offset 0) ; no bit for fv0
+                        lpm
+                        (logbit1 (fx- offset 1) lpm))))
+                (cond
+                 [(fv? live) (add-fv live lpm)]
+                 [(eq? (uvar-type live) 'ptr) (add-fv (uvar-location live) lpm)]
+                 [else lpm])))
+            (define build-live-pointer-mask/tree
+              (make-memoized-tree-reduce (vector-length varvec)
+                                         (lambda (lpm offset)
+                                           (add-to-live-pointer-mask lpm (vector-ref varvec offset)))
+                                         logior
+                                         0))
+            (define build-live-pointer-mask/list
+              (lambda (live*) (fold-left add-to-live-pointer-mask 0 live*)))
+            (define build-inspector-mask
+              (cond
+               [(info-lambda-ctci lambda-info) =>
+                (lambda (ctci)
+                  (make-memoized-tree-reduce (vector-length varvec)
+                                             (lambda (mask offset lpm)
+                                               (let ([x (vector-ref varvec offset)])
+                                                 (cond
+                                                  [(and (uvar? x) (uvar-iii x)) =>
+                                                   (lambda (index)
+                                                     (safe-assert
+                                                       (let ([name.offset (vector-ref (ctci-live ctci) index)])
+                                                         (logbit? (fx- (cdr name.offset) 1) lpm)))
+                                                     (logior (ash 1 index) mask))]
+                                                  [else mask])))
+                                             logior
+                                             0))]
+               [else #f]))
+            (define extract-local-save
+              (make-memoized-tree-reduce (vector-length varvec)
+                                         (lambda (var* offset)
+                                           (let ([x (vector-ref varvec offset)])
+                                             (if (and (uvar? x) (uvar-local-save? x))
+                                                 (cons x var*)
+                                                 var*)))
+                                         append
+                                         '()))
             (define cool?
               (lambda (base nfv*)
                 (let loop ([nfv* nfv*] [offset base])
@@ -14596,41 +14705,6 @@
                             (for-each (lambda (nfv*) (set-offsets! nfv* arg-base)) nfv**)
                             base)
                           (loop (fx+ base 1))))))))
-            (define build-mask
-              (lambda (index*)
-                (define bucket-width (if (fx> (fixnum-width) 32) 32 16))
-                (let* ([nbits (fx+ (fold-left (lambda (m index) (fxmax m index)) -1 index*) 1)]
-                       [nbuckets (fxdiv (fx+ nbits (fx- bucket-width 1)) bucket-width)]
-                       [buckets (make-fxvector nbuckets 0)])
-                  (for-each
-                    (lambda (index)
-                      (let-values ([(i j) (fxdiv-and-mod index bucket-width)])
-                        (fxvector-set! buckets i (fxlogbit1 j (fxvector-ref buckets i)))))
-                    index*)
-                  (let f ([base 0] [len nbuckets])
-                    (if (fx< len 2)
-                        (if (fx= len 0)
-                            0
-                            (fxvector-ref buckets base))
-                        (let ([half (fxsrl len 1)])
-                          (logor
-                            (bitwise-arithmetic-shift-left (f (fx+ base half) (fx- len half)) (fx* half bucket-width))
-                            (f base half))))))))
-            (define build-live-pointer-mask
-              (lambda (live*)
-                (build-mask
-                  (fold-left
-                    (lambda (index* live)
-                      (define (cons-fv fv index*)
-                        (let ([offset (fv-offset fv)])
-                          (if (fx= offset 0) ; no bit for fv0
-                              index*
-                              (cons (fx- offset 1) index*))))
-                      (cond
-                        [(fv? live) (cons-fv live index*)]
-                        [(eq? (uvar-type live) 'ptr) (cons-fv (uvar-location live) index*)]
-                        [else index*]))
-                    '() live*))))
             (define (process-info-newframe! info)
               (unless (info-newframe-frame-words info)
                 (let ([call-live* (info-newframe-call-live* info)])
@@ -14638,26 +14712,14 @@
                     (let ([cnfv* (info-newframe-cnfv* info)])
                       (fx+ (assign-new-frame! cnfv* (cons (info-newframe-nfv* info) (info-newframe-nfv** info)) call-live*)
                         (length cnfv*))))
-                  (info-newframe-local-save*-set! info
-                    (filter (lambda (x) (and (uvar? x) (uvar-local-save? x))) call-live*)))))
+                  (info-newframe-local-save*-set! info (extract-local-save call-live*)))))
             (define record-inspector-info!
               (lambda (src sexpr rpl call-live* lpm)
                 (safe-assert (if call-live* rpl (not rpl)))
                 (cond
                   [(and call-live* (info-lambda-ctci lambda-info)) =>
                    (lambda (ctci)
-                     (let ([mask (build-mask
-                                   (fold-left
-                                     (lambda (i* x)
-                                       (cond
-                                         [(and (uvar? x) (uvar-iii x)) =>
-                                          (lambda (index)
-                                            (safe-assert
-                                              (let ([name.offset (vector-ref (ctci-live ctci) index)])
-                                                (logbit? (fx- (cdr name.offset) 1) lpm)))
-                                            (cons index i*))]
-                                         [else i*]))
-                                     '() call-live*))])
+                     (let ([mask (build-inspector-mask call-live* lpm)])
                        (when (or src sexpr (not (eqv? mask 0)))
                          (ctci-rpi*-set! ctci (cons (make-ctrpi rpl src sexpr mask) (ctci-rpi* ctci))))))]))))
           (Pred : Pred (ir) -> Pred ())
@@ -14668,7 +14730,8 @@
           (foldable-Effect : Effect (ir new-effect*) -> * (new-effect*)
             [(return-point ,info ,rpl ,mrvl (,cnfv* ...))
              (process-info-newframe! info)
-             (let ([lpm (build-live-pointer-mask (append cnfv* (info-newframe-call-live* info)))])
+             (let ([lpm (logior (build-live-pointer-mask/list cnfv*)
+                                (build-live-pointer-mask/tree (info-newframe-call-live* info)))])
                (record-inspector-info! (info-newframe-src info) (info-newframe-sexpr info) rpl (info-newframe-call-live* info) lpm)
                (with-output-language (L15b Effect)
                  (safe-assert (< -1 lpm (ash 1 (fx- (info-newframe-frame-words info) 1))))
@@ -15620,11 +15683,11 @@
                    (RApass unparse-L15a do-live-analysis! live-size entry-block*)
                    ; this is worth enabling from time to time...
                    #;(check-entry-live! (info-lambda-name info) live-size varvec entry-block*)
-                   ; rerun intra-block live analysis and record (fv v reg v spillable) x spillable conflicts
-                   (RApass unparse-L15a record-call-live! block* varvec)
                    ;; NB: we could just use (vector-length varvec) to get live-size
                    (when (fx> kspillable 1000) ; NB: parameter?
                      (RApass unparse-L15a identify-poison! kspillable varvec live-size block*))
+                   (RApass unparse-L15a record-call-live! block* varvec)
+                   ; rerun intra-block live analysis and record (fv v reg v spillable) x spillable conflicts
                    (RApass unparse-L15a do-spillable-conflict! kspillable kfv varvec live-size block*)
                    #;(show-conflicts (info-lambda-name info) varvec '#())
                    ; find frame homes for call-live variables; adds new fv x spillable conflicts
