@@ -250,286 +250,8 @@
                                  (bytevector-u16-native-ref bv n))
                             count))))))))
 
-    (module (empty-tree full-tree tree-extract tree-for-each tree-fold-left tree-bit-set? tree-bit-set tree-bit-unset tree-bit-count tree-same? tree-merge
-                        make-memoized-tree-reduce)
-      ; tree -> fixnum | (tree-node tree tree)
-      ; 0 represents any tree or subtree with no bits set, and a tree or subtree
-      ; with no bits set is always 0
-      (define empty-tree 0)
-
-      ; any tree or subtree with all bits set
-      (define full-tree #t)
-
-      (define (full-fixnum size) (fxsrl (most-positive-fixnum) (fx- (fx- (fixnum-width) 1) size)))
-
-      (define compute-split
-        (lambda (size)
-          (fxsrl size 1)
-          ; 2015/03/15 rkd: tried the following under the theory that we'd allocate
-          ; fewer nodes.  for example, say fixmun-width is 30 and size is 80.  if we
-          ; split 40/40 we create two nodes under the current node.  if instead we
-          ; split 29/51 we create just one node and one fixnum under the current
-          ; node.  this worked as planned; however, it reduced the number of nodes
-          ; created by only 3.3% on the x86 and made compile times slightly worse.
-          #;(if (fx<= size (fx* (fx- (fixnum-width) 1) 3)) (fx- (fixnum-width) 1) (fxsrl size 1))))
-
-      (meta-cond
-        [(fx= (optimize-level) 3)
-         (module (make-tree-node tree-node? tree-node-left tree-node-right)
-           (define make-tree-node cons)
-           (define tree-node? pair?)
-           (define tree-node-left car)
-           (define tree-node-right cdr))]
-        [else
-         (module (make-tree-node tree-node? tree-node-left tree-node-right)
-           (define-record-type tree-node
-             (nongenerative)
-             (sealed #t)
-             (fields left right)
-             (protocol
-               (lambda (new)
-                 (lambda (left right)
-                   (new left right)))))
-           (record-writer (record-type-descriptor tree-node)
-             (lambda (r p wr)
-               (define tree-node->s-exp
-                 (lambda (tn)
-                   (with-virgin-quasiquote
-                     (let ([left (tree-node-left tn)] [right (tree-node-right tn)])
-                       `(tree-node
-                          ,(if (tree-node? left) (tree-node->s-exp left) left)
-                          ,(if (tree-node? right) (tree-node->s-exp right) right))))))
-               (wr (tree-node->s-exp r) p))))])
-
-      (define tree-extract ; assumes empty-tree is 0
-        (lambda (st size v)
-          (let extract ([st st] [size size] [offset 0] [x* '()])
-            (cond
-              [(fixnum? st)
-                (do ([st st (fxsrl st 1)]
-                     [offset offset (fx+ offset 1)]
-                     [x* x* (if (fxodd? st) (cons (vector-ref v offset) x*) x*)])
-                 ((fx= st 0) x*))]
-              [(eq? st full-tree)
-               (do ([size size (fx- size 1)]
-                    [offset offset (fx+ offset 1)]
-                    [x* x* (cons (vector-ref v offset) x*)])
-                 ((fx= size 0) x*))]
-              [else
-                (let ([split (compute-split size)])
-                  (extract (tree-node-right st) (fx- size split) (fx+ offset split)
-                    (extract (tree-node-left st) split offset x*)))]))))
-
-      (define tree-for-each ; assumes empty-tree is 0
-        (lambda (st size start end action)
-          (let f ([st st] [size size] [start start] [end end] [offset 0])
-            (cond
-              [(fixnum? st)
-               (unless (eq? st empty-tree)
-                 (do ([st (fxbit-field st start end) (fxsrl st 1)] [offset (fx+ offset start) (fx+ offset 1)])
-                     ((fx= st 0))
-                   (when (fxodd? st) (action offset))))]
-              [(eq? st full-tree)
-               (do ([start start (fx+ start 1)] [offset offset (fx+ offset 1)])
-                   ((fx= start end))
-                 (action offset))]
-              [else
-               (let ([split (compute-split size)])
-                 (when (fx< start split)
-                   (f (tree-node-left st) split start (fxmin end split) offset))
-                 (when (fx> end split)
-                   (f (tree-node-right st) (fx- size split) (fxmax (fx- start split) 0) (fx- end split) (fx+ offset split))))]))))
-
-      (define tree-fold-left ; assumes empty-tree is 0
-        (lambda (proc size init st)
-          (let f ([st st] [size size] [offset 0] [init init])
-            (cond
-              [(fixnum? st)
-                (do ([st st (fxsrl st 1)]
-                     [offset offset (fx+ offset 1)]
-                     [init init (if (fxodd? st) (proc init offset) init)])
-                 ((fx= st 0) init))]
-              [(eq? st full-tree)
-               (do ([size size (fx- size 1)]
-                    [offset offset (fx+ offset 1)]
-                    [init init (proc init offset)])
-                 ((fx= size 0) init))]
-              [else
-                (let ([split (compute-split size)])
-                  (f (tree-node-left st) split offset
-                    (f (tree-node-right st) (fx- size split) (fx+ offset split) init)))]))))
-
-      (define tree-bit-set? ; assumes empty-tree is 0
-        (lambda (st size bit)
-          (let loop ([st st] [size size] [bit bit])
-            (cond
-              [(fixnum? st)
-                (and (not (eqv? st empty-tree))
-                     ; fxlogbit? is unnecessarily general, so roll our own
-                    (fxlogtest st (fxsll 1 bit)))]
-              [(eq? st full-tree) #t]
-              [else
-                (let ([split (compute-split size)])
-                  (if (fx< bit split)
-                      (loop (tree-node-left st) split bit)
-                      (loop (tree-node-right st) (fx- size split) (fx- bit split))))]))))
-
-      (define tree-bit-set ; assumes empty-tree is 0
-        (lambda (st size bit)
-          ; set bit in tree.  result is eq? to tr if result is same as tr.
-          (cond
-            [(eq? st full-tree) st]
-            [(fx< size (fixnum-width))
-             (let ([st (fxlogbit1 bit st)])
-               (if (fx= st (full-fixnum size))
-                   full-tree
-                   st))]
-            [else
-              (let ([split (compute-split size)])
-                (if (eqv? st empty-tree)
-                    (if (fx< bit split)
-                        (make-tree-node (tree-bit-set empty-tree split bit) empty-tree)
-                        (make-tree-node empty-tree (tree-bit-set empty-tree (fx- size split) (fx- bit split))))
-                    (let ([lst (tree-node-left st)] [rst (tree-node-right st)])
-                      (if (fx< bit split)
-                          (let ([new-lst (tree-bit-set lst split bit)])
-                            (if (eq? new-lst lst)
-                                st
-                                (if (and (eq? new-lst full-tree) (eq? rst full-tree))
-                                    full-tree
-                                    (make-tree-node new-lst rst))))
-                          (let ([new-rst (tree-bit-set rst (fx- size split) (fx- bit split))])
-                            (if (eq? new-rst rst)
-                                st
-                                (if (and (eq? lst full-tree) (eq? new-rst full-tree))
-                                    full-tree
-                                    (make-tree-node lst new-rst))))))))])))
-
-      (define tree-bit-unset ; assumes empty-tree is 0
-        (lambda (st size bit)
-          ; reset bit in tree.  result is eq? to tr if result is same as tr.
-          (cond
-            [(fixnum? st)
-             (if (eqv? st empty-tree)
-                 empty-tree
-                 (fxlogbit0 bit st))]
-            [(eq? st full-tree)
-             (if (fx< size (fixnum-width))
-                 (fxlogbit0 bit (full-fixnum size))
-                 (let ([split (compute-split size)])
-                   (if (fx< bit split)
-                       (make-tree-node (tree-bit-unset full-tree split bit) full-tree)
-                       (make-tree-node full-tree (tree-bit-unset full-tree (fx- size split) (fx- bit split))))))]
-            [else
-              (let ([split (compute-split size)] [lst (tree-node-left st)] [rst (tree-node-right st)])
-                (if (fx< bit split)
-                    (let ([new-lst (tree-bit-unset lst split bit)])
-                      (if (eq? new-lst lst)
-                          st
-                          (if (and (eq? new-lst empty-tree) (eq? rst empty-tree))
-                              empty-tree
-                              (make-tree-node new-lst rst))))
-                    (let ([new-rst (tree-bit-unset rst (fx- size split) (fx- bit split))])
-                      (if (eq? new-rst rst)
-                          st
-                          (if (and (eq? lst empty-tree) (eq? new-rst empty-tree))
-                              empty-tree
-                              (make-tree-node lst new-rst))))))])))
-
-      (define tree-bit-count ; assumes empty-tree is 0
-        (lambda (st size)
-          (cond
-            [(fixnum? st) (fxbit-count st)]
-            [(eq? st full-tree) size]
-            [else
-              (let ([split (compute-split size)])
-                (fx+
-                  (tree-bit-count (tree-node-left st) split)
-                  (tree-bit-count (tree-node-right st) (fx- size split))))])))
-
-      (define tree-same? ; assumes empty-tree is 0
-        (lambda (st1 st2)
-          (or (eq? st1 st2) ; assuming fixnums and full trees are eq-comparable
-              (and (tree-node? st1)
-                   (tree-node? st2)
-                   (tree-same? (tree-node-left st1) (tree-node-left st2))
-                   (tree-same? (tree-node-right st1) (tree-node-right st2))))))
-
-      (define tree-merge
-       ; merge tr1 and tr2.  result is eq? to tr1 if result is same as tr1.
-        (lambda (st1 st2 size)
-          (cond
-            [(or (eq? st1 st2) (eq? st2 empty-tree)) st1]
-            [(eq? st1 empty-tree) st2]
-            [(or (eq? st1 full-tree) (eq? st2 full-tree)) full-tree]
-            [(fixnum? st1)
-             (safe-assert (fixnum? st2))
-             (let ([st (fxlogor st1 st2)])
-               (if (fx= st (full-fixnum size))
-                   full-tree
-                   st))]
-            [else
-             (let ([lst1 (tree-node-left st1)]
-                   [rst1 (tree-node-right st1)]
-                   [lst2 (tree-node-left st2)]
-                   [rst2 (tree-node-right st2)])
-               (let ([split (compute-split size)])
-                 (let ([l (tree-merge lst1 lst2 split)] [r (tree-merge rst1 rst2 (fx- size split))])
-                 (cond
-                   [(and (eq? l lst1) (eq? r rst1)) st1]
-                   [(and (eq? l lst2) (eq? r rst2)) st2]
-                   [(and (eq? l full-tree) (eq? r full-tree)) full-tree]
-                   [else (make-tree-node l r)]))))])))
-
-      (define make-memoized-tree-reduce
-        ;; Memoizing reduces over multiple trees is useful when the
-        ;; tree are likely to share nodes.
-        (lambda (size leaf-proc merge-proc init)
-          (cond
-           [(< size (* 8 (fixnum-width)))
-            ;; Memoizing probably isn't worthwhile
-            (case-lambda
-             [(st)
-              (tree-fold-left leaf-proc size init st)]
-             [(st . extra-leaf-args)
-              (tree-fold-left (lambda (init offset)
-                                (apply leaf-proc init offset extra-leaf-args))
-                              size init st)])]
-           [else
-            ;; Memoizing could be worthwhile...
-            (let ([cache (make-eq-hashtable)] ; maps st to an assoc list that is keyed by offset or pair
-                  [apply-leaf-proc (lambda (init offset extra-leaf-args)
-                                     (if (null? extra-leaf-args)
-                                         (leaf-proc init offset)
-                                         (apply leaf-proc init offset extra-leaf-args)))])
-              (lambda (st . extra-leaf-args)
-                (let f ([st st] [size size] [offset 0])
-                  (let ([cell (eq-hashtable-cell cache st '())]
-                        [key (if (fixnum? st)
-                                 offset       ; shortcut for fixnum, where only the offset matters
-                                 (cons offset size))]) ; both offset and size matter for full-tree
-                    (cond
-                     [(assoc key (cdr cell))
-                      => (lambda (a) (cdr a))]
-                     [else
-                      (let ([v (cond
-                                [(fixnum? st)
-                                 (do ([st st (fxsrl st 1)]
-                                      [offset offset (fx+ offset 1)]
-                                      [init init (if (fxodd? st) (apply-leaf-proc init offset extra-leaf-args) init)])
-                                     ((fx= st 0) init))]
-                                [(eq? st full-tree)
-                                 (do ([size size (fx- size 1)]
-                                      [offset offset (fx+ offset 1)]
-                                      [init init (apply-leaf-proc init offset extra-leaf-args)])
-                                     ((fx= size 0) init))]
-                                [else
-                                 (let ([split (compute-split size)])
-                                   (merge-proc (f (tree-node-left st) split offset)
-                                               (f (tree-node-right st) (fx- size split) (fx+ offset split))))])])
-                        (set-cdr! cell (cons (cons key v) (cdr cell)))
-                        v)])))))]))))
-
+    (include "tree.ss")
+    
     (define-syntax tc-disp
       (lambda (x)
         (syntax-case x ()
@@ -814,7 +536,7 @@
     (define-record-type ctrpi ; compile-time version of rp-info
       (nongenerative)
       (sealed #t)
-      (fields label src sexpr mask))
+      (fields label src sexpr mask)) ; mask is like a livemask: an integer or (cons size tree)
 
     (define-threaded next-lambda-seqno)
 
@@ -14631,42 +14353,42 @@
                                            (let ([x (vector-ref varvec offset)])
                                              (fxmax (fv-offset (if (uvar? x) (uvar-location x) x)) call-max-fv)))
                                          fxmax -1))
-            (define add-to-live-pointer-mask
-              (lambda (lpm live)
-                (define (add-fv fv lpm)
+            (define add-to-live-pointer-tree
+              (lambda (lpt live)
+                (define (add-fv fv lpt)
                   (let ([offset (fv-offset fv)])
                     (if (fx= offset 0) ; no bit for fv0
-                        lpm
-                        (logbit1 (fx- offset 1) lpm))))
+                        lpt
+                        (tree-bit-set lpt live-size (fx- offset 1)))))
                 (cond
-                 [(fv? live) (add-fv live lpm)]
-                 [(eq? (uvar-type live) 'ptr) (add-fv (uvar-location live) lpm)]
-                 [else lpm])))
-            (define build-live-pointer-mask/tree
+                 [(fv? live) (add-fv live lpt)]
+                 [(eq? (uvar-type live) 'ptr) (add-fv (uvar-location live) lpt)]
+                 [else lpt])))
+            (define build-live-pointer-tree-from-tree
               (make-memoized-tree-reduce (vector-length varvec)
-                                         (lambda (lpm offset)
-                                           (add-to-live-pointer-mask lpm (vector-ref varvec offset)))
-                                         logior
-                                         0))
-            (define build-live-pointer-mask/list
-              (lambda (live*) (fold-left add-to-live-pointer-mask 0 live*)))
-            (define build-inspector-mask
+                                         (lambda (lpt offset)
+                                           (add-to-live-pointer-tree lpt (vector-ref varvec offset)))
+                                         (lambda (t1 t2) (tree-merge t1 t2 live-size))
+                                         empty-tree))
+            (define build-live-pointer-tree-from-list
+              (lambda (live*) (fold-left add-to-live-pointer-tree empty-tree live*)))
+            (define build-inspector-tree
               (cond
                [(info-lambda-ctci lambda-info) =>
                 (lambda (ctci)
                   (make-memoized-tree-reduce (vector-length varvec)
-                                             (lambda (mask offset lpm)
+                                             (lambda (tree offset lpm)
                                                (let ([x (vector-ref varvec offset)])
                                                  (cond
                                                   [(and (uvar? x) (uvar-iii x)) =>
                                                    (lambda (index)
                                                      (safe-assert
                                                        (let ([name.offset (vector-ref (ctci-live ctci) index)])
-                                                         (logbit? (fx- (cdr name.offset) 1) lpm)))
-                                                     (logior (ash 1 index) mask))]
-                                                  [else mask])))
-                                             logior
-                                             0))]
+                                                         ($livemask-member? lpm (fx- (cdr name.offset) 1))))
+                                                     (tree-bit-set tree live-size index))]
+                                                  [else tree])))
+                                             (lambda (t1 t2) (tree-merge t1 t2 live-size))
+                                             empty-tree))]
                [else #f]))
             (define extract-local-save
               (make-memoized-tree-reduce (vector-length varvec)
@@ -14719,7 +14441,7 @@
                 (cond
                   [(and call-live* (info-lambda-ctci lambda-info)) =>
                    (lambda (ctci)
-                     (let ([mask (build-inspector-mask call-live* lpm)])
+                     (let ([mask ($make-livemask live-size (build-inspector-tree call-live* lpm))])
                        (when (or src sexpr (not (eqv? mask 0)))
                          (ctci-rpi*-set! ctci (cons (make-ctrpi rpl src sexpr mask) (ctci-rpi* ctci))))))]))))
           (Pred : Pred (ir) -> Pred ())
@@ -14730,11 +14452,14 @@
           (foldable-Effect : Effect (ir new-effect*) -> * (new-effect*)
             [(return-point ,info ,rpl ,mrvl (,cnfv* ...))
              (process-info-newframe! info)
-             (let ([lpm (logior (build-live-pointer-mask/list cnfv*)
-                                (build-live-pointer-mask/tree (info-newframe-call-live* info)))])
+             (let ([lpm ($make-livemask
+                         live-size
+                         (tree-merge (build-live-pointer-tree-from-list cnfv*)
+                                     (build-live-pointer-tree-from-tree (info-newframe-call-live* info))
+                                     live-size))])
                (record-inspector-info! (info-newframe-src info) (info-newframe-sexpr info) rpl (info-newframe-call-live* info) lpm)
                (with-output-language (L15b Effect)
-                 (safe-assert (< -1 lpm (ash 1 (fx- (info-newframe-frame-words info) 1))))
+                 (safe-assert (<= ($livemask-size lpm) (fx- (info-newframe-frame-words info) 1)))
                  (cons `(rp-header ,mrvl ,(fx* (info-newframe-frame-words info) (constant ptr-bytes)) ,lpm) new-effect*)))]
             [(remove-frame ,live-info ,info)
              (process-info-newframe! info)

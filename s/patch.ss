@@ -15,6 +15,29 @@
 
 (printf "loading ~s cross compiler~%" (constant machine-type-name))
 
+(let ()
+  (include "tree.ss")
+  (set! $livemask?
+    (lambda (v)
+      ;; intended to be constant-time, so just check plausible:
+      (or (integer? v) (and (pair? v) (integer? (car v))))))
+  (set! $make-livemask
+    (lambda (size t)
+      (let ([t (or (tree-simplify-for-readonly t size) t)])
+        (if (integer? t)
+            t
+            (cons size t)))))
+  (set! $livemask-size
+    (lambda (livemask)
+      (if (number? livemask)
+          (integer-length livemask)
+          (tree-bit-length (cdr livemask) (car livemask)))))
+  (set! $livemask-member?
+    (lambda (livemask index)
+      (if (number? livemask)
+          (logbit? index livemask)
+          (tree-bit-set? (cdr livemask) (car livemask) index)))))
+
 ; (current-expand (lambda args (apply sc-expand args)))
 ; (current-eval (lambda args (apply interpret args)))
 
