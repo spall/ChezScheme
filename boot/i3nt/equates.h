@@ -502,7 +502,7 @@ typedef unsigned __int64 U64;
 #define size_rp_header 0x10
 #define size_rtd_counts 0x410
 #define size_symbol 0x18
-#define size_tc 0x140
+#define size_tc 0x148
 #define size_thread 0x8
 #define size_tlc 0x10
 #define size_typed_object 0x8
@@ -555,7 +555,7 @@ typedef unsigned __int64 U64;
 #define tc_ac0_disp 0x4
 #define tc_ac1_disp 0x8
 #define tc_active_disp 0x8C
-#define tc_alloc_counter_disp 0x130
+#define tc_alloc_counter_disp 0x138
 #define tc_ap_disp 0x18
 #define tc_arg_regs_disp 0x0
 #define tc_block_counter_disp 0xDC
@@ -567,6 +567,8 @@ typedef unsigned __int64 U64;
 #define tc_current_input_disp 0xD0
 #define tc_current_mso_disp 0xE4
 #define tc_current_output_disp 0xD4
+#define tc_default_record_equal_procedure_disp 0x124
+#define tc_default_record_hash_procedure_disp 0x128
 #define tc_disable_count_disp 0xC0
 #define tc_eap_disp 0x1C
 #define tc_esp_disp 0x14
@@ -576,7 +578,7 @@ typedef unsigned __int64 U64;
 #define tc_generate_procedure_source_information_disp 0x110
 #define tc_generate_profile_forms_disp 0x114
 #define tc_guardian_entries_disp 0x7C
-#define tc_instr_counter_disp 0x128
+#define tc_instr_counter_disp 0x130
 #define tc_keyboard_interrupt_pending_disp 0xC8
 #define tc_meta_level_disp 0x104
 #define tc_null_immutable_bytevector_disp 0xFC
@@ -584,7 +586,7 @@ typedef unsigned __int64 U64;
 #define tc_null_immutable_string_disp 0x100
 #define tc_null_immutable_vector_disp 0xF4
 #define tc_optimize_level_disp 0x118
-#define tc_parameters_disp 0x138
+#define tc_parameters_disp 0x140
 #define tc_random_seed_disp 0x88
 #define tc_real_eap_disp 0x38
 #define tc_ret_disp 0x20
@@ -915,7 +917,7 @@ typedef unsigned __int64 U64;
 #define AC0(x) (*((void* *)((uptr)(x)+4)))
 #define AC1(x) (*((void* *)((uptr)(x)+8)))
 #define ACTIVE(x) (*((I32 *)((uptr)(x)+140)))
-#define ALLOCCOUNTER(x) (*((U64 *)((uptr)(x)+304)))
+#define ALLOCCOUNTER(x) (*((U64 *)((uptr)(x)+312)))
 #define AP(x) (*((void* *)((uptr)(x)+24)))
 #define ARGREGS(x,i) (((void* *)((uptr)(x)+0))[i])
 #define BLOCKCOUNTER(x) (*((ptr *)((uptr)(x)+220)))
@@ -927,6 +929,8 @@ typedef unsigned __int64 U64;
 #define CURRENTINPUT(x) (*((ptr *)((uptr)(x)+208)))
 #define CURRENTMSO(x) (*((ptr *)((uptr)(x)+228)))
 #define CURRENTOUTPUT(x) (*((ptr *)((uptr)(x)+212)))
+#define DEFAULTRECORDEQUALPROCEDURE(x) (*((ptr *)((uptr)(x)+292)))
+#define DEFAULTRECORDHASHPROCEDURE(x) (*((ptr *)((uptr)(x)+296)))
 #define DISABLECOUNT(x) (*((ptr *)((uptr)(x)+192)))
 #define EAP(x) (*((void* *)((uptr)(x)+28)))
 #define ESP(x) (*((void* *)((uptr)(x)+20)))
@@ -936,7 +940,7 @@ typedef unsigned __int64 U64;
 #define GENERATEPROCEDURESOURCEINFORMATION(x) (*((ptr *)((uptr)(x)+272)))
 #define GENERATEPROFILEFORMS(x) (*((ptr *)((uptr)(x)+276)))
 #define GUARDIANENTRIES(x) (*((ptr *)((uptr)(x)+124)))
-#define INSTRCOUNTER(x) (*((U64 *)((uptr)(x)+296)))
+#define INSTRCOUNTER(x) (*((U64 *)((uptr)(x)+304)))
 #define KEYBOARDINTERRUPTPENDING(x) (*((ptr *)((uptr)(x)+200)))
 #define METALEVEL(x) (*((ptr *)((uptr)(x)+260)))
 #define NULLIMMUTABLEBYTEVECTOR(x) (*((ptr *)((uptr)(x)+252)))
@@ -944,7 +948,7 @@ typedef unsigned __int64 U64;
 #define NULLIMMUTABLESTRING(x) (*((ptr *)((uptr)(x)+256)))
 #define NULLIMMUTABLEVECTOR(x) (*((ptr *)((uptr)(x)+244)))
 #define OPTIMIZELEVEL(x) (*((ptr *)((uptr)(x)+280)))
-#define PARAMETERS(x) (*((ptr *)((uptr)(x)+312)))
+#define PARAMETERS(x) (*((ptr *)((uptr)(x)+320)))
 #define RANDOMSEED(x) (*((U32 *)((uptr)(x)+136)))
 #define REAL_EAP(x) (*((void* *)((uptr)(x)+56)))
 #define RET(x) (*((void* *)((uptr)(x)+32)))
