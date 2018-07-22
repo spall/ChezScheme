@@ -1778,6 +1778,7 @@
   ($c-tlv [flags])
   ($current-stack-link [flags])
   ($current-winders [flags])
+  ($current-attachments [flags])
   ($distinct-bound-ids? [flags])
   ($dofmt [flags])
   ($do-wind [flags])

@@ -282,12 +282,14 @@
 )
 
 (let ()
-  (define disable/enable (make-winder #f disable-interrupts enable-interrupts))
+  (include "types.ss")
+
+  (define disable/enable (make-winder disable-interrupts enable-interrupts))
 
   (define (dwind in body out)
     (let ((old-winders ($current-winders)))
       (in)
-      ($current-winders (cons (make-winder #f in out) old-winders))
+      ($current-winders (cons (make-winder in out) old-winders))
       (call-with-values
         body
         (case-lambda
@@ -306,7 +308,7 @@
       (disable-interrupts)
       ($current-winders d/e+old-winders)
       (in)
-      ($current-winders (cons (make-winder #t in out) old-winders))
+      ($current-winders (cons (make-critical-winder in out) old-winders))
       (enable-interrupts)
       (call-with-values
         body
@@ -361,7 +363,8 @@
         (let f ((old old))
           (unless (eq? old tail)
             (let ([w (car old)] [old (cdr old)])
-              (if (winder-critical? w)
+              (when (winder? w)
+                (if (critical-winder? w)
                   (begin
                     (disable-interrupts)
                     ($current-winders (cons disable/enable old))
@@ -370,13 +373,14 @@
                     (enable-interrupts))
                   (begin
                     ($current-winders old)
-                    ((winder-out w))))
+                    ((winder-out w)))))
               (f old))))
         (let f ([new new])
           (unless (eq? new tail)
             (let ([w (car new)])
               (f (cdr new))
-              (if (winder-critical? w)
+              (when (winder? w)
+                (if (critical-winder? w)
                   (begin
                     (disable-interrupts)
                     ($current-winders (cons disable/enable (cdr new)))
@@ -385,7 +389,7 @@
                     (enable-interrupts))
                   (begin
                     ((winder-in w))
-                    ($current-winders new)))))))))
+                    ($current-winders new))))))))))
 )
 
 

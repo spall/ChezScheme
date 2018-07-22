@@ -885,6 +885,7 @@
         (defref RELOCCODE reloc-table code)
         (defref RELOCIT reloc-table data)
 
+        (defref CONTCODE continuation code)
         (defref CONTSTACK continuation stack)
         (defref CONTLENGTH continuation stack-length)
         (defref CONTCLENGTH continuation stack-clength)
@@ -1002,6 +1003,8 @@
              (libspec-index (lookup-libspec nonprocedure-code)))
         (def "library_dounderflow"
              (libspec-index (lookup-libspec dounderflow)))
+        (def "library_nuate"
+             (libspec-index (lookup-libspec nuate)))
 
       )))
 )

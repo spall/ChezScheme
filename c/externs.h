@@ -275,6 +275,7 @@ extern ptr S_get_scheme_arg PROTO((ptr tc, iptr n));
 extern void S_put_scheme_arg PROTO((ptr tc, iptr n, ptr x));
 extern iptr S_continuation_depth PROTO((ptr k));
 extern ptr S_single_continuation PROTO((ptr k, iptr n));
+extern void S_reify_continuation PROTO((void));
 extern void S_split_and_resize PROTO((void));
 extern void S_handle_overflow PROTO((void));
 extern void S_handle_overflood PROTO((void));

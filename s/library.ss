@@ -88,6 +88,7 @@
 )
 
 (define-hand-coded-library-entry get-room)
+(define-hand-coded-library-entry reify-cc)
 (define-hand-coded-library-entry call-error)
 (define-hand-coded-library-entry dooverflood)
 (define-hand-coded-library-entry dooverflow)

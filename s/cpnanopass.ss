@@ -903,6 +903,7 @@
       (declare-intrinsic dofretu32* dofretu32* (%ac0 %ts %td %cp) (%ac0) (%xp))
       (declare-intrinsic get-room get-room () (%xp) (%xp))
       (declare-intrinsic scan-remembered-set scan-remembered-set () () ())
+      (declare-intrinsic reify-cc reify-cc () (%td) (%td))
       (declare-intrinsic dooverflow dooverflow () () ())
       (declare-intrinsic dooverflood dooverflood () (%xp) ())
       ; a dorest routine takes all of the register and frame arguments from the rest
@@ -11085,6 +11086,17 @@
            [(dorest4) (make-do-rest 4 frame-args-offset)]
            [(dorest5) (make-do-rest 5 frame-args-offset)]
            [(callcc)
+            ;; Could be implemented using the `reify-cc` intrinsic, as follows,
+            ;; but the hand-coded version that inlines `reify-cc` is significantly
+            ;; faster
+            #;
+            `(lambda ,(make-named-info-lambda 'callcc '(1)) 0 ()
+               ,(%seq
+                  (set! ,%td (inline ,(intrinsic-info-asmlib reify-cc #f) ,%asmlibcall))
+                  (set! ,(ref-reg %cp) ,(make-arg-opnd 1))
+                  (set! ,(make-arg-opnd 1) ,%td)
+                  ,(do-call 1)))
+            ;; If this implementation changes, `reify-cc` should change, too
             (let ([Ltop (make-local-label 'Ltop)])
               `(lambda ,(make-named-info-lambda 'callcc '(1)) 0 ()
                  ,(%seq
@@ -12129,6 +12141,7 @@
            [(dooverflood) ((make-do/ret (intrinsic-entry-live* dooverflood) (intrinsic-return-live* dooverflood)) #f "dooverflood" (lookup-c-entry handle-overflood))]
            [(scan-remembered-set) ((make-do/ret (intrinsic-entry-live* scan-remembered-set) (intrinsic-return-live* scan-remembered-set)) (in-context Lvalue (%tc-ref ret)) "scan-remembered-set" (lookup-c-entry scan-remembered-set))]
            [(get-room) ((make-do/ret (intrinsic-entry-live* get-room) (intrinsic-return-live* get-room)) (in-context Lvalue (%tc-ref ret)) "get-room" (lookup-c-entry get-more-room))]
+           [(reify-cc) ((make-do/ret (intrinsic-entry-live* reify-cc) (intrinsic-return-live* reify-cc)) (in-context Lvalue (%tc-ref ret)) "reify-cc" (lookup-c-entry reify-continuation))]
            [(nonprocedure-code)
             `(lambda ,(make-info "nonprocedure-code" '()) 0 ()
                ,(%seq
