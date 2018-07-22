@@ -109,3 +109,23 @@
                            (define profile-counter-count (record-accessor '#,rtd 0))
                            (define profile-counter-count-set! (record-mutator '#,rtd 0))))]))])
   (a profile-counter? make-profile-counter profile-counter-count profile-counter-count-set!))
+
+
+;; The `winders` list in a tc constains a mixture of `winder` records
+;; and pairs for attachments. The attachment value is in the `car` of
+;; an attachment pair. The `cdr` of an attachment pair or the
+;; `attachements` field of a `caching-winder` is either #f or a list
+;; containing only the attachments of the list from that element on.
+
+(define-record-type winder
+  (fields (immutable in) (immutable out))
+  (nongenerative #{winder qnbz1n5f3x1ldovscan3nu-0}))
+
+(define-record-type caching-winder
+  (parent winder)
+  (fields (mutable attachments))
+  (nongenerative #{caching-winder qnbz1n5f3x1ldovscan3nu-1}))
+
+(define-record-type critical-winder
+  (parent caching-winder)
+  (nongenerative #{critical-winder qnbz1n5f3x1ldovscan3nu-2}))

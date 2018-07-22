@@ -3176,6 +3176,112 @@
        (get-output-string p))
      "EIEIO")
  )
+
+(mat continuation-attachments
+  (equal? '() (current-continuation-attachments))
+  (equal? '(#&(1 2 3))
+          (call-setting-continuation-attachment
+           3
+           (lambda ()
+            (list
+             (call-setting-continuation-attachment
+              2
+              (lambda ()
+               (box
+                (call-setting-continuation-attachment
+                 1
+                 (lambda ()
+                   (current-continuation-attachments))))))))))
+  (equal? '() (current-continuation-attachments))
+  (equal? '#((left) (right))
+          (vector (call-setting-continuation-attachment
+                   'left
+                   (lambda () (current-continuation-attachments)))
+                  (call-setting-continuation-attachment
+                   'right
+                   (lambda () (current-continuation-attachments)))))
+  (equal? '#((left2) (right2))
+          (vector (call-setting-continuation-attachment
+                   'left2
+                   current-continuation-attachments)
+                  (call-setting-continuation-attachment
+                   'right2
+                   current-continuation-attachments)))
+  (equal? 'yes
+          (call-setting-continuation-attachment
+           'yes
+           (lambda ()
+            (call-with-current-continuation-attachment
+             'no
+             (lambda (v) v)))))
+  (equal? 'yes
+          (call-setting-continuation-attachment
+           'yes
+           (lambda ()
+            (call-with-current-continuation-attachment
+             'no
+             values))))
+  (equal? '(no)
+          (call-setting-continuation-attachment
+           'yes
+           (lambda ()
+            (list
+             (call-with-current-continuation-attachment
+              'no
+              (lambda (v) v))))))
+  (equal? '(no)
+          (call-setting-continuation-attachment
+           'yes
+           (lambda ()
+            (list
+             (call-with-current-continuation-attachment
+              'no
+              values)))))
+  (begin
+   (define (call-with-yep f)
+     (call-setting-continuation-attachment
+      'yep
+       (lambda () (f))))
+   (define (call-with-yeah f)
+     (call-setting-continuation-attachment
+      'yeah
+       f))
+   (define (get-or-nope)
+     (call-with-current-continuation-attachment
+      'nope
+      (lambda (x) x)))
+    #t)
+  (equal? 'yep (call-with-yep get-or-nope))
+  (equal? 'yeah (call-with-yep (lambda () (call-with-yeah get-or-nope))))
+  (equal? '(yeah) (call-with-yep (lambda () (call-with-yeah current-continuation-attachments))))
+  (equal? '((yeah yep)) (call-with-yep (lambda () (list (call-with-yeah current-continuation-attachments)))))
+  (equal? '(yeah yep) (call-with-yep (lambda () (let ([v #f])
+                                                  (set! v (call-with-yeah current-continuation-attachments))
+                                                  v))))
+  (equal? '(nope) (call-with-yep (lambda () (list (get-or-nope)))))
+  (equal? '(nope) (call-with-yep (lambda () (call-with-yeah (lambda () (list (get-or-nope)))))))
+  
+  (equal? '() (if (call-with-yep list)
+                  (current-continuation-attachments)
+                  #f))
+  (equal? '() (if (call-setting-continuation-attachment 'here (lambda () #t))
+                  (current-continuation-attachments)
+                  #f))
+  (equal? 1 (let loop ([i 10000])
+              (if (zero? i)
+                  (length (current-continuation-attachments))
+                  (call-setting-continuation-attachment
+                   'here
+                   (lambda ()                                     
+                     (loop (sub1 i)))))))
+  (equal? 10000 (let loop ([i 10000])
+                  (if (zero? i)
+                      (length (current-continuation-attachments))
+                      (call-setting-continuation-attachment
+                       'here
+                       (lambda ()                                     
+                         (+ (loop (sub1 i)) 0))))))
+ )
  
 ;;; section 4-7:
 

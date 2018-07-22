@@ -366,6 +366,22 @@
       ($oops who "~s is not a procedure" p))
     (#3%call/cc p)))
 
+(define-who call-setting-continuation-attachment
+  (lambda (v p)
+    (unless (procedure? p)
+      ($oops who "~s is not a procedure" p))
+    (#3%call-setting-continuation-attachment v (lambda () (p)))))
+
+(define-who call-with-current-continuation-attachment
+  (lambda (default-val p)
+    (unless (procedure? p)
+      ($oops who "~s is not a procedure" p))
+    (#3%call-with-current-continuation-attachment default-val (lambda (x) (p x)))))
+
+(define $make-shift-attachment
+  (lambda (proc)
+    (#3%$make-shift-attachment proc)))
+
 (define $code? (lambda (x) ($code? x)))
 
 (define $system-code? (lambda (x) ($system-code? x)))
@@ -1393,12 +1409,14 @@
      ($current-stack-link k)]))
 
 (define $current-winders
-  (case-lambda
-    [() ($current-winders)]
-    [(w)
-     (unless (and (list? w) (andmap (lambda (x) (winder? x)) w))
-       ($oops '$current-winders "malformed winders ~s" w))
-     ($current-winders w)]))
+  (let ()
+    (include "types.ss")
+    (case-lambda
+     [() ($current-winders)]
+     [(w)
+      (unless (and (list? w) (andmap (lambda (x) (or (winder? x) (pair? x))) w))
+        ($oops '$current-winders "malformed winders ~s" w))
+      ($current-winders w)])))
 
 (define lock-object
   (foreign-procedure "(cs)lock_object" (scheme-object) void))

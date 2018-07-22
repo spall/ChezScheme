@@ -1296,7 +1296,7 @@
    [iptr stack-clength]
    [ptr link]
    [ptr return-address]
-   [ptr winders]))
+   [ptr winders])) ; #f => not recorded
 
 (define-primitive-structure-disps record type-typed-object
   ([ptr type]
@@ -1334,7 +1334,7 @@
    [ptr stack-cache]
    [ptr stack-link]
    [iptr scheme-stack-size]
-   [ptr winders]
+   [ptr winders] ; list contains `winder`s and attachment pairs
    [ptr U]
    [ptr V]
    [ptr W]
@@ -1879,23 +1879,6 @@
 (define-constant time-utc 4)
 (define-constant time-collector-cpu 5)
 (define-constant time-collector-real 6)
-
-(define-syntax make-winder
-  (syntax-rules ()
-    [(_ critical? in out) (vector critical? in out)]))
-(define-syntax winder-critical? (syntax-rules () [(_ w) (vector-ref w 0)]))
-(define-syntax winder-in (syntax-rules () [(_ w) (vector-ref w 1)]))
-(define-syntax winder-out (syntax-rules () [(_ w) (vector-ref w 2)]))
-
-(define-syntax winder?
-  (syntax-rules ()
-    [(_ ?w)
-     (let ([w ?w])
-       (and (vector? w)
-            (fx= (vector-length w) 3)
-            (boolean? (winder-critical? w))
-            (procedure? (winder-in w))
-            (procedure? (winder-out w))))]))
 
 (define-syntax default-run-cp0
   (lambda (x)
@@ -2566,6 +2549,7 @@
      (ormap1 #f 2 #f #t)
      (put-bytevector-some #f 4 #f #t)
      (put-string-some #f 4 #f #t)
+     (reify-cc #f 0 #f #f)
      (dofretu8* #f 1 #f #f)
      (dofretu16* #f 1 #f #f)
      (dofretu32* #f 1 #f #f)
@@ -2600,6 +2584,7 @@
      (nuate #f 0 #f #t)
      (virtual-register #f 1 #t #t)
      (set-virtual-register! #f 1 #t #t)
+     ($shift-attachment #f 0 #f #f)
   ))
 
 (let ()
