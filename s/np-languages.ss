@@ -45,7 +45,7 @@
     block-pariah! block-seen! block-finished! block-return-point! block-repeater! block-loop-header!
     block-pariah? block-seen? block-finished? block-return-point? block-repeater? block-loop-header?
     L1 unparse-L1 L2 unparse-L2 L3 unparse-L3 L4 unparse-L4
-    L4.5 unparse-L4.5 L4.75 unparse-L4.75 L4.875 unparse-L4.875
+    L4.5 unparse-L4.5 L4.75 unparse-L4.75 L4.875 unparse-L4.875 L4.9375 unparse-L4.9375
     L5 unparse-L5 L6 unparse-L6 L7 unparse-L7
     L9 unparse-L9 L9.5 unparse-L9.5 L9.75 unparse-L9.75
     L10 unparse-L10 L10.5 unparse-L10.5 L11 unparse-L11
@@ -382,8 +382,26 @@
     (Expr (e body)
       (+ (loop x (x* ...) body) => (loop x body))))
 
+  (define attachment-set-op?
+    (lambda (x)
+      (memq x '(push pop set reify-and-set get))))
+  (define attachment-get-op?
+    (lambda (x)
+      (eq? x 'get)))
+  (define attachment-op?
+    (lambda (x)
+      (or (attachment-set-op? x) (attachment-get-op? x))))
+
+ ; exposed attachment-manipulation operations
+  (define-language L4.9375 (extends L4.875)
+    (terminals
+     (+ (attachment-op (aop))))
+    (entry CaseLambdaExpr)
+    (Expr (e body)
+      (+ (attachment aop e* ...))))
+
  ; moves all case lambda expressions into rhs of letrec
-  (define-language L5 (extends L4.875)
+  (define-language L5 (extends L4.9375)
     (entry CaseLambdaExpr)
     (Expr (e body)
       (- le)))
@@ -655,7 +673,8 @@
          (alloc info t)                          => (alloc info t)
          (inline info prim t* ...)               => (inline info prim t* ...)
          (mvcall info e t)                       => (mvcall e t)
-         (foreign-call info t t* ...)))
+         (foreign-call info t t* ...)
+         (attachment aop t* ...)))
     (Expr (e body)
       (- lvalue
          (values info e* ...)
@@ -668,7 +687,8 @@
          (let ([x e] ...) body)
          (set! lvalue e)
          (mvcall info e1 e2)
-         (foreign-call info e e* ...))
+         (foreign-call info e e* ...)
+         (attachment aop e* ...))
       (+ rhs
          (values info t* ...)
          (set! lvalue rhs))))
@@ -692,17 +712,22 @@
  ; marked as literals so they will not be turned into scheme constants again.
   (define-language L11 (extends L10.5)
     (terminals
-      (- (primitive (prim)))
+      (- (primitive (prim))
+         (attachment-op (aop)))
       (+ (value-primitive (value-prim))
          (pred-primitive (pred-prim))
-         (effect-primitive (effect-prim))))
+         (effect-primitive (effect-prim))
+         (attachment-set-op (saop))
+         (attachment-get-op (gaop))))
     (entry Program)
     (CaseLambdaClause (cl)
       (- (clause (x* ...) (local* ...) mcp interface body))
       (+ (clause (x* ...) (local* ...) mcp interface tlbody)))
     (Rhs (rhs)
-      (- (inline info prim t* ...))
-      (+ (inline info value-prim t* ...)               => (inline info value-prim t* ...)))
+      (- (inline info prim t* ...)
+         (attachment aop t* ...))
+      (+ (inline info value-prim t* ...)               => (inline info value-prim t* ...)
+         (attachment gaop t* ...)))
     (Expr (e body)
       (- rhs
          (label l body)
@@ -747,6 +772,7 @@
             (mvset (mdcl t0 t1 ...) (t* ...) ((x** ...) interface* l*) ...)
          (mvcall info mdcl (maybe t0) t1 ... (t* ...)) => (mvcall mdcl t0 t1 ... (t* ...))
          (foreign-call info t t* ...)
+         (attachment saop t* ...)
          (tail tl))))
 
   (define-language L11.5 (extends L11)

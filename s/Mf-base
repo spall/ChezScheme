@@ -19,7 +19,7 @@ MAKEFLAGS += --no-print-directory
 # separately control the options used while compiling a cross compiler.
 
 # o determines the optimize level
-o = 3
+o = 2
 
 # d is the debug level at which the system should be built
 d = 0

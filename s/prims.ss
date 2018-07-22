@@ -366,6 +366,28 @@
       ($oops who "~s is not a procedure" p))
     (#3%call/cc p)))
 
+(define-who call-using-continuation-attachment
+  (lambda (v p)
+    (unless (procedure? p)
+      ($oops who "~s is not a procedure" p))
+    '(#3%call-using-continuation-attachment v p)))
+
+(define-who call-with-current-continuation-attachment
+  (lambda (default-val p)
+    (unless (procedure? p)
+      ($oops who "~s is not a procedure" p))
+    '(#3%call-with-current-continuation-attachment default-val p)))
+
+(define $attachment-shift-to-reified-continuation
+  (lambda args
+    (let ([r (reverse args)])
+      (apply (car r) (reverse (cdr r))))))
+
+(define $attachment-curry-shift-to-reified-continuation
+  (lambda (proc)
+    (lambda args
+      (apply proc args))))
+
 (define $code? (lambda (x) ($code? x)))
 
 (define $system-code? (lambda (x) ($system-code? x)))

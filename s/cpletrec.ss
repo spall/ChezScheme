@@ -284,7 +284,7 @@ Handling letrec and letrec*
          (safe-assert (prelex? x))
          (safe-assert (prelex-was-referenced x))
          (when (prelex-referenced x)
-           (safe-assert (prelex-was-multiply-referenced x))
+           ; (safe-assert (prelex-was-multiply-referenced x))
            (set-prelex-multiply-referenced! x #t))
          (set-prelex-seen/referenced! x #t)
          (values `(ref ,maybe-src ,x) (not (prelex-was-assigned x))))]

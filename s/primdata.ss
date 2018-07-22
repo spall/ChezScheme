@@ -1170,8 +1170,10 @@
   (bytevector-compress [sig [(ptr) -> (ptr)]] [flags])
   (bytevector-uncompress [sig [(ptr) -> (ptr)]] [flags])
   (call/1cc [sig [(procedure) -> (ptr ...)]] [flags])
+  (call-with-current-continuation-attachment [sig [(ptr procedure) -> (ptr ...)]] [flags])
   (call-with-input-file [sig [(pathname procedure) (pathname procedure sub-ptr) -> (ptr ...)]] [flags ieee r5rs])      ; has options argument
   (call-with-output-file [sig [(pathname procedure) (pathname procedure sub-ptr) -> (ptr ...)]] [flags ieee r5rs])     ; has options argument
+  (call-using-continuation-attachment [sig [(ptr procedure) -> (ptr ...)]] [flags])
   (cfl* [sig [(cflonum ...) -> (cflonum)]] [flags arith-op partial-folder])
   (cfl+ [sig [(cflonum ...) -> (cflonum)]] [flags arith-op partial-folder])
   (cfl- [sig [(cflonum cflonum ...) -> (cflonum)]] [flags arith-op partial-folder])
@@ -1710,6 +1712,8 @@
 )
 
 (define-symbol-flags* ([libraries] [flags system proc]) ; system procedures
+  ($attachment-shift-to-reified-continuation [flags])
+  ($attachment-curry-shift-to-reified-continuation [flags])
   ($address-in-heap? [flags])
   ($address->object [flags])
   ($allocate-thread-parameter [feature pthreads] [flags alloc])

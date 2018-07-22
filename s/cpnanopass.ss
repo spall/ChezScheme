@@ -1550,7 +1550,90 @@
         [,pr pr]
         [else ($oops who "unexpected Expr ~s" ir)]))
 
-    (define-pass np-name-anonymous-lambda : L4.875 (ir) -> L5 ()
+    (define-pass np-recognize-attachment : L4.875 (ir) -> L4.9375 ()
+      (definitions
+        (define return
+          (lambda (mode x)
+            (case mode
+              [(pop) `(seq
+                        (attachment pop)
+                        ,x)]
+              [else x])))
+        (define ->in-wca
+          (lambda (mode)
+            (case mode
+              [(non-tail pop) 'pop]
+              [(tail tail/reified) 'tail/reified]))))
+      (CaseLambdaClause : CaseLambdaClause (cl) -> CaseLambdaClause ()
+        [(clause (,x* ...) ,interface ,[Expr : body 'tail '() -> body])
+         `(clause (,x* ...) ,interface ,body)])
+      (Expr : Expr (ir [mode 'non-tail] [loop-x* '()]) -> Expr ()
+        [,x (return mode x)]
+        [(letrec ([,x* ,[le* 'non-tail loop-x* -> le*]] ...) ,[body])
+         `(letrec ([,x* ,le*] ...) ,body)]
+        [(call ,info ,mdcl ,pr ,[e1 'non-tail -> e1]
+               (case-lambda ,info2 (clause () ,interface ,[body (->in-wca mode) '() -> body])))
+         (guard (and (eq? (primref-name pr) 'call-using-continuation-attachment)
+                     (= interface 0)))
+         (case mode
+           [(pop tail/reified)
+            ;; Definitely an attachment in place
+            `(seq (attachment set ,e1) ,body)]
+           [(tail)
+            ;; Check dynamically for reified continuation and attachment
+            `(seq (attachment reify-and-set ,e1) ,body)]
+           [(non-tail)
+            ;; Push attachment; `body` has been adjusted to pop
+            `(seq (attachment push ,e1) body)])]
+        [(call ,info ,mdcl ,pr ,[e1 'non-tail loop-x* -> e1]
+               (case-lambda ,info2 (clause (,x) ,interface ,[body mode loop-x* -> body])))
+         (guard (and (eq? (primref-name pr) 'call-with-current-continuation-attachment)
+                     (= interface 1)))
+         (case mode
+           [(non-tail)
+            ;; No surrounding `with-continuation-attachment`
+            `(let ([,x ,e1]) ,body)]
+           [(pop tail/reified)
+            ;; Defintely an attachment in place
+            `(seq ,e1 (let ([,x (attachment get)]) ,body))]
+           [else
+            ;; Check dynamically for attachment
+            `(let ([,x (attachment get ,e1)]) ,body)])]
+        [(call ,info ,mdcl ,x ,[e* 'non-tail loop-x* -> e*] ...)
+         (guard (memq x loop-x*))
+         ;; No convert for a loop call, even if mode is 'pop
+         `(call ,info ,mdcl ,x ,e* ...)]
+        [(call ,info ,mdcl ,[e 'non-tail loop-x* -> e] ,[e* 'non-tail loop-x* -> e*] ...)
+         (case mode
+           [(pop)
+            (%primcall #f #f $attachment-shift-to-reified-continuation ,e* ... ,e)]
+           [else
+            `(call ,info ,mdcl ,e ,e* ...)])]
+        [(foreign-call ,info ,[e 'non-tail loop-x* -> e] ,[e* 'non-tail loop-x* -> e*] ...)
+         (return mode `(foreign-call ,info ,e ,e* ...))]
+        [(fcallable ,info) (return mode `(fcallable ,info))]
+        [(label ,l ,[body]) `(label ,l ,body)]
+        [(mvlet ,[e 'non-tail loop-x* -> e] ((,x** ...) ,interface* ,[body*]) ...)
+         `(mvlet ,e ((,x** ...) ,interface* ,body*) ...)]
+        [(mvcall ,info ,[e1 'non-tail loop-x* -> e1] ,[e2 'non-tail loop-x* -> e2])
+         (let ([e1 (case mode
+                     [(pop) (%primcall #f #f $attachment-curry-shift-to-reified-continuation ,e1)]
+                     [else e1])])
+           `(mvcall ,info ,e1 ,e2))]
+        [(let ([,x* ,[e* 'non-tail -> e*]] ...) ,[body])
+         `(let ([,x* ,e*] ...) ,body)]
+        [(case-lambda ,info ,[cl] ...) (return mode `(case-lambda ,info ,cl ...))]
+        [(quote ,d) (return mode `(quote ,d))]
+        [(if ,[e0 'non-tail -> e0] ,[e1] ,[e2]) `(if ,e0 ,e1 ,e2)]
+        [(seq ,[e0 'non-tail -> e0] ,[e1]) `(seq ,e0 ,e1)]
+        [(profile ,src) `(profile ,src)]
+        [(pariah) `(pariah)]
+        [,pr (return mode pr)]
+        [(loop ,x (,x* ...) ,[body mode (cons x loop-x*) -> body])
+         `(loop ,x (,x* ...) ,body)]
+        [else ($oops who "unexpected Expr ~s" ir)]))
+
+    (define-pass np-name-anonymous-lambda : L4.9375 (ir) -> L5 ()
       (CaseLambdaClause : CaseLambdaClause (ir) -> CaseLambdaClause ())
       (Expr : Expr (ir) -> Expr ()
         [(case-lambda ,info ,[cl] ...)
@@ -1560,7 +1643,7 @@
            (uvar-info-lambda-set! anon info)
            `(letrec ([,anon (case-lambda ,info ,cl ...)])
               ,anon))])
-      (nanopass-case (L4.875 CaseLambdaExpr) ir
+      (nanopass-case (L4.9375 CaseLambdaExpr) ir
         [(case-lambda ,info ,[CaseLambdaClause : cl] ...) `(case-lambda ,info ,cl ...)]))
 
     (define-pass np-convert-closures : L5 (x) -> L6 ()
@@ -2693,6 +2776,25 @@
              ,[e*] ...)
            (guard (and (eq? (primref-name pr) '$top-level-value) (symbol? d)))
            `(call ,info0 ,mdcl0 ,(Symref d) ,e* ...)]
+          [(call ,info ,mdcl ,pr ,e* ... ,pr2)
+           (guard (eq? (primref-name pr) '$shift-attachment-to-reified-continuation)
+                  ;; FIXME: need a less fragile way to avoid multiple results
+                  ;; Exclude primitives that return more than one value:
+                  (not (memq (primref-name pr2) '(values call/cc call-with-current-continuation call/1cc))))
+           (cond
+            [(handle-prim (info-call-src info) (info-call-sexpr info) (primref-level pr2) (primref-name pr2) e*)
+             => (lambda (e)
+                  (let ([t (make-tmp 't)])
+                    `(let ([,t ,(Expr e)])
+                       (seq
+                        (attachment pop)
+                        ,t))))]
+            [else
+             (let ([e* (map Expr e*)])
+                (let ([info (if (any-set? (prim-mask abort-op) (primref-flags pr2))
+                                (make-info-call (info-call-src info) (info-call-sexpr info) (info-call-check? info) #t #t)
+                                info)])
+                  `(call ,info ,mdcl ,(Symref (primref-name pr)) ,e* ... ,(Symref (primref-name pr2)))))])]
           [(call ,info ,mdcl ,pr ,e* ...)
            (cond
              [(handle-prim (info-call-src info) (info-call-sexpr info) (primref-level pr) (primref-name pr) e*) => Expr]
@@ -9556,6 +9658,10 @@
          (if e0?
              (Triv* (cons e0? e1*) (lambda (t*) (k `(call ,info ,mdcl ,(car t*) ,(cdr t*) ...))))
              (Triv* e1* (lambda (t*) (k `(call ,info ,mdcl #f ,t* ...)))))]
+        [(attachment ,aop ,e* ...)
+         (Triv* e*
+           (lambda (t*)
+             `(attachment ,aop ,t* ...)))]
         [(foreign-call ,info ,e0 ,e1* ...)
          (Triv* (cons e0 e1*)
            (lambda (t*)
@@ -11285,7 +11391,11 @@
         [(mref ,x1 ,x2 ,imm) (%mref ,(Ref x1) ,(Ref x2) ,imm)])
       (Rhs : Rhs (ir) -> Rhs ()
         [(mvcall ,info ,mdcl ,t0? ,t1* ... (,t* ...))
-         ($oops who "Effect is responsible for handling mvcalls")])
+         ($oops who "Effect is responsible for handling mvcalls")]
+        [(attachment ,gaop)
+         ($oops who "attachment-todo")]
+        [(attachment ,gaop ,t)
+         ($oops who "attachment-todo")])
       (Effect : Effect (ir) -> Effect ()
         [(do-rest ,fixed-args)
          (if (fx<= fixed-args dorest-intrinsic-max)
@@ -11329,7 +11439,11 @@
         [(foreign-call ,info ,[t0] ,[t1*] ...)
          (build-foreign-call info t0 t1* #f #t)]
         [(set! ,[lvalue] (foreign-call ,info ,[t0] ,[t1*] ...))
-         (build-foreign-call info t0 t1* lvalue #t)])
+         (build-foreign-call info t0 t1* lvalue #t)]
+        [(attachment ,saop ,t)
+         ($oops who "attachment-todo")]
+        [(attachment ,saop ,t)
+         ($oops who "attachment-todo")])
       (Tail : Tail  (ir) -> Tail  ()
         [(entry-point (,x* ...) ,dcl ,mcp ,tlbody)
          (unless (andmap (lambda (x) (eq? (uvar-type x) 'ptr)) x*)
@@ -15964,6 +16078,7 @@
               (pass np-recognize-mrvs unparse-L4.5)
               (pass np-expand-foreign unparse-L4.75)
               (pass np-recognize-loops unparse-L4.875)
+              (pass np-recognize-attachment unparse-L4.9375)
               (pass np-name-anonymous-lambda unparse-L5)
               (pass np-convert-closures unparse-L6)
               (pass np-optimize-direct-call unparse-L6)
