@@ -755,10 +755,11 @@
 (define-constant type-rtd-counts       #b01101110)
 (define-constant type-record                #b111)
 
-(define-constant code-flag-system         #b0001)
-(define-constant code-flag-continuation   #b0010)
-(define-constant code-flag-template       #b0100)
-(define-constant code-flag-guardian       #b1000)
+(define-constant code-flag-system         #b00001)
+(define-constant code-flag-continuation   #b00010)
+(define-constant code-flag-template       #b00100)
+(define-constant code-flag-guardian       #b01000)
+(define-constant code-flag-single-valued  #b10000)
 
 (define-constant fixnum-bits
   (case (constant ptr-bits)
@@ -849,6 +850,10 @@
   (fxlogor (constant type-code)
            (fxsll (constant code-flag-guardian)
                   (constant code-flags-offset))))
+(define-constant type-code-single-valued
+  (fxlogor (constant type-code)
+           (fxsll (constant code-flag-single-valued)
+                  (constant code-flags-offset))))
 
 ;; type checks are generally performed by applying the mask to the object
 ;; then comparing against the type code.  a mask equal to
@@ -926,6 +931,9 @@
            (fx- (fxsll 1 (constant code-flags-offset)) 1)))
 (define-constant mask-guardian-code
   (fxlogor (fxsll (constant code-flag-guardian) (constant code-flags-offset))
+           (fx- (fxsll 1 (constant code-flags-offset)) 1)))
+(define-constant mask-code-single-valued
+  (fxlogor (fxsll (constant code-flag-single-valued) (constant code-flags-offset))
            (fx- (fxsll 1 (constant code-flags-offset)) 1)))
 (define-constant mask-thread       (constant byte-constant-mask))
 (define-constant mask-tlc          (constant byte-constant-mask))
@@ -1313,7 +1321,8 @@
    [iptr stack-clength]
    [ptr link]
    [ptr return-address]
-   [ptr winders]))
+   [ptr winders]
+   [ptr attachments])) ; #f => not recorded
 
 (define-primitive-structure-disps record type-typed-object
   ([ptr type]
@@ -1352,6 +1361,8 @@
    [ptr stack-link]
    [iptr scheme-stack-size]
    [ptr winders]
+   [ptr attachments]
+   [ptr cached-frame]
    [ptr U]
    [ptr V]
    [ptr W]
@@ -1584,18 +1595,19 @@
   (ieee                     #b00000000000000000010000)
   (proc                     #b00000000000000000100000)
   (discard                  #b00000000000000001000000)
-  (unrestricted             #b00000000000000010000000)
-  (true                     #b00000000000000100000000)
-  (mifoldable               #b00000000000001000000000)
+  (single-valued            #b00000000000000010000000)
+  (true                 (or #b00000000000000100000000 single-valued))
+  (mifoldable           (or #b00000000000001000000000 single-valued))
   (cp02                     #b00000000000010000000000)
   (cp03                     #b00000000000100000000000)
   (system-keyword           #b00000000001000000000000)
   (r6rs                     #b00000000010000000000000)
-  (pure                 (or #b00000000100000000000000 discard))
+  (pure                 (or #b00000000100000000000000 discard single-valued))
   (library-uid              #b00000001000000000000000)
-  (boolean-valued           #b00000010000000000000000)
+  (boolean-valued       (or #b00000010000000000000000 single-valued))
   (abort-op                 #b00000100000000000000000)
   (unsafe                   #b00001000000000000000000)
+  (unrestricted             #b00010000000000000000000)
   (arith-op                 (or proc pure true))
   (alloc                    (or proc discard true))
   ; would be nice to check that these and only these actually have cp0 partial folders
@@ -1611,6 +1623,8 @@
   (simple                        #b0000100000)
   (boolean-valued-known          #b0001000000)
   (boolean-valued                #b0010000000)
+  (single-valued-known           #b0100000000)
+  (single-valued                 #b1000000000)
 )
 
 (define-syntax define-flag-field
@@ -1850,6 +1864,11 @@
 (define-constant unscaled-shot-1-shot-flag -1)
 (define-constant scaled-shot-1-shot-flag
   (* (constant unscaled-shot-1-shot-flag) (constant ptr-bytes)))
+;; opportunistic--1-shot-flag is in the continuation length field for
+;; a one-shot continuation that is only treated a 1-shot when
+;; it's contiguous with the current stack when called, in which case
+;; the continuation can be just merged back with the current stack
+(define-constant opportunistic-1-shot-flag 0)
 
 ;;; underflow limit determines how much we're willing to copy on
 ;;; stack underflow/continuation invocation
@@ -1901,23 +1920,6 @@
 (define-constant time-utc 4)
 (define-constant time-collector-cpu 5)
 (define-constant time-collector-real 6)
-
-(define-syntax make-winder
-  (syntax-rules ()
-    [(_ critical? in out) (vector critical? in out)]))
-(define-syntax winder-critical? (syntax-rules () [(_ w) (vector-ref w 0)]))
-(define-syntax winder-in (syntax-rules () [(_ w) (vector-ref w 1)]))
-(define-syntax winder-out (syntax-rules () [(_ w) (vector-ref w 2)]))
-
-(define-syntax winder?
-  (syntax-rules ()
-    [(_ ?w)
-     (let ([w ?w])
-       (and (vector? w)
-            (fx= (vector-length w) 3)
-            (boolean? (winder-critical? w))
-            (procedure? (winder-in w))
-            (procedure? (winder-out w))))]))
 
 (define-syntax default-run-cp0
   (lambda (x)
@@ -2588,6 +2590,7 @@
      (ormap1 #f 2 #f #t)
      (put-bytevector-some #f 4 #f #t)
      (put-string-some #f 4 #f #t)
+     (reify-cc #f 0 #f #f)
      (dofretu8* #f 1 #f #f)
      (dofretu16* #f 1 #f #f)
      (dofretu32* #f 1 #f #f)
