@@ -1296,7 +1296,8 @@
    [iptr stack-clength]
    [ptr link]
    [ptr return-address]
-   [ptr winders]))
+   [ptr winders]
+   [ptr attachments])) ; #f => not recorded
 
 (define-primitive-structure-disps record type-typed-object
   ([ptr type]
@@ -1335,6 +1336,7 @@
    [ptr stack-link]
    [iptr scheme-stack-size]
    [ptr winders]
+   [ptr attachments]
    [ptr U]
    [ptr V]
    [ptr W]
@@ -2566,6 +2568,7 @@
      (ormap1 #f 2 #f #t)
      (put-bytevector-some #f 4 #f #t)
      (put-string-some #f 4 #f #t)
+     (reify-cc #f 0 #f #f)
      (dofretu8* #f 1 #f #f)
      (dofretu16* #f 1 #f #f)
      (dofretu32* #f 1 #f #f)
@@ -2600,6 +2603,7 @@
      (nuate #f 0 #f #t)
      (virtual-register #f 1 #t #t)
      (set-virtual-register! #f 1 #t #t)
+     ($shift-attachment #f 0 #f #f)
   ))
 
 (let ()
