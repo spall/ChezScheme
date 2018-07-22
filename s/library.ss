@@ -111,6 +111,7 @@
 ;;; dounderflow & nuate must come before callcc
 (define-hand-coded-library-entry dounderflow)
 (define-hand-coded-library-entry nuate)
+(define-hand-coded-library-entry reify-cc)
 (define-hand-coded-library-entry callcc)
 (define-hand-coded-library-entry call1cc)
 (define-hand-coded-library-entry dofargint32)
