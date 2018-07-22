@@ -58,6 +58,16 @@ Online versions of both books can be found at
 %-----------------------------------------------------------------------------
 \section{Functionality Changes}\label{section:functionality}
 
+\subsection{Continuation attachments (9.5.3)}
+
+The new \scheme{call-setting-continuation-attachment},
+\scheme{call-getting-continuation-attachment},
+\scheme{call-consuming-continuation-attachment}, and
+\scheme{current-continuation-attachments} procedure support
+efficiently recording and querying information on a continuation, but
+without unnecessarily extending continuation---that is, without
+interfering with tail-call behavior.
+
 \subsection{Coverage support and source tables (9.5.3)}
 
 When the new parameter \scheme{generate-covin-files} is set to \scheme{#t}

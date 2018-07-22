@@ -1304,7 +1304,8 @@
    [iptr stack-clength]
    [ptr link]
    [ptr return-address]
-   [ptr winders]))
+   [ptr winders]
+   [ptr attachments])) ; #f => not recorded
 
 (define-primitive-structure-disps record type-typed-object
   ([ptr type]
@@ -1343,6 +1344,8 @@
    [ptr stack-link]
    [iptr scheme-stack-size]
    [ptr winders]
+   [ptr attachments]
+   [ptr cached-frame]
    [ptr U]
    [ptr V]
    [ptr W]
@@ -1840,6 +1843,11 @@
 (define-constant unscaled-shot-1-shot-flag -1)
 (define-constant scaled-shot-1-shot-flag
   (* (constant unscaled-shot-1-shot-flag) (constant ptr-bytes)))
+;; opportunistic--1-shot-flag is in the continuation length field for
+;; a one-shot continuation that is only treated a 1-shot when
+;; it's contiguous with the current stack when called, in which case
+;; the continuation can be just merged back with the current stack
+(define-constant opportunistic-1-shot-flag 0)
 
 ;;; underflow limit determines how much we're willing to copy on
 ;;; stack underflow/continuation invocation
@@ -1891,23 +1899,6 @@
 (define-constant time-utc 4)
 (define-constant time-collector-cpu 5)
 (define-constant time-collector-real 6)
-
-(define-syntax make-winder
-  (syntax-rules ()
-    [(_ critical? in out) (vector critical? in out)]))
-(define-syntax winder-critical? (syntax-rules () [(_ w) (vector-ref w 0)]))
-(define-syntax winder-in (syntax-rules () [(_ w) (vector-ref w 1)]))
-(define-syntax winder-out (syntax-rules () [(_ w) (vector-ref w 2)]))
-
-(define-syntax winder?
-  (syntax-rules ()
-    [(_ ?w)
-     (let ([w ?w])
-       (and (vector? w)
-            (fx= (vector-length w) 3)
-            (boolean? (winder-critical? w))
-            (procedure? (winder-in w))
-            (procedure? (winder-out w))))]))
 
 (define-syntax default-run-cp0
   (lambda (x)
@@ -2578,6 +2569,7 @@
      (ormap1 #f 2 #f #t)
      (put-bytevector-some #f 4 #f #t)
      (put-string-some #f 4 #f #t)
+     (reify-cc #f 0 #f #f)
      (dofretu8* #f 1 #f #f)
      (dofretu16* #f 1 #f #f)
      (dofretu32* #f 1 #f #f)
