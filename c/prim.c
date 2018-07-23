@@ -134,7 +134,6 @@ static void create_c_entry_vector() {
     install_c_entry(CENTRY_foreign_entry, proc2ptr(S_foreign_entry));
     install_c_entry(CENTRY_install_library_entry, proc2ptr(scheme_install_library_entry));
     install_c_entry(CENTRY_get_more_room, proc2ptr(S_get_more_room));
-    install_c_entry(CENTRY_reify_continuation, proc2ptr(S_reify_continuation));
     install_c_entry(CENTRY_scan_remembered_set, proc2ptr(S_scan_remembered_set));
     install_c_entry(CENTRY_instantiate_code_object, proc2ptr(s_instantiate_code_object));
     install_c_entry(CENTRY_Sreturn, proc2ptr(S_return));

@@ -1003,8 +1003,6 @@
              (libspec-index (lookup-libspec nonprocedure-code)))
         (def "library_dounderflow"
              (libspec-index (lookup-libspec dounderflow)))
-        (def "library_nuate"
-             (libspec-index (lookup-libspec nuate)))
 
       )))
 )

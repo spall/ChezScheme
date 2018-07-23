@@ -11173,7 +11173,51 @@
                                              (set! ,%xp ,(%mref ,xp/cp ,(constant continuation-return-address-disp)))
                                              (set! ,fv0 ,%xp)
                                              (jump ,(%mref ,%xp ,(constant return-address-mv-return-address-disp))
-                                               (,%ac0 ,arg-registers ... ,fv0))))]))))))))))))
+                                               (,%ac0 ,arg-registers ... ,fv0))))])))))))))))
+        (define reify-cc-help
+          (lambda (finish)
+            (with-output-language (L13 Tail)
+              (let ([Ltop (make-local-label 'Ltop)])
+                (%seq
+                  (set! ,%td ,(%tc-ref stack-link))
+                  (set! ,%xp ,%td)
+                  (label ,Ltop)
+                  (set! ,%ac0 ,(%mref ,%xp ,(constant continuation-stack-clength-disp)))
+                  (if ,(%inline eq?
+                          ,(%mref ,%xp ,(constant continuation-stack-length-disp))
+                          ,%ac0)
+                       ,(%seq
+                          (set! ,%ac0
+                            (literal ,(make-info-literal #f 'library-code
+                                        (lookup-libspec dounderflow)
+                                        (fx+ (constant code-data-disp) (constant size-rp-header)))))
+                          (if (if ,(%inline eq? ,%ref-ret ,%ac0)
+                                  ,(%inline eq?
+                                     ,(%mref ,%td ,(constant continuation-winders-disp))
+                                     ,(%tc-ref winders))
+                                  (false))
+                              ,(finish %td)
+                              ,(%seq
+                                 (set! ,%xp ,(%constant-alloc type-closure (constant size-continuation)))
+                                 (set! ,(%mref ,%xp ,(constant continuation-code-disp))
+                                   (literal ,(make-info-literal #f 'library (lookup-libspec nuate) (constant code-data-disp))))
+                                 (set! ,(%mref ,%xp ,(constant continuation-return-address-disp)) ,%ref-ret)
+                                 (set! ,(%mref ,%xp ,(constant continuation-winders-disp)) ,(%tc-ref winders))
+                                 (set! ,%ref-ret ,%ac0)
+                                 (set! ,(%mref ,%xp ,(constant continuation-link-disp)) ,%td)
+                                 (set! ,(%tc-ref stack-link) ,%xp)
+                                 (set! ,%ac0 ,(%tc-ref scheme-stack))
+                                 (set! ,(%tc-ref scheme-stack) ,%sfp)
+                                 (set! ,(%mref ,%xp ,(constant continuation-stack-disp)) ,%ac0)
+                                 (set! ,%ac0 ,(%inline - ,%sfp ,%ac0))
+                                 (set! ,(%mref ,%xp ,(constant continuation-stack-length-disp)) ,%ac0)
+                                 (set! ,(%mref ,%xp ,(constant continuation-stack-clength-disp)) ,%ac0)
+                                 (set! ,(%tc-ref scheme-stack-size) ,(%inline - ,(%tc-ref scheme-stack-size) ,%ac0))
+                                 ,(finish %xp))))
+                       ,(%seq
+                          (set! ,(%mref ,%xp ,(constant continuation-stack-length-disp)) ,%ac0)
+                          (set! ,%xp ,(%mref ,%xp ,(constant continuation-link-disp)))
+                          (goto ,Ltop)))))))))
       (Program : Program (ir) -> Program ()
         [(labels ([,l* ,le*] ...) ,l)
          `(labels ([,l* ,(map CaseLambdaExpr le* l*)] ...) ,l)])
@@ -11199,66 +11243,41 @@
            [(dorest3) (make-do-rest 3 frame-args-offset)]
            [(dorest4) (make-do-rest 4 frame-args-offset)]
            [(dorest5) (make-do-rest 5 frame-args-offset)]
+           [(reify-cc)
+            (let ([other-reg* (fold-left (lambda (live* kill) (remq kill live*))
+                                         (vector->list regvec)
+                                         ;; Registers used by `reify-cc-help` output,
+                                         ;; plus `%ts` so that we have one to allocate
+                                         (reg-list %xp %td %ac0 %ts))])
+              `(lambda ,(make-named-info-lambda "reify-cc" '(0)) 0 ()
+                ,(asm-enter
+                   (%seq
+                     (check-live ,other-reg* ...)
+                     ,(reify-cc-help
+                       (lambda (reg)
+                         (if (eq? reg %td)
+                             `(asm-return ,%td ,other-reg* ...)
+                             `(seq
+                                (set! ,%td ,reg)
+                                (asm-return ,%td ,other-reg* ...)))))))))]
            [(callcc)
             ;; Could be implemented using the `reify-cc` intrinsic, as follows,
-            ;; but the hand-coded version that inlines `reify-cc` is significantly
-            ;; faster
+            ;; but, we inline `reify-cc` to save a few instructions
+            #;
             `(lambda ,(make-named-info-lambda 'callcc '(1)) 0 ()
                ,(%seq
                   (set! ,%td (inline ,(intrinsic-info-asmlib reify-cc #f) ,%asmlibcall))
                   (set! ,(ref-reg %cp) ,(make-arg-opnd 1))
                   (set! ,(make-arg-opnd 1) ,%td)
                   ,(do-call 1)))
-            #;
-            ;; If this implementation changes, `reify-cc` should change, too
-            (let ([Ltop (make-local-label 'Ltop)])
-              `(lambda ,(make-named-info-lambda 'callcc '(1)) 0 ()
-                 ,(%seq
-                    (set! ,(ref-reg %cp) ,(make-arg-opnd 1))
-                    (set! ,%td ,(%tc-ref stack-link))
-                    (set! ,%xp ,%td)
-                    (label ,Ltop)
-                    (set! ,%ac0 ,(%mref ,%xp ,(constant continuation-stack-clength-disp)))
-                    (if ,(%inline eq?
-                           ,(%mref ,%xp ,(constant continuation-stack-length-disp))
-                           ,%ac0)
-                        ,(%seq
-                           (set! ,%ac0
-                             (literal ,(make-info-literal #f 'library-code
-                                         (lookup-libspec dounderflow)
-                                         (fx+ (constant code-data-disp) (constant size-rp-header)))))
-                           (if (if ,(%inline eq? ,%ref-ret ,%ac0)
-                                   ,(%inline eq?
-                                      ,(%mref ,%td ,(constant continuation-winders-disp))
-                                      ,(%tc-ref winders))
-                                   (false))
-                               ,(%seq
-                                  (set! ,(make-arg-opnd 1) ,%td)
-                                  ,(do-call 1))
-                               ,(%seq
-                                  (set! ,%xp ,(%constant-alloc type-closure (constant size-continuation)))
-                                  ; TODO: remove next line once get-room preserves %td
-                                  ; (set! ,%td ,(%tc-ref stack-link))
-                                  (set! ,(%mref ,%xp ,(constant continuation-code-disp))
-                                    (literal ,(make-info-literal #f 'library (lookup-libspec nuate) (constant code-data-disp))))
-                                  (set! ,(%mref ,%xp ,(constant continuation-return-address-disp)) ,%ref-ret)
-                                  (set! ,(%mref ,%xp ,(constant continuation-winders-disp)) ,(%tc-ref winders))
-                                  (set! ,%ref-ret ,%ac0)
-                                  (set! ,(%mref ,%xp ,(constant continuation-link-disp)) ,%td)
-                                  (set! ,(%tc-ref stack-link) ,%xp)
-                                  (set! ,%ac0 ,(%tc-ref scheme-stack))
-                                  (set! ,(%tc-ref scheme-stack) ,%sfp)
-                                  (set! ,(%mref ,%xp ,(constant continuation-stack-disp)) ,%ac0)
-                                  (set! ,%ac0 ,(%inline - ,%sfp ,%ac0))
-                                  (set! ,(%mref ,%xp ,(constant continuation-stack-length-disp)) ,%ac0)
-                                  (set! ,(%mref ,%xp ,(constant continuation-stack-clength-disp)) ,%ac0)
-                                  (set! ,(%tc-ref scheme-stack-size) ,(%inline - ,(%tc-ref scheme-stack-size) ,%ac0))
-                                  (set! ,(make-arg-opnd 1) ,%xp)
-                                  ,(do-call 1))))
-                        ,(%seq
-                           (set! ,(%mref ,%xp ,(constant continuation-stack-length-disp)) ,%ac0)
-                           (set! ,%xp ,(%mref ,%xp ,(constant continuation-link-disp)))
-                           (goto ,Ltop))))))]
+            `(lambda ,(make-named-info-lambda 'callcc '(1)) 0 ()
+               ,(%seq
+                  (set! ,(ref-reg %cp) ,(make-arg-opnd 1))
+                  ,(reify-cc-help
+                    (lambda (reg)
+                      (%seq
+                        (set! ,(make-arg-opnd 1) ,reg)
+                        ,(do-call 1))))))]
            [(call1cc)
             `(lambda ,(make-named-info-lambda 'call1cc '(1)) 0 ()
                ,(%seq
@@ -12318,60 +12337,6 @@
            [(dooverflood) ((make-do/ret (intrinsic-entry-live* dooverflood) (intrinsic-return-live* dooverflood)) #f "dooverflood" (lookup-c-entry handle-overflood))]
            [(scan-remembered-set) ((make-do/ret (intrinsic-entry-live* scan-remembered-set) (intrinsic-return-live* scan-remembered-set)) (in-context Lvalue (%tc-ref ret)) "scan-remembered-set" (lookup-c-entry scan-remembered-set))]
            [(get-room) ((make-do/ret (intrinsic-entry-live* get-room) (intrinsic-return-live* get-room)) (in-context Lvalue (%tc-ref ret)) "get-room" (lookup-c-entry get-more-room))]
-           #;
-           [(reify-cc) ((make-do/ret (intrinsic-entry-live* reify-cc) (intrinsic-return-live* reify-cc)) (in-context Lvalue (%tc-ref ret)) "reify-cc" (lookup-c-entry reify-continuation))]
-           [(reify-cc)
-            (let ([Ltop (make-local-label 'Ltop)]
-                  [other-reg* (fold-left (lambda (live* kill) (remq kill live*))
-                                         (vector->list regvec)
-                                         (reg-list %xp %td %ac0 %ts))])
-              `(lambda ,(make-info "reify-cc" '()) 0 ()
-                ,(asm-enter
-                 (%seq
-                  (check-live ,other-reg* ...)
-                  ,(%seq
-                    (set! ,%td ,(%tc-ref stack-link))
-                    (set! ,%xp ,%td)
-                    (label ,Ltop)
-                    (set! ,%ac0 ,(%mref ,%xp ,(constant continuation-stack-clength-disp)))
-                    (if ,(%inline eq?
-                           ,(%mref ,%xp ,(constant continuation-stack-length-disp))
-                           ,%ac0)
-                        ,(%seq
-                           (set! ,%ac0
-                             (literal ,(make-info-literal #f 'library-code
-                                         (lookup-libspec dounderflow)
-                                         (fx+ (constant code-data-disp) (constant size-rp-header)))))
-                           (if (if ,(%inline eq? ,%ref-ret ,%ac0)
-                                   ,(%inline eq?
-                                      ,(%mref ,%td ,(constant continuation-winders-disp))
-                                      ,(%tc-ref winders))
-                                   (false))
-                               (asm-return ,%td ,other-reg* ...)
-                               ,(%seq
-                                  (set! ,%xp ,(%constant-alloc type-closure (constant size-continuation)))
-                                  ; TODO: remove next line once get-room preserves %td
-                                  (set! ,%td ,(%tc-ref stack-link))
-                                  (set! ,(%mref ,%xp ,(constant continuation-code-disp))
-                                    (literal ,(make-info-literal #f 'library (lookup-libspec nuate) (constant code-data-disp))))
-                                  (set! ,(%mref ,%xp ,(constant continuation-return-address-disp)) ,%ref-ret)
-                                  (set! ,(%mref ,%xp ,(constant continuation-winders-disp)) ,(%tc-ref winders))
-                                  (set! ,%ref-ret ,%ac0)
-                                  (set! ,(%mref ,%xp ,(constant continuation-link-disp)) ,%td)
-                                  (set! ,(%tc-ref stack-link) ,%xp)
-                                  (set! ,%ac0 ,(%tc-ref scheme-stack))
-                                  (set! ,(%tc-ref scheme-stack) ,%sfp)
-                                  (set! ,(%mref ,%xp ,(constant continuation-stack-disp)) ,%ac0)
-                                  (set! ,%ac0 ,(%inline - ,%sfp ,%ac0))
-                                  (set! ,(%mref ,%xp ,(constant continuation-stack-length-disp)) ,%ac0)
-                                  (set! ,(%mref ,%xp ,(constant continuation-stack-clength-disp)) ,%ac0)
-                                  (set! ,(%tc-ref scheme-stack-size) ,(%inline - ,(%tc-ref scheme-stack-size) ,%ac0))
-                                  (set! ,%td ,%xp)
-                                  (asm-return ,%td ,other-reg* ...))))
-                        ,(%seq
-                           (set! ,(%mref ,%xp ,(constant continuation-stack-length-disp)) ,%ac0)
-                           (set! ,%xp ,(%mref ,%xp ,(constant continuation-link-disp)))
-                           (goto ,Ltop))))))))]
            [(nonprocedure-code)
             `(lambda ,(make-info "nonprocedure-code" '()) 0 ()
                ,(%seq

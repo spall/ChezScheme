@@ -2644,7 +2644,6 @@
      foreign-entry
      install-library-entry
      get-more-room
-     reify-continuation
      scan-remembered-set
      instantiate-code-object
      Sreturn

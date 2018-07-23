@@ -190,44 +190,6 @@ ptr S_single_continuation(k, n) ptr k; iptr n; {
     return Sfalse;
 }
 
-void S_reify_continuation() {
-  /* If this implementation changes, then the hand-coded `callcc`
-     implementation should also change */
-  ptr tc = get_thread_context();
-  ptr c = STACKLINK(tc);
-  ptr ret = FRAME(tc,0);
-  ptr xc = c;
-
-  for (xc = c; CONTLENGTH(xc) != CONTCLENGTH(xc); xc = CONTLINK(xc))
-    CONTLENGTH(xc) = CONTCLENGTH(xc);
-
-  if ((ret != DOUNDERFLOW)
-      || (CONTWINDERS(c) != WINDERS(tc))) {
-    ptr stack, sfp;
-    uptr len;
-
-    xc = c;
-    find_room(space_new, 0, type_closure, size_continuation, c);
-    CONTLINK(c) = xc;
-
-    CONTCODE(c) = CODEENTRYPOINT(Svector_ref(S_G.library_entry_vector, library_nuate));
-    CONTRET(c) = ret;
-    FRAME(tc,0) = DOUNDERFLOW;
-    CONTWINDERS(c) = WINDERS(tc);
-    stack = SCHEMESTACK(tc);
-    sfp = SFP(tc);
-    len = (uptr)sfp - (uptr)stack;
-    SCHEMESTACK(tc) = sfp;
-    CONTSTACK(c) = stack;
-    CONTLENGTH(c) = len;
-    CONTCLENGTH(c) = len;
-    SCHEMESTACKSIZE(tc) -= len;
-    STACKLINK(tc) = c;
-  }
-
-  TD(tc) = c;
-}
-
 void S_handle_overflow() {
     ptr tc = get_thread_context();
 
