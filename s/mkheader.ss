@@ -1003,6 +1003,8 @@
              (libspec-index (lookup-libspec nonprocedure-code)))
         (def "library_dounderflow"
              (libspec-index (lookup-libspec dounderflow)))
+        (def "library_other"
+             (libspec-index (lookup-libspec $attachment-shift-to-reified-continuation)))
 
       )))
 )

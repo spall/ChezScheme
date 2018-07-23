@@ -1712,8 +1712,7 @@
 )
 
 (define-symbol-flags* ([libraries] [flags system proc]) ; system procedures
-  ($attachment-shift-to-reified-continuation [flags])
-  ($attachment-curry-shift-to-reified-continuation [flags])
+  ($attachment-make-shift-to-reified-continuation [flags])
   ($address-in-heap? [flags])
   ($address->object [flags])
   ($allocate-thread-parameter [feature pthreads] [flags alloc])

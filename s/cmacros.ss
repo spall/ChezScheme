@@ -2604,6 +2604,7 @@
      (nuate #f 0 #f #t)
      (virtual-register #f 1 #t #t)
      (set-virtual-register! #f 1 #t #t)
+     ($attachment-shift-to-reified-continuation #f 0 #f #f)
   ))
 
 (let ()

@@ -1605,11 +1605,10 @@
          ;; No convert for a loop call, even if mode is 'pop
          `(call ,info ,mdcl ,x ,e* ...)]
         [(call ,info ,mdcl ,[e 'non-tail loop-x* -> e] ,[e* 'non-tail loop-x* -> e*] ...)
-         (case mode
-           [(pop)
-            (%primcall #f #f $attachment-shift-to-reified-continuation ,e* ... ,e)]
-           [else
-            `(call ,info ,mdcl ,e ,e* ...)])]
+         (let ([e (case mode
+                    [(pop) (%primcall #f #f $attachment-make-shift-to-reified-continuation ,e)]
+                    [else e])])
+           `(call ,info #f ,e ,e* ...))]
         [(foreign-call ,info ,[e 'non-tail loop-x* -> e] ,[e* 'non-tail loop-x* -> e*] ...)
          (return mode `(foreign-call ,info ,e ,e* ...))]
         [(fcallable ,info) (return mode `(fcallable ,info))]
@@ -1618,7 +1617,7 @@
          `(mvlet ,e ((,x** ...) ,interface* ,body*) ...)]
         [(mvcall ,info ,[e1 'non-tail loop-x* -> e1] ,[e2 'non-tail loop-x* -> e2])
          (let ([e1 (case mode
-                     [(pop) (%primcall #f #f $attachment-curry-shift-to-reified-continuation ,e1)]
+                     [(pop) (%primcall #f #f $attachment-make-shift-to-reified-continuation ,e1)]
                      [else e1])])
            `(mvcall ,info ,e1 ,e2))]
         [(let ([,x* ,[e* 'non-tail -> e*]] ...) ,[body])
@@ -2777,13 +2776,13 @@
              ,[e*] ...)
            (guard (and (eq? (primref-name pr) '$top-level-value) (symbol? d)))
            `(call ,info0 ,mdcl0 ,(Symref d) ,e* ...)]
-          [(call ,info ,mdcl ,pr ,e* ... ,pr2)
-           (guard (eq? (primref-name pr) '$shift-attachment-to-reified-continuation)
+          [(call ,info ,mdcl (call ,info2 ,mdcl2 ,pr0 ,pr) ,e* ...)
+           (guard (eq? (primref-name pr0) '$attachment-make-shift-to-reified-continuation)
                   ;; FIXME: need a less fragile way to avoid multiple results
-                  ;; Exclude primitives that return more than one value:
-                  (not (memq (primref-name pr2) '(values call/cc call-with-current-continuation call/1cc))))
+                  ;; Exclude inlined primitives that return more than one value:
+                  (not (memq (primref-name pr) '(values call/cc call-with-current-continuation call/1cc))))
            (cond
-            [(handle-prim (info-call-src info) (info-call-sexpr info) (primref-level pr2) (primref-name pr2) e*)
+            [(handle-prim (info-call-src info) (info-call-sexpr info) (primref-level pr) (primref-name pr) e*)
              => (lambda (e)
                   (let ([t (make-tmp 't)])
                     `(let ([,t ,(Expr e)])
@@ -2792,10 +2791,10 @@
                         ,t))))]
             [else
              (let ([e* (map Expr e*)])
-                (let ([info (if (any-set? (prim-mask abort-op) (primref-flags pr2))
+                (let ([info (if (any-set? (prim-mask abort-op) (primref-flags pr))
                                 (make-info-call (info-call-src info) (info-call-sexpr info) (info-call-check? info) #t #t)
                                 info)])
-                  `(call ,info ,mdcl ,(Symref (primref-name pr)) ,e* ... ,(Symref (primref-name pr2)))))])]
+                  `(call ,info ,mdcl (call ,info2 ,mdcl2 ,(Symref (primref-name pr0)) ,(Symref (primref-name pr))) ,e* ...)))])]
           [(call ,info ,mdcl ,pr ,e* ...)
            (cond
              [(handle-prim (info-call-src info) (info-call-sexpr info) (primref-level pr) (primref-name pr) e*) => Expr]
@@ -5385,7 +5384,8 @@
         (let ()
           (define hand-coded-closure?
             (lambda (name)
-              (not (memq name '(nuate nonprocedure-code error-invoke invoke)))))
+              (not (memq name '(nuate nonprocedure-code error-invoke invoke
+                                      $attachment-shift-to-reified-continuation)))))
           (define-inline 2 $hand-coded
             [(name)
              (nanopass-case (L7 Expr) name
@@ -5477,6 +5477,18 @@
           (define-tc-parameter default-record-equal-procedure default-record-equal-procedure)
           (define-tc-parameter default-record-hash-procedure default-record-hash-procedure)
           )
+
+        (define-inline 3 $attachment-make-shift-to-reified-continuation
+          [(e-proc)
+           (bind #f (e-proc)
+             (bind #t ([c (%constant-alloc type-closure (fx* 3 (constant ptr-bytes)))])
+               (%seq
+                 (set! ,(%mref ,c ,(constant closure-code-disp))
+                       (literal ,(make-info-literal #f 'library
+                                      (lookup-libspec $attachment-shift-to-reified-continuation)
+                                      (constant code-data-disp))))
+                 (set! ,(%mref ,c ,(constant closure-data-disp)) ,e-proc)
+                 ,c)))])
 
         (define-inline 3 $install-guardian
           [(e-obj e-rep e-tconc)
@@ -12385,6 +12397,29 @@
                           (out %ac0 %ac1 %cp %xp %yp %ts %td scheme-args extra-regs))))
                   (set! ,%ac0 ,(%constant svoid))
                   (jump ,%ref-ret (,%ac0))))]
+           [($attachment-shift-to-reified-continuation)
+            (let ([info (make-info "$attachment-shift-to-reified-continuation" '())])
+              (info-lambda-fv*-set! info '(proc))
+              `(lambda ,info 0 ()
+                ,(%seq
+                  (set! ,%ac1 ,%ac0) ; save argument count
+                  (set! ,%td (inline ,(intrinsic-info-asmlib reify-cc #f) ,%asmlibcall))
+                  (set! ,%ts ,(%mref ,%td ,(constant continuation-winders-disp)))
+                  (set! ,(%mref ,%td ,(constant continuation-winders-disp)) ,(%mref ,%ts ,(constant pair-cdr-disp)))
+                  (set! ,%ac0 ,%ac1) ; restore argument count
+                  ,(meta-cond
+                    [(real-register? '%cp)
+                     (%seq
+                       (set! ,%cp ,(%mref ,%cp ,(constant closure-data-disp)))
+                       (jump ,(%mref ,%cp ,(constant closure-code-disp))
+                             (,%ac0 ,%cp ,(reg-cons* %ret arg-registers) ...)))]
+                    [else
+                     (%seq
+                       (set! ,%td ,(ref-reg %cp))
+                       (set! ,%td ,(%mref ,%td ,(constant closure-data-disp)))
+                       (set! ,(ref-reg %cp) ,%td)
+                       (jump ,(%mref ,%td ,(constant closure-code-disp))
+                             (,%ac0 ,(reg-cons* %ret arg-registers) ...)))]))))]
            [(bytevector=?)
             (let ([bv1 (make-tmp 'bv1)] [bv2 (make-tmp 'bv2)] [idx (make-tmp 'idx)] [len2 (make-tmp 'len2)])
               (define (argcnt->max-fv n) (max (- n (length arg-registers)) 0))
