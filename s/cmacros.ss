@@ -1880,6 +1880,26 @@
 (define-constant time-collector-cpu 5)
 (define-constant time-collector-real 6)
 
+(define-syntax make-winder
+  (syntax-rules ()
+    [(_ critical? in out) (vector critical? in out)]))
+(define-syntax winder-critical? (syntax-rules () [(_ w) (vector-ref w 0)]))
+(define-syntax winder-in (syntax-rules () [(_ w) (vector-ref w 1)]))
+(define-syntax winder-out (syntax-rules () [(_ w) (vector-ref w 2)]))
+(define-syntax winder-attachment? (syntax-rules () [(_ w) (pair? w)]))
+
+(define-syntax winder?
+  (syntax-rules ()
+    [(_ ?w)
+     (let ([w ?w])
+       (or (and (vector? w)
+                (fx= (vector-length w) 3)
+                (boolean? (winder-critical? w))
+                (procedure? (winder-in w))
+                (procedure? (winder-out w)))
+           (and (pair? w)
+                (eq? 'attachment (cdr w)))))]))
+
 (define-syntax default-run-cp0
   (lambda (x)
     (syntax-case x ()

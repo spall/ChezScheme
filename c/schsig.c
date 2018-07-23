@@ -190,12 +190,6 @@ ptr S_single_continuation(k, n) ptr k; iptr n; {
     return Sfalse;
 }
 
-void reify_done()
-{
-}
-
-static void (*do_reify_done)() = reify_done;
-
 void S_reify_continuation() {
   /* If this implementation changes, then the hand-coded `callcc`
      implementation should also change */
@@ -232,7 +226,6 @@ void S_reify_continuation() {
   }
 
   TD(tc) = c;
-  do_reify_done();
 }
 
 void S_handle_overflow() {

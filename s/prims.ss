@@ -1415,14 +1415,12 @@
      ($current-stack-link k)]))
 
 (define $current-winders
-  (let ()
-    (include "types.ss")
-    (case-lambda
-      [() ($current-winders)]
-      [(w)
-       (unless (and (list? w) (andmap winder-like? w))
-         ($oops '$current-winders "malformed winders ~s" w))
-       ($current-winders w)])))
+  (case-lambda
+    [() ($current-winders)]
+    [(w)
+     (unless (and (list? w) (andmap (lambda (x) (winder? x)) w))
+       ($oops '$current-winders "malformed winders ~s" w))
+     ($current-winders w)]))
 
 (define lock-object
   (foreign-procedure "(cs)lock_object" (scheme-object) void))

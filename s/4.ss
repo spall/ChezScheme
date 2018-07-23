@@ -282,14 +282,12 @@
 )
 
 (let ()
-  (include "types.ss")
-
-  (define disable/enable (make-winder disable-interrupts enable-interrupts))
+  (define disable/enable (make-winder #f disable-interrupts enable-interrupts))
 
   (define (dwind in body out)
     (let ((old-winders ($current-winders)))
       (in)
-      ($current-winders (cons (make-winder in out) old-winders))
+      ($current-winders (cons (make-winder #f in out) old-winders))
       (call-with-values
         body
         (case-lambda
@@ -308,7 +306,7 @@
       (disable-interrupts)
       ($current-winders d/e+old-winders)
       (in)
-      ($current-winders (cons (make-critical-winder in out) old-winders))
+      ($current-winders (cons (make-winder #t in out) old-winders))
       (enable-interrupts)
       (call-with-values
         body
@@ -363,8 +361,8 @@
         (let f ((old old))
           (unless (eq? old tail)
             (let ([w (car old)] [old (cdr old)])
-              (when (winder? w)
-                (if (critical-winder? w)
+              (unless (winder-attachment? w)
+                (if (winder-critical? w)
                   (begin
                     (disable-interrupts)
                     ($current-winders (cons disable/enable old))
@@ -379,8 +377,8 @@
           (unless (eq? new tail)
             (let ([w (car new)])
               (f (cdr new))
-              (when (winder? w)
-                (if (critical-winder? w)
+              (unless (winder-attachment? w)
+                (if (winder-critical? w)
                   (begin
                     (disable-interrupts)
                     ($current-winders (cons disable/enable (cdr new)))

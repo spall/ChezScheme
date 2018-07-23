@@ -382,15 +382,9 @@
     (Expr (e body)
       (+ (loop x (x* ...) body) => (loop x body))))
 
-  (define attachment-set-op?
-    (lambda (x)
-      (memq x '(push pop set reify-and-set get))))
-  (define attachment-get-op?
-    (lambda (x)
-      (eq? x 'get)))
   (define attachment-op?
     (lambda (x)
-      (or (attachment-set-op? x) (attachment-get-op? x))))
+      (memq x '(push pop set reify-and-set))))
 
  ; exposed attachment-manipulation operations
   (define-language L4.9375 (extends L4.875)
@@ -398,7 +392,8 @@
      (+ (attachment-op (aop))))
     (entry CaseLambdaExpr)
     (Expr (e body)
-      (+ (attachment aop e* ...))))
+      (+ (attachment-set aop e* ...)
+         (attachment-get e* ...))))
 
  ; moves all case lambda expressions into rhs of letrec
   (define-language L5 (extends L4.9375)
@@ -674,7 +669,7 @@
          (inline info prim t* ...)               => (inline info prim t* ...)
          (mvcall info e t)                       => (mvcall e t)
          (foreign-call info t t* ...)
-         (attachment aop t* ...)))
+         (attachment-get t* ...)))
     (Expr (e body)
       (- lvalue
          (values info e* ...)
@@ -688,7 +683,7 @@
          (set! lvalue e)
          (mvcall info e1 e2)
          (foreign-call info e e* ...)
-         (attachment aop e* ...))
+         (attachment-get e* ...))
       (+ rhs
          (values info t* ...)
          (set! lvalue rhs))))
@@ -712,22 +707,17 @@
  ; marked as literals so they will not be turned into scheme constants again.
   (define-language L11 (extends L10.5)
     (terminals
-      (- (primitive (prim))
-         (attachment-op (aop)))
+      (- (primitive (prim)))
       (+ (value-primitive (value-prim))
          (pred-primitive (pred-prim))
-         (effect-primitive (effect-prim))
-         (attachment-set-op (saop))
-         (attachment-get-op (gaop))))
+         (effect-primitive (effect-prim))))
     (entry Program)
     (CaseLambdaClause (cl)
       (- (clause (x* ...) (local* ...) mcp interface body))
       (+ (clause (x* ...) (local* ...) mcp interface tlbody)))
     (Rhs (rhs)
-      (- (inline info prim t* ...)
-         (attachment aop t* ...))
-      (+ (inline info value-prim t* ...)               => (inline info value-prim t* ...)
-         (attachment gaop t* ...)))
+      (- (inline info prim t* ...))
+      (+ (inline info value-prim t* ...)               => (inline info value-prim t* ...)))
     (Expr (e body)
       (- rhs
          (label l body)
@@ -741,7 +731,8 @@
          (pariah)
          (trap-check ioc e)
          (overflow-check e)
-         (profile src)))
+         (profile src)
+         (attachment-set aop e* ...)))
     (Tail (tl tlbody)
       (+ rhs
          (if p0 tl1 tl2)
@@ -772,7 +763,7 @@
             (mvset (mdcl t0 t1 ...) (t* ...) ((x** ...) interface* l*) ...)
          (mvcall info mdcl (maybe t0) t1 ... (t* ...)) => (mvcall mdcl t0 t1 ... (t* ...))
          (foreign-call info t t* ...)
-         (attachment saop t* ...)
+         (attachment-set aop t* ...)
          (tail tl))))
 
   (define-language L11.5 (extends L11)

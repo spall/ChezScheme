@@ -903,7 +903,7 @@
       (declare-intrinsic dofretu32* dofretu32* (%ac0 %ts %td %cp) (%ac0) (%xp))
       (declare-intrinsic get-room get-room () (%xp) (%xp))
       (declare-intrinsic scan-remembered-set scan-remembered-set () () ())
-      (declare-intrinsic reify-cc reify-cc () (%td) (%td))
+      (declare-intrinsic reify-cc reify-cc () () ())
       (declare-intrinsic dooverflow dooverflow () () ())
       (declare-intrinsic dooverflood dooverflood () (%xp) ())
       ; a dorest routine takes all of the register and frame arguments from the rest
@@ -1555,9 +1555,10 @@
         (define return
           (lambda (mode x)
             (case mode
-              [(pop) `(seq
-                        (attachment pop)
-                        ,x)]
+              [(pop) (with-output-language (L4.9375 Expr)
+                       `(seq
+                          (attachment-set pop)
+                          ,x))]
               [else x])))
         (define ->in-wca
           (lambda (mode)
@@ -1578,13 +1579,13 @@
          (case mode
            [(pop tail/reified)
             ;; Definitely an attachment in place
-            `(seq (attachment set ,e1) ,body)]
+            `(seq (attachment-set set ,e1) ,body)]
            [(tail)
             ;; Check dynamically for reified continuation and attachment
-            `(seq (attachment reify-and-set ,e1) ,body)]
+            `(seq (attachment-set reify-and-set ,e1) ,body)]
            [(non-tail)
             ;; Push attachment; `body` has been adjusted to pop
-            `(seq (attachment push ,e1) body)])]
+            `(seq (attachment-set push ,e1) ,body)])]
         [(call ,info ,mdcl ,pr ,[e1 'non-tail loop-x* -> e1]
                (case-lambda ,info2 (clause (,x) ,interface ,[body mode loop-x* -> body])))
          (guard (and (eq? (primref-name pr) 'call-with-current-continuation-attachment)
@@ -1595,10 +1596,10 @@
             `(let ([,x ,e1]) ,body)]
            [(pop tail/reified)
             ;; Defintely an attachment in place
-            `(seq ,e1 (let ([,x (attachment get)]) ,body))]
+            `(seq ,e1 (let ([,x (attachment-get)]) ,body))]
            [else
             ;; Check dynamically for attachment
-            `(let ([,x (attachment get ,e1)]) ,body)])]
+            `(let ([,x (attachment-get ,e1)]) ,body)])]
         [(call ,info ,mdcl ,x ,[e* 'non-tail loop-x* -> e*] ...)
          (guard (memq x loop-x*))
          ;; No convert for a loop call, even if mode is 'pop
@@ -2787,7 +2788,7 @@
                   (let ([t (make-tmp 't)])
                     `(let ([,t ,(Expr e)])
                        (seq
-                        (attachment pop)
+                        (attachment-set pop)
                         ,t))))]
             [else
              (let ([e* (map Expr e*)])
@@ -9658,10 +9659,14 @@
          (if e0?
              (Triv* (cons e0? e1*) (lambda (t*) (k `(call ,info ,mdcl ,(car t*) ,(cdr t*) ...))))
              (Triv* e1* (lambda (t*) (k `(call ,info ,mdcl #f ,t* ...)))))]
-        [(attachment ,aop ,e* ...)
+        [(attachment-get ,e* ...)
          (Triv* e*
            (lambda (t*)
-             `(attachment ,aop ,t* ...)))]
+             (k `(attachment-get ,t* ...))))]
+        [(attachment-set ,aop ,e* ...)
+         (Triv* e*
+           (lambda (t*)
+             (k `(attachment-set ,aop ,t* ...))))]
         [(foreign-call ,info ,e0 ,e1* ...)
          (Triv* (cons e0 e1*)
            (lambda (t*)
@@ -10005,6 +10010,8 @@
         [(set! ,[lvalue] (mvcall ,info ,mdcl ,[t0?] ,[t1] ... (,[t*] ...)))
          (guard (info-call-error? info) (fx< (debug-level) 2))
          `(tail (mvcall ,info ,mdcl ,t0? ,t1 ... (,t* ...)))]
+        [(set! ,[lvalue] (attachment-get ,[t*] ...))
+         `(set! ,lvalue (attachment-get ,t* ...))]
         [(label ,l ,[ebody]) `(seq (label ,l) ,ebody)]
         [(trap-check ,ioc ,[ebody]) `(seq (trap-check ,ioc) ,ebody)]
         [(overflow-check ,[ebody]) `(seq (overflow-check) ,ebody)]
@@ -10022,7 +10029,8 @@
                      (%seq ,e (goto ,join)
                        ,(f `(seq (label ,(car l*)) ,(car e*)) (cdr l*) (cdr e*)))))
               (label ,join)))]
-        [(values ,info ,t* ...) `(nop)])
+        [(values ,info ,t* ...) `(nop)]
+        [(attachment-get ,t* ...) `(nop)])
       (Tail : Expr (ir) -> Tail ()
         [(inline ,info ,prim ,[t*] ...)
          (guard (pred-primitive? prim))
@@ -11195,13 +11203,13 @@
             ;; Could be implemented using the `reify-cc` intrinsic, as follows,
             ;; but the hand-coded version that inlines `reify-cc` is significantly
             ;; faster
-            #;
             `(lambda ,(make-named-info-lambda 'callcc '(1)) 0 ()
                ,(%seq
                   (set! ,%td (inline ,(intrinsic-info-asmlib reify-cc #f) ,%asmlibcall))
                   (set! ,(ref-reg %cp) ,(make-arg-opnd 1))
                   (set! ,(make-arg-opnd 1) ,%td)
                   ,(do-call 1)))
+            #;
             ;; If this implementation changes, `reify-cc` should change, too
             (let ([Ltop (make-local-label 'Ltop)])
               `(lambda ,(make-named-info-lambda 'callcc '(1)) 0 ()
@@ -11352,6 +11360,7 @@
                     (set! ,%ac0 (immediate 1))
                     (label ,Lmvreturn)
                     (set! ,xp/cp ,(%tc-ref stack-link))
+                    ;(set! ,(%tc-ref winders) ,(%mref ,xp/cp ,(constant continuation-winders-disp))) ; potentially pops an attachment
                     ,(meta-cond
                        [(real-register? '%cp) `(nop)]
                        [else `(set! ,(ref-reg %cp) ,xp/cp)])
@@ -11392,10 +11401,8 @@
       (Rhs : Rhs (ir) -> Rhs ()
         [(mvcall ,info ,mdcl ,t0? ,t1* ... (,t* ...))
          ($oops who "Effect is responsible for handling mvcalls")]
-        [(attachment ,gaop)
-         ($oops who "attachment-todo")]
-        [(attachment ,gaop ,t)
-         ($oops who "attachment-todo")])
+        [(attachment-get ,t* ...)
+         ($oops who "Effect is responsible for handling attachment-gets")])
       (Effect : Effect (ir) -> Effect ()
         [(do-rest ,fixed-args)
          (if (fx<= fixed-args dorest-intrinsic-max)
@@ -11440,10 +11447,66 @@
          (build-foreign-call info t0 t1* #f #t)]
         [(set! ,[lvalue] (foreign-call ,info ,[t0] ,[t1*] ...))
          (build-foreign-call info t0 t1* lvalue #t)]
-        [(attachment ,saop ,t)
-         ($oops who "attachment-todo")]
-        [(attachment ,saop ,t)
-         ($oops who "attachment-todo")])
+        [(set! ,[lvalue] (attachment-get))
+         ;; No default expression => an attachment is certainly available
+         (let ([wdr (make-tmp 'wdr)])
+           (%seq
+            (set! ,wdr ,(%tc-ref winders))
+            (set! ,wdr ,(%mref ,wdr ,(constant pair-car-disp)))
+            (set! ,lvalue ,(%mref ,wdr ,(constant pair-car-disp)))))]
+        [(set! ,[lvalue] (attachment-get ,[t]))
+         ;; Default expression => need to check for reified continuation
+         ;; and winder beyond it. For now, we always reify the continuation
+         ;; to simplify the check
+         (let ([wdr (make-tmp 'wdr)])
+           (%seq
+             (set! ,%td (inline ,(intrinsic-info-asmlib reify-cc #f) ,%asmlibcall))
+             (set! ,wdr ,(%tc-ref winders))
+             (if ,(%inline eq? ,(%mref ,%td ,(constant continuation-winders-disp)) ,wdr)
+                 (set! ,lvalue ,t)
+                 (seq
+                  (set! ,wdr ,(%mref ,wdr ,(constant pair-car-disp)))
+                  (set! ,lvalue ,(%mref ,wdr ,(constant pair-car-disp)))))))]
+        [(attachment-set ,aop)
+         (case aop
+           [(pop)
+            (let ([wdr (make-tmp 'wdr)])
+              (%seq
+                (set! ,wdr ,(%tc-ref winders))
+                (set! ,(%tc-ref winders) ,(%mref ,wdr ,(constant pair-cdr-disp)))))]
+           [else
+            ($oops who "unexpected attachment-set mode ~s" aop)])]
+        [(attachment-set ,aop ,[t])
+         (let ([wdr (make-tmp 'wdr)])
+           (define (make-push)
+             (let ([p (make-tmp 'pr)])
+               ;; Generate
+               ;;  ($current-winders (cons (cons t 'attachment) ($current-winders)))
+               (%seq
+                (set! ,p ,(%constant-alloc type-pair (fx* 2 (constant size-pair))))
+                (set! ,(%mref ,p ,(fx+ (constant size-pair) (constant pair-car-disp))) ,t)
+                (set! ,(%mref ,p ,(fx+ (constant size-pair) (constant pair-cdr-disp))) (literal ,(make-info-literal #f 'object 'attachment 0)))
+                (set! ,(%mref ,p ,(constant pair-car-disp)) ,(%inline + ,p ,(%constant size-pair)))
+                (set! ,(%mref ,p ,(constant pair-cdr-disp)) ,wdr)
+                (set! ,(%tc-ref winders) ,p))))
+           (case aop
+             [(push)
+              (make-push)]
+             [(set)
+              (%seq
+               (set! ,wdr ,(%tc-ref winders))
+               (set! ,wdr ,(%mref ,wdr ,(constant pair-cdr-disp)))
+               ,(make-push))]
+             [(reify-and-set)
+              (%seq
+               (set! ,%td (inline ,(intrinsic-info-asmlib reify-cc #f) ,%asmlibcall))
+               (set! ,wdr ,(%tc-ref winders))
+               (if ,(%inline eq? ,(%mref ,%td ,(constant continuation-winders-disp)) ,wdr)
+                   (nop)
+                   (set! ,wdr ,(%mref ,wdr ,(constant pair-cdr-disp))))
+               ,(make-push))]
+             [else
+              ($oops who "unexpected attachment-set mode ~s" aop)]))])
       (Tail : Tail  (ir) -> Tail  ()
         [(entry-point (,x* ...) ,dcl ,mcp ,tlbody)
          (unless (andmap (lambda (x) (eq? (uvar-type x) 'ptr)) x*)
@@ -12256,6 +12319,55 @@
            [(scan-remembered-set) ((make-do/ret (intrinsic-entry-live* scan-remembered-set) (intrinsic-return-live* scan-remembered-set)) (in-context Lvalue (%tc-ref ret)) "scan-remembered-set" (lookup-c-entry scan-remembered-set))]
            [(get-room) ((make-do/ret (intrinsic-entry-live* get-room) (intrinsic-return-live* get-room)) (in-context Lvalue (%tc-ref ret)) "get-room" (lookup-c-entry get-more-room))]
            [(reify-cc) ((make-do/ret (intrinsic-entry-live* reify-cc) (intrinsic-return-live* reify-cc)) (in-context Lvalue (%tc-ref ret)) "reify-cc" (lookup-c-entry reify-continuation))]
+           #;
+           [(reify-cc)
+            (let ([Ltop (make-local-label 'Ltop)])
+              `(lambda ,(make-info "reify-cc" '()) 0 ()
+                ,(asm-enter
+                 (%seq
+                  (check-live)
+                  ,(%seq
+                    (set! ,%td ,(%tc-ref stack-link))
+                    (set! ,%xp ,%td)
+                    (label ,Ltop)
+                    (set! ,%ac0 ,(%mref ,%xp ,(constant continuation-stack-clength-disp)))
+                    (if ,(%inline eq?
+                           ,(%mref ,%xp ,(constant continuation-stack-length-disp))
+                           ,%ac0)
+                        ,(%seq
+                           (set! ,%ac0
+                             (literal ,(make-info-literal #f 'library-code
+                                         (lookup-libspec dounderflow)
+                                         (fx+ (constant code-data-disp) (constant size-rp-header)))))
+                           (if (if ,(%inline eq? ,%ref-ret ,%ac0)
+                                   ,(%inline eq?
+                                      ,(%mref ,%td ,(constant continuation-winders-disp))
+                                      ,(%tc-ref winders))
+                                   (false))
+                               (asm-return ,%td)
+                               ,(%seq
+                                  (set! ,%xp ,(%constant-alloc type-closure (constant size-continuation)))
+                                  ; TODO: remove next line once get-room preserves %td
+                                  (set! ,%td ,(%tc-ref stack-link))
+                                  (set! ,(%mref ,%xp ,(constant continuation-code-disp))
+                                    (literal ,(make-info-literal #f 'library (lookup-libspec nuate) (constant code-data-disp))))
+                                  (set! ,(%mref ,%xp ,(constant continuation-return-address-disp)) ,%ref-ret)
+                                  (set! ,(%mref ,%xp ,(constant continuation-winders-disp)) ,(%tc-ref winders))
+                                  (set! ,%ref-ret ,%ac0)
+                                  (set! ,(%mref ,%xp ,(constant continuation-link-disp)) ,%td)
+                                  (set! ,(%tc-ref stack-link) ,%xp)
+                                  (set! ,%ac0 ,(%tc-ref scheme-stack))
+                                  (set! ,(%tc-ref scheme-stack) ,%sfp)
+                                  (set! ,(%mref ,%xp ,(constant continuation-stack-disp)) ,%ac0)
+                                  (set! ,%ac0 ,(%inline - ,%sfp ,%ac0))
+                                  (set! ,(%mref ,%xp ,(constant continuation-stack-length-disp)) ,%ac0)
+                                  (set! ,(%mref ,%xp ,(constant continuation-stack-clength-disp)) ,%ac0)
+                                  (set! ,(%tc-ref scheme-stack-size) ,(%inline - ,(%tc-ref scheme-stack-size) ,%ac0))
+                                  (asm-return ,%td))))
+                        ,(%seq
+                           (set! ,(%mref ,%xp ,(constant continuation-stack-length-disp)) ,%ac0)
+                           (set! ,%xp ,(%mref ,%xp ,(constant continuation-link-disp)))
+                           (goto ,Ltop))))))))]
            [(nonprocedure-code)
             `(lambda ,(make-info "nonprocedure-code" '()) 0 ()
                ,(%seq
