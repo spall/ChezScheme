@@ -903,7 +903,7 @@
       (declare-intrinsic dofretu32* dofretu32* (%ac0 %ts %td %cp) (%ac0) (%xp))
       (declare-intrinsic get-room get-room () (%xp) (%xp))
       (declare-intrinsic scan-remembered-set scan-remembered-set () () ())
-      (declare-intrinsic reify-cc reify-cc () () ())
+      (declare-intrinsic reify-cc reify-cc (%xp %ac0 %ts) () ())
       (declare-intrinsic dooverflow dooverflow () () ())
       (declare-intrinsic dooverflood dooverflood () (%xp) ())
       ; a dorest routine takes all of the register and frame arguments from the rest
@@ -11238,7 +11238,7 @@
                                ,(%seq
                                   (set! ,%xp ,(%constant-alloc type-closure (constant size-continuation)))
                                   ; TODO: remove next line once get-room preserves %td
-                                  (set! ,%td ,(%tc-ref stack-link))
+                                  ; (set! ,%td ,(%tc-ref stack-link))
                                   (set! ,(%mref ,%xp ,(constant continuation-code-disp))
                                     (literal ,(make-info-literal #f 'library (lookup-libspec nuate) (constant code-data-disp))))
                                   (set! ,(%mref ,%xp ,(constant continuation-return-address-disp)) ,%ref-ret)
@@ -12318,14 +12318,17 @@
            [(dooverflood) ((make-do/ret (intrinsic-entry-live* dooverflood) (intrinsic-return-live* dooverflood)) #f "dooverflood" (lookup-c-entry handle-overflood))]
            [(scan-remembered-set) ((make-do/ret (intrinsic-entry-live* scan-remembered-set) (intrinsic-return-live* scan-remembered-set)) (in-context Lvalue (%tc-ref ret)) "scan-remembered-set" (lookup-c-entry scan-remembered-set))]
            [(get-room) ((make-do/ret (intrinsic-entry-live* get-room) (intrinsic-return-live* get-room)) (in-context Lvalue (%tc-ref ret)) "get-room" (lookup-c-entry get-more-room))]
-           [(reify-cc) ((make-do/ret (intrinsic-entry-live* reify-cc) (intrinsic-return-live* reify-cc)) (in-context Lvalue (%tc-ref ret)) "reify-cc" (lookup-c-entry reify-continuation))]
            #;
+           [(reify-cc) ((make-do/ret (intrinsic-entry-live* reify-cc) (intrinsic-return-live* reify-cc)) (in-context Lvalue (%tc-ref ret)) "reify-cc" (lookup-c-entry reify-continuation))]
            [(reify-cc)
-            (let ([Ltop (make-local-label 'Ltop)])
+            (let ([Ltop (make-local-label 'Ltop)]
+                  [other-reg* (fold-left (lambda (live* kill) (remq kill live*))
+                                         (vector->list regvec)
+                                         (reg-list %xp %td %ac0 %ts))])
               `(lambda ,(make-info "reify-cc" '()) 0 ()
                 ,(asm-enter
                  (%seq
-                  (check-live)
+                  (check-live ,other-reg* ...)
                   ,(%seq
                     (set! ,%td ,(%tc-ref stack-link))
                     (set! ,%xp ,%td)
@@ -12344,7 +12347,7 @@
                                       ,(%mref ,%td ,(constant continuation-winders-disp))
                                       ,(%tc-ref winders))
                                    (false))
-                               (asm-return ,%td)
+                               (asm-return ,%td ,other-reg* ...)
                                ,(%seq
                                   (set! ,%xp ,(%constant-alloc type-closure (constant size-continuation)))
                                   ; TODO: remove next line once get-room preserves %td
@@ -12363,7 +12366,8 @@
                                   (set! ,(%mref ,%xp ,(constant continuation-stack-length-disp)) ,%ac0)
                                   (set! ,(%mref ,%xp ,(constant continuation-stack-clength-disp)) ,%ac0)
                                   (set! ,(%tc-ref scheme-stack-size) ,(%inline - ,(%tc-ref scheme-stack-size) ,%ac0))
-                                  (asm-return ,%td))))
+                                  (set! ,%td ,%xp)
+                                  (asm-return ,%td ,other-reg* ...))))
                         ,(%seq
                            (set! ,(%mref ,%xp ,(constant continuation-stack-length-disp)) ,%ac0)
                            (set! ,%xp ,(%mref ,%xp ,(constant continuation-link-disp)))
