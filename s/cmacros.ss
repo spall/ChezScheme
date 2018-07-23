@@ -1296,7 +1296,7 @@
    [iptr stack-clength]
    [ptr link]
    [ptr return-address]
-   [ptr winders]))
+   [ptr winders])) ; #f => not recorded
 
 (define-primitive-structure-disps record type-typed-object
   ([ptr type]

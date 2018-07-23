@@ -11056,6 +11056,11 @@
                              ; (new) stack base in sfp, clength in ac1, old frame base in yp
                              ; set up return address and stack link
                              (set! ,(%tc-ref stack-link) ,(%mref ,xp/cp ,(constant continuation-link-disp)))
+                             ; potentially pop an attachment
+                             (set! ,%ts ,(%mref ,xp/cp ,(constant continuation-winders-disp)))
+                             (if ,(%inline eq? ,(%constant sfalse) ,%ts)
+                                 (nop)
+                                 (set! ,(%tc-ref winders) ,%ts))
                              ; set %td to end of the destination area / base of stack values dest
                              (set! ,%td ,(%inline + ,%td ,%sfp))
                              ; don't shift if no stack values
@@ -11191,11 +11196,11 @@
                             (literal ,(make-info-literal #f 'library-code
                                         (lookup-libspec dounderflow)
                                         (fx+ (constant code-data-disp) (constant size-rp-header)))))
-                          (if (if ,(%inline eq? ,%ref-ret ,%ac0)
-                                  ,(%inline eq?
+                          (if (if ,(%inline eq?
                                      ,(%mref ,%td ,(constant continuation-winders-disp))
-                                     ,(%tc-ref winders))
-                                  (false))
+                                     ,(%constant sfalse))
+                                  (false)
+                                  ,(%inline eq? ,%ref-ret ,%ac0))
                               ,(finish %td)
                               ,(%seq
                                  (set! ,%xp ,(%constant-alloc type-closure (constant size-continuation)))
@@ -11287,11 +11292,11 @@
                     (literal ,(make-info-literal #f 'library-code
                                    (lookup-libspec dounderflow)
                                    (fx+ (constant code-data-disp) (constant size-rp-header)))))
-                  (if (if ,(%inline eq? ,%ref-ret ,%ac0)
-                          ,(%inline eq?
+                  (if (if ,(%inline eq?
                              ,(%mref ,%td ,(constant continuation-winders-disp))
-                             ,(%tc-ref winders))
-                          (false))
+                             ,(%constant sfalse))
+                          (false)
+                          ,(%inline eq? ,%ref-ret ,%ac0))
                       ,(%seq
                          (set! ,(make-arg-opnd 1) ,%td)
                          ,(do-call 1))
@@ -11379,7 +11384,6 @@
                     (set! ,%ac0 (immediate 1))
                     (label ,Lmvreturn)
                     (set! ,xp/cp ,(%tc-ref stack-link))
-                    ;(set! ,(%tc-ref winders) ,(%mref ,xp/cp ,(constant continuation-winders-disp))) ; potentially pops an attachment
                     ,(meta-cond
                        [(real-register? '%cp) `(nop)]
                        [else `(set! ,(ref-reg %cp) ,xp/cp)])
@@ -11510,7 +11514,9 @@
                 (set! ,(%tc-ref winders) ,p))))
            (case aop
              [(push)
-              (make-push)]
+              (%seq
+               (set! ,wdr ,(%tc-ref winders))
+               ,(make-push))]
              [(set)
               (%seq
                (set! ,wdr ,(%tc-ref winders))
