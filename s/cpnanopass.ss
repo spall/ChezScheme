@@ -11229,15 +11229,11 @@
                             (literal ,(make-info-literal #f 'library-code
                                         (lookup-libspec dounderflow)
                                         (fx+ (constant code-data-disp) (constant size-rp-header)))))
-                          (if (if ,(%inline eq? ,%ref-ret ,%ac0)
-                                   (if ,(%inline eq?
-                                          ,(%mref ,%td ,(constant continuation-attachments-disp))
-                                          ,(%constant sfalse))
-                                       (false)
-                                       ,(%inline eq?
-                                          ,(%mref ,%td ,(constant continuation-winders-disp))
-                                          ,(%tc-ref winders)))
-                                   (false))
+                          (if (if ,(%inline eq?
+                                        ,(%mref ,%td ,(constant continuation-attachments-disp))
+                                        ,(%constant sfalse))
+                                   (false)
+                                   ,(%inline eq? ,%ref-ret ,%ac0))
                               ,(finish %td)
                               ,(%seq
                                  (set! ,%xp ,(%constant-alloc type-closure (constant size-continuation)))
@@ -11330,15 +11326,11 @@
                     (literal ,(make-info-literal #f 'library-code
                                    (lookup-libspec dounderflow)
                                    (fx+ (constant code-data-disp) (constant size-rp-header)))))
-                  (if (if ,(%inline eq? ,%ref-ret ,%ac0)
-                          (if ,(%inline eq?
-                                 ,(%mref ,%td ,(constant continuation-attachments-disp))
-                                ,(%constant sfalse))
-                              (false)
-                              ,(%inline eq?
-                                 ,(%mref ,%td ,(constant continuation-winders-disp))
-                                 ,(%tc-ref winders)))
-                          (false))
+                  (if (if ,(%inline eq?
+                               ,(%mref ,%td ,(constant continuation-attachments-disp))
+                               ,(%constant sfalse))
+                           (false)
+                           ,(%inline eq? ,%ref-ret ,%ac0))
                       ,(%seq
                          (set! ,(make-arg-opnd 1) ,%td)
                          ,(do-call 1))
