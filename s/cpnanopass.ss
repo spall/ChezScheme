@@ -1570,9 +1570,9 @@
          `(clause (,x* ...) ,interface ,body)])
       (Expr : Expr (ir [mode 'non-tail] [loop-x* '()]) -> Expr ()
         [,x (return mode x)]
-        [(letrec ([,x* ,[le* 'non-tail loop-x* -> le*]] ...) ,[body])
+        [(letrec ([,x* ,[le* 'non-tail '() -> le*]] ...) ,[body])
          `(letrec ([,x* ,le*] ...) ,body)]
-        [(call ,info ,mdcl ,pr ,[e1 'non-tail -> e1]
+        [(call ,info ,mdcl ,pr ,[e1 'non-tail '() -> e1]
                (case-lambda ,info2 (clause () ,interface ,[body (->in-wca mode) '() -> body])))
          (guard (and (eq? (primref-name pr) 'call-setting-continuation-attachment)
                      (= interface 0)))
@@ -1586,8 +1586,8 @@
            [(non-tail)
             ;; Push attachment; `body` has been adjusted to pop
             `(seq (attachment-set push ,e1) ,body)])]
-        [(call ,info ,mdcl ,pr ,[e1 'non-tail loop-x* -> e1]
-               (case-lambda ,info2 (clause (,x) ,interface ,[body mode loop-x* -> body])))
+        [(call ,info ,mdcl ,pr ,[e1 'non-tail '() -> e1]
+               (case-lambda ,info2 (clause (,x) ,interface ,[body])))
          (guard (and (eq? (primref-name pr) 'call-with-current-continuation-attachment)
                      (= interface 1)))
          (case mode
@@ -1600,32 +1600,51 @@
            [else
             ;; Check dynamically for attachment
             `(let ([,x (attachment-get ,e1)]) ,body)])]
-        [(call ,info ,mdcl ,x ,[e* 'non-tail loop-x* -> e*] ...)
+        [(call ,info ,mdcl ,x ,[e* 'non-tail '() -> e*] ...)
          (guard (memq x loop-x*))
          ;; No convert for a loop call, even if mode is 'pop
          `(call ,info ,mdcl ,x ,e* ...)]
-        [(call ,info ,mdcl ,[e 'non-tail loop-x* -> e] ,[e* 'non-tail loop-x* -> e*] ...)
-         (let ([e (case mode
-                    [(pop) (%primcall #f #f $make-shift-attachment ,e)]
-                    [else e])])
-           `(call ,info #f ,e ,e* ...))]
-        [(foreign-call ,info ,[e 'non-tail loop-x* -> e] ,[e* 'non-tail loop-x* -> e*] ...)
+        [(call ,info ,mdcl ,[e 'non-tail '() -> e] ,[e* 'non-tail '() -> e*] ...)
+         (let ([new-e (case mode
+                        [(pop) (%primcall #f #f $make-shift-attachment ,e)]
+                        [else e])])
+           `(call ,info ,(and (eq? new-e e) mdcl) ,new-e ,e* ...))]
+        [(foreign-call ,info ,[e 'non-tail '() -> e] ,[e* 'non-tail '() -> e*] ...)
          (return mode `(foreign-call ,info ,e ,e* ...))]
         [(fcallable ,info) (return mode `(fcallable ,info))]
         [(label ,l ,[body]) `(label ,l ,body)]
-        [(mvlet ,[e 'non-tail loop-x* -> e] ((,x** ...) ,interface* ,[body*]) ...)
-         `(mvlet ,e ((,x** ...) ,interface* ,body*) ...)]
-        [(mvcall ,info ,[e1 'non-tail loop-x* -> e1] ,[e2 'non-tail loop-x* -> e2])
-         (let ([e1 (case mode
-                     [(pop) (%primcall #f #f $make-shift-attachment ,e1)]
-                     [else e1])])
+        [(mvlet ,[e 'non-tail '() -> e] ((,x** ...) ,interface* ,body*) ...)
+         (let ([body* (map (lambda (body interface)
+                             (case (and (fx< interface 0)
+                                        mode)
+                               [(pop)
+                                ;; If `body` is a direct call, then we need to change
+                                ;; to an `apply`, since the last argument is turned
+                                ;; into a list already. It would have been better to
+                                ;; avoid the direct-call setup in the first place.
+                                (nanopass-case (L4.875 Expr) body
+                                  [(call ,info ,mdcl ,e ,e* ...)
+                                   (guard mdcl)
+                                   (%primcall info #f apply
+                                              ,(%primcall #f #f $make-shift-attachment ,e)
+                                              ,e* ...)]
+                                  [else
+                                   (Expr body 'pop loop-x*)])]
+                               [else
+                                (Expr body mode loop-x*)]))
+                           body* interface*)])
+           `(mvlet ,e ((,x** ...) ,interface* ,body*) ...))]
+        [(mvcall ,info ,[e1 'non-tail '() -> e1] ,[e2 'non-tail '() -> e2])
+         (let ([e2 (case mode
+                     [(pop) (%primcall #f #f $make-shift-attachment ,e2)]
+                     [else e2])])
            `(mvcall ,info ,e1 ,e2))]
-        [(let ([,x* ,[e* 'non-tail -> e*]] ...) ,[body])
+        [(let ([,x* ,[e* 'non-tail '() -> e*]] ...) ,[body])
          `(let ([,x* ,e*] ...) ,body)]
         [(case-lambda ,info ,[cl] ...) (return mode `(case-lambda ,info ,cl ...))]
         [(quote ,d) (return mode `(quote ,d))]
-        [(if ,[e0 'non-tail -> e0] ,[e1] ,[e2]) `(if ,e0 ,e1 ,e2)]
-        [(seq ,[e0 'non-tail -> e0] ,[e1]) `(seq ,e0 ,e1)]
+        [(if ,[e0 'non-tail '() -> e0] ,[e1] ,[e2]) `(if ,e0 ,e1 ,e2)]
+        [(seq ,[e0 'non-tail '() -> e0] ,[e1]) `(seq ,e0 ,e1)]
         [(profile ,src) `(profile ,src)]
         [(pariah) `(pariah)]
         [,pr (return mode pr)]

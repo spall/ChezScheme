@@ -3250,6 +3250,8 @@
      (call-with-current-continuation-attachment
       'nope
       (lambda (x) x)))
+   (define (return-one) 1)
+   (define (act-like-list . l) l)
     #t)
   (equal? 'yep (call-with-yep get-or-nope))
   (equal? 'yeah (call-with-yep (lambda () (call-with-yeah get-or-nope))))
@@ -3320,6 +3322,43 @@
                          (set! post (cons (current-continuation-attachments) post))))))))
              (lambda () (lambda (self) void)))
             (vector pre body post)))
+
+  ;; intended to trigger `mvcall` in the `np-recognize-attachment` pass:
+  (equal? '(1)
+          (call-setting-continuation-attachment
+           'ok
+           (lambda ()
+             (call-with-values (lambda () (return-one)) act-like-list))))
+  (equal? '(1)
+          (letrec ([act-like-list (lambda l
+                                    (if (equal? l '(never))
+                                        (act-like-list (cdr l))
+                                        l))])
+            (call-setting-continuation-attachment
+             'ok
+             (lambda ()
+               ;; `call-with-values` can see that `act-like-list` has
+               ;; a rest argument, and it generates a direct call
+               (call-with-values (lambda () (return-one)) act-like-list)))))
+  (equal? '(1)
+          ;; Like the previous example, but in tail position
+          (call-with-yep ; just to ensure the argument `lambda` isn't inlined
+           (lambda ()
+             (letrec ([act-like-list (lambda l
+                                       (if (equal? l '(never))
+                                           (act-like-list (cdr l))
+                                           l))])
+               (call-setting-continuation-attachment
+                'ok
+                (lambda ()
+                  (call-with-values (lambda () (return-one)) act-like-list)))))))
+  (equal? '(1)
+          (call-with-yep ; just to ensure the argument `lambda` isn't inlined
+           (lambda ()
+             (call-setting-continuation-attachment
+              'ok
+              (lambda ()
+                (call-with-values (lambda () (return-one)) act-like-list))))))
  )
  
 ;;; section 4-7:
