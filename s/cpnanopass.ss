@@ -1606,7 +1606,10 @@
          `(call ,info ,mdcl ,x ,e* ...)]
         [(call ,info ,mdcl ,[e 'non-tail '() -> e] ,[e* 'non-tail '() -> e*] ...)
          (let ([new-e (case mode
-                        [(pop) (%primcall #f #f $make-shift-attachment ,e)]
+                        [(pop)
+                         (let ([level (if (info-call-check? info) 2 3)]
+                               [p-info (make-info-call #f #f #f #f #f)])
+                           `(call ,p-info #f ,(lookup-primref level '$make-shift-attachment) ,e))]
                         [else e])])
            `(call ,info ,(and (eq? new-e e) mdcl) ,new-e ,e* ...))]
         [(foreign-call ,info ,[e 'non-tail '() -> e] ,[e* 'non-tail '() -> e*] ...)
@@ -2795,6 +2798,13 @@
              ,[e*] ...)
            (guard (and (eq? (primref-name pr) '$top-level-value) (symbol? d)))
            `(call ,info0 ,mdcl0 ,(Symref d) ,e* ...)]
+          [(call ,info0 ,mdcl0
+             (call ,info1 ,mdcl1 ,pr
+               (call ,info2 ,mdcl2 ,pr2 (quote ,d)))
+             ,[e*] ...)
+           (guard (and (eq? (primref-name pr) '$make-shift-attachment)
+                       (eq? (primref-name pr2) '$top-level-value) (symbol? d)))
+           `(call ,info0 ,mdcl0 (call ,info1 ,mdcl1 ,(Symref (primref-name pr)) ,(Symref d)) ,e* ...)]
           [(call ,info ,mdcl (call ,info2 ,mdcl2 ,pr0 ,pr) ,e* ...)
            (guard (eq? (primref-name pr0) '$make-shift-attachment)
                   ;; FIXME: need a less fragile way to avoid multiple results

@@ -380,7 +380,9 @@
 
 (define $make-shift-attachment
   (lambda (proc)
-    (#3%$make-shift-attachment proc)))
+    (if (procedure? proc)
+        (#3%$make-shift-attachment proc)
+        ($oops #f "attempt to apply non-procedure ~s" proc))))
 
 (define $code? (lambda (x) ($code? x)))
 

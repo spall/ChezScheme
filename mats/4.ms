@@ -3246,22 +3246,46 @@
      (call-setting-continuation-attachment
       'yeah
        f))
+   (define-syntax call-with-yeah*
+     (syntax-rules ()
+       [(_ f)
+        (call-setting-continuation-attachment
+         'yeah
+         f)]))
    (define (get-or-nope)
      (call-with-current-continuation-attachment
       'nope
       (lambda (x) x)))
    (define (return-one) 1)
    (define (act-like-list . l) l)
+   (define not-a-procedure 'something-else)
+   (define (returns-not-a-procedure) 'also-something-else)
     #t)
   (equal? 'yep (call-with-yep get-or-nope))
   (equal? 'yeah (call-with-yep (lambda () (call-with-yeah get-or-nope))))
   (equal? '(yeah) (call-with-yep (lambda () (call-with-yeah current-continuation-attachments))))
   (equal? '((yeah yep)) (call-with-yep (lambda () (list (call-with-yeah current-continuation-attachments)))))
+  (equal? '((yeah yep)) (call-with-yep (lambda () (act-like-list (call-with-yeah current-continuation-attachments)))))
   (equal? '(yeah yep) (call-with-yep (lambda () (let ([v #f])
                                                   (set! v (call-with-yeah current-continuation-attachments))
                                                   v))))
   (equal? '(nope) (call-with-yep (lambda () (list (get-or-nope)))))
+  (equal? '(nope) (call-with-yep (lambda () (act-like-list (get-or-nope)))))
   (equal? '(nope) (call-with-yep (lambda () (call-with-yeah (lambda () (list (get-or-nope)))))))
+  (equal? '(nope) (call-with-yep (lambda () (call-with-yeah (lambda () (act-like-list (get-or-nope)))))))
+  (equal? '(yeah) (call-with-yep (lambda () (list (call-with-yeah (lambda () (get-or-nope)))))))
+  (equal? '(yeah) (call-with-yep (lambda () (act-like-list (call-with-yeah (lambda () (get-or-nope)))))))
+  (equal? '(nope) (call-with-yep (lambda () (call-with-yeah* (lambda () (list (get-or-nope)))))))
+  (equal? '(nope) (call-with-yep (lambda () (call-with-yeah* (lambda () (act-like-list (get-or-nope)))))))
+  (equal? '(yeah) (call-with-yep (lambda () (list (call-with-yeah* (lambda () (get-or-nope)))))))
+  (equal? '(yeah) (call-with-yep (lambda () (act-like-list (call-with-yeah* (lambda () (get-or-nope)))))))
+
+  (error? (call-with-yep (lambda () (call-with-yeah* (lambda () (not-a-procedure))))))
+  (error? (call-with-yep (lambda () (list (call-with-yeah* (lambda () (not-a-procedure)))))))
+  (error? (call-with-yep (lambda () (act-like-list (call-with-yeah* (lambda () (not-a-procedure)))))))
+  (error? (call-with-yep (lambda () (call-with-yeah* (lambda () ((returns-not-a-procedure)))))))
+  (error? (call-with-yep (lambda () (list (call-with-yeah* (lambda () ((returns-not-a-procedure))))))))
+  (error? (call-with-yep (lambda () (act-like-list (call-with-yeah* (lambda () ((returns-not-a-procedure))))))))
   
   (equal? '() (if (call-with-yep list)
                   (current-continuation-attachments)
