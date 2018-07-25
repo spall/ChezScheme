@@ -3260,6 +3260,7 @@
    (define (act-like-list . l) l)
    (define not-a-procedure 'something-else)
    (define (returns-not-a-procedure) 'also-something-else)
+   (define (return-three-values) (values 1 2 3))
     #t)
   (equal? 'yep (call-with-yep get-or-nope))
   (equal? 'yeah (call-with-yep (lambda () (call-with-yeah get-or-nope))))
@@ -3298,14 +3299,14 @@
                   (length (current-continuation-attachments))
                   (call-setting-continuation-attachment
                    'here
-                   (lambda ()                                     
+                   (lambda ()
                      (loop (sub1 i)))))))
   (equal? 10000 (let loop ([i 10000])
                   (if (zero? i)
                       (length (current-continuation-attachments))
                       (call-setting-continuation-attachment
                        'here
-                       (lambda ()                                     
+                       (lambda ()
                          (+ (loop (sub1 i)) 0))))))
   (equal? '#((forget-me yeah yep) (yeah yep))
           (call/cc
@@ -3346,6 +3347,25 @@
                          (set! post (cons (current-continuation-attachments) post))))))))
              (lambda () (lambda (self) void)))
             (vector pre body post)))
+
+  (equal? 'ok
+          (call-setting-continuation-attachment
+           'ok
+           (lambda ()
+             (call-with-values (lambda () (return-three-values))
+               (case-lambda
+                [(x y z)
+                 (get-or-nope)])))))
+  (equal? '(ok 1 2 3)
+          (call-setting-continuation-attachment
+           'ok
+           (lambda ()
+             (call-with-values (lambda () (return-three-values))
+               (case-lambda
+                [(x y z)
+                 (call-with-current-continuation-attachment
+                  'nope
+                  (lambda (a) (list a x y z)))])))))
 
   ;; intended to trigger `mvcall` in the `np-recognize-attachment` pass:
   (equal? '(1)
