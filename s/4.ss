@@ -364,7 +364,7 @@
         (let f ((old old))
           (unless (eq? old tail)
             (let ([w (car old)] [old (cdr old)])
-              (if (winder-critical? w)
+              (if (critical-winder? w)
                   (begin
                     (disable-interrupts)
                     ($current-winders (cons disable/enable old))
@@ -373,15 +373,15 @@
                     ($current-winders old)
                     (enable-interrupts))
                   (begin
-                    ($current-attachments (winder-attachments w))
                     ($current-winders old)
+                    ($current-attachments (winder-attachments w))
                     ((winder-out w))))
               (f old))))
         (let f ([new new])
           (unless (eq? new tail)
             (let ([w (car new)])
               (f (cdr new))
-              (if (winder-critical? w)
+              (if (critical-winder? w)
                   (begin
                     (disable-interrupts)
                     ($current-winders (cons disable/enable (cdr new)))
