@@ -3180,15 +3180,15 @@
 (mat continuation-attachments
   (error? (current-continuation-attachments '()))
 
-  (error? (call-setting-current-attachment 'any))
-  (error? (call-setting-current-attachment 'any 10))
-  (error? (call-setting-current-attachment 'any void 'bad-more))
-  (error? (call-setting-current-attachment 'any (lambda (x) x)))
+  (error? (call-setting-continuation-attachment 'any))
+  (error? (call-setting-continuation-attachment 'any 10))
+  (error? (call-setting-continuation-attachment 'any void 'bad-more))
+  (error? (call-setting-continuation-attachment 'any (lambda (x) x)))
 
-  (error? (call-with-current-current-attachment 'none))
-  (error? (call-with-current-current-attachment 'none 10))
-  (error? (call-with-current-current-attachment 'none (lambda (a) a) 'bad-more))
-  (error? (call-with-current-current-attachment 'none void))
+  (error? (call-with-current-continuation-attachment 'none))
+  (error? (call-with-current-continuation-attachment 'none 10))
+  (error? (call-with-current-continuation-attachment 'none (lambda (a) a) 'bad-more))
+  (error? (call-with-current-continuation-attachment 'none void))
 
   (error? (continuation-next-attachments))
   (error? (continuation-next-attachments 10))
@@ -3282,6 +3282,7 @@
    (define not-a-procedure 'something-else)
    (define (returns-not-a-procedure) 'also-something-else)
    (define (return-three-values) (values 1 2 3))
+   (define (return-the-same-value v) v)
     #t)
   (equal? 'yep (call-with-yep get-or-nope))
   (equal? 'yeah (call-with-yep (lambda () (call-with-yeah get-or-nope))))
@@ -3328,7 +3329,7 @@
                       (call-setting-continuation-attachment
                        'here
                        (lambda ()
-                         (+ (loop (sub1 i)) 0))))))
+                         (return-the-same-value (loop (sub1 i))))))))
   (equal? '#((forget-me yeah yep) (yeah yep))
           (call/cc
            (lambda (esc)
