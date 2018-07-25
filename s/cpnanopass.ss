@@ -12432,11 +12432,11 @@
               (info-lambda-fv*-set! info '(proc))
               `(lambda ,info 0 ()
                 ,(%seq
-                  (set! ,%ac1 ,%ac0) ; save argument count
+                  (set! ,(ref-reg %ac1) ,%ac0) ; save argument count
                   (set! ,%td (inline ,(intrinsic-info-asmlib reify-cc #f) ,%asmlibcall))
                   (set! ,%ts ,(%mref ,%td ,(constant continuation-attachments-disp)))
                   (set! ,(%mref ,%td ,(constant continuation-attachments-disp)) ,(%mref ,%ts ,(constant pair-cdr-disp)))
-                  (set! ,%ac0 ,%ac1) ; restore argument count
+                  (set! ,%ac0 ,(ref-reg %ac1)) ; restore argument count
                   ,(meta-cond
                     [(real-register? '%cp)
                      (%seq

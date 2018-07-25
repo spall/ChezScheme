@@ -497,6 +497,12 @@
          ($oops '$continuation-winders "~s is not a continuation" x))
       ($continuation-winders x)))
 
+(define $continuation-attachments
+   (lambda (x)
+      (unless ($continuation? x)
+         ($oops '$continuation-attachments "~s is not a continuation" x))
+      ($continuation-attachments x)))
+
 (define $continuation-return-code
    (lambda (x)
       (unless ($continuation? x)
