@@ -3277,6 +3277,11 @@
      (call-with-current-continuation-attachment
       'nope
       (lambda (x) x)))
+   (define (vector-with-attachments . args)
+     (call-with-current-continuation-attachment
+      'nothing
+      (lambda (v)
+        (apply vector v (current-continuation-attachments) args))))
    (define (return-one) 1)
    (define (act-like-list . l) l)
    (define not-a-procedure 'something-else)
@@ -3400,6 +3405,88 @@
            'ok
            (lambda ()
              (call-with-values (lambda () (return-one)) act-like-list))))
+  (equal? '(#(nothing (here) (there here)) (here))
+          (call-setting-continuation-attachment
+           'here
+           (lambda ()
+             (list
+              ;; becomes an mvcall with attachment-shifting producer call
+              ;; and non-shifting consumer call
+              (call-with-values
+                  (lambda ()
+                    (call-setting-continuation-attachment
+                     'there
+                     (lambda ()
+                       ;; In tail position with respect to 'there attachment
+                       (current-continuation-attachments))))
+                ;; Not in tail position with respect to an attachment
+                vector-with-attachments)
+              (current-continuation-attachments)))))
+  (equal? '#(here (here) (there here))
+          (call-setting-continuation-attachment
+           'here
+           (lambda ()
+             ;; becomes an mvcall with attachment-shifting producer call
+             ;; and attachment-shifting consumer call
+             (call-with-values
+                 (lambda ()
+                   (call-setting-continuation-attachment
+                    'there
+                    (lambda ()
+                      (current-continuation-attachments))))
+               ;; in tail position with respect to 'here attachment
+               vector-with-attachments))))
+  (equal? '#(here (here) (here))
+          (call-setting-continuation-attachment
+           'here
+           (lambda ()
+             ;; becomes an mvcall with non-shifting producer call
+             ;; and attachment-shifting consumer call
+             (call-with-values
+                 (lambda ()
+                   (current-continuation-attachments))
+               vector-with-attachments))))
+  (equal? '(#(nothing (here) #(there (there here) (there here)))
+            (here))
+          (call-setting-continuation-attachment
+           'here
+           (lambda ()
+             (list
+              ;; becomes an mvcall with a non-shifting producer call,
+              ;; a shifting consumer call, and a non-shifting consumer call
+              (call-with-values
+                  (lambda ()
+                    (call-setting-continuation-attachment
+                     'there
+                     (lambda ()
+                       (call-with-values
+                           (lambda ()
+                             (current-continuation-attachments))
+                         vector-with-attachments))))
+                vector-with-attachments)
+              (current-continuation-attachments)))))
+  (equal? '(#(nothing (here) #(there (there here) (more there here)))
+            (here))
+          (call-setting-continuation-attachment
+           'here
+           (lambda ()
+             (list
+              ;; becomes an mvcall with a shifting producer call,
+              ;; a shifting consumer call, and a non-shifting consumer call
+              (call-with-values
+                  (lambda ()
+                    (call-setting-continuation-attachment
+                     'there
+                     (lambda ()
+                       (call-with-values
+                           (lambda ()
+                             (call-setting-continuation-attachment
+                              'more
+                              (lambda ()
+                                (current-continuation-attachments))))
+                         vector-with-attachments))))
+                vector-with-attachments)
+              (current-continuation-attachments)))))
   (equal? '(1)
           (letrec ([act-like-list (lambda l
                                     (if (equal? l '(never))
