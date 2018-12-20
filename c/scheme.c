@@ -1116,8 +1116,6 @@ extern void Sbuild_heap(kernel, custom_init) const char *kernel; void (*custom_i
     }
   }
 
-  S_vfasl_to_static = 1;
-
   if (boot_count != 0) {
     INT i = 0;
 
@@ -1143,8 +1141,6 @@ extern void Sbuild_heap(kernel, custom_init) const char *kernel; void (*custom_i
 
     while (i < boot_count) load(tc, i++, 0);
   }
-
-  S_vfasl_to_static = 0;
 
   if (boot_count != 0) Scompact_heap();
 

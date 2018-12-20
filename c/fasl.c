@@ -461,14 +461,9 @@ static ptr fasl_entry(ptr tc, unbufFaslFile uf) {
     S_error1("", "malformed fasl-object header found in ~a", uf->path);
 
   ffo.size = uf_uptrin(uf);
-  // printf("SIZE %ld [%d]\n", ffo.size, ty);
 
   if (ty == fasl_type_vfasl_size) {
-    if (S_vfasl_to_static == 1) {
-      Scompact_heap();
-      S_vfasl_to_static = -1;
-    }
-    x = S_vfasl((ptr)0, uf, ffo.size, S_vfasl_to_static ? static_generation : 0);
+    x = S_vfasl((ptr)0, uf, ffo.size);
   } else {
     ffo.buf = buf;
     ffo.next = ffo.end = ffo.buf;

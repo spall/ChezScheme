@@ -106,8 +106,8 @@ extern int S_fasl_intern_rtd(ptr *x);
 
 /* vfasl.c */
 extern ptr S_to_vfasl PROTO((ptr v));
-extern ptr S_vfasl PROTO((ptr bv, void *stream, iptr len, int target_generation));
-extern ptr S_vfasl_to PROTO((ptr v, int target_generation));
+extern ptr S_vfasl PROTO((ptr bv, void *stream, iptr len));
+extern ptr S_vfasl_to PROTO((ptr v));
 
 /* flushcache.c */
 extern void S_record_code_mod PROTO((ptr tc, uptr addr, uptr bytes));
