@@ -836,7 +836,7 @@ static ptr copy(vfasl_info *vfi, ptr pp, seginfo *si) {
           EXACTNUM_REAL_PART(p) = EXACTNUM_REAL_PART(pp);
           EXACTNUM_IMAG_PART(p) = EXACTNUM_IMAG_PART(pp);
       } else if ((iptr)tf == type_inexactnum) {
-          FIND_ROOM(vfi, vspace_typed, type_typed_object, size_inexactnum, p);
+          FIND_ROOM(vfi, vspace_data, type_typed_object, size_inexactnum, p);
           INEXACTNUM_TYPE(p) = type_inexactnum;
           INEXACTNUM_REAL_PART(p) = INEXACTNUM_REAL_PART(pp);
           INEXACTNUM_IMAG_PART(p) = INEXACTNUM_IMAG_PART(pp);
@@ -865,8 +865,8 @@ static ptr copy(vfasl_info *vfi, ptr pp, seginfo *si) {
             vfasl_register_pointer(vfi, &CODERELOC(p));
           }
       } else if ((iptr)tf == type_rtd_counts) {
-          FIND_ROOM(vfi, vspace_data, type_typed_object, size_rtd_counts, p);
-          copy_ptrs(type_typed_object, p, pp, size_rtd_counts);
+        /* prune counts, since GC will recreate as needed */
+          return Sfalse;
       } else if ((iptr)tf == type_thread) {
           vfasl_fail(vfi, "thread");
           return (ptr)0;
@@ -974,11 +974,8 @@ static void sweep_ptrs(vfasl_info *vfi, ptr *pp, iptr n) {
 static uptr sweep(vfasl_info *vfi, ptr p) {
   ptr tf; ITYPE t;
 
-  if ((t = TYPEBITS(p)) == type_pair) {
-    vfasl_relocate(vfi, &INITCAR(p));
-    vfasl_relocate(vfi, &INITCDR(p));
-    return size_pair;
-  } else if (t == type_closure) {
+  t = TYPEBITS(p);
+  if (t == type_closure) {
     uptr len;
     ptr code;
 
@@ -1005,15 +1002,6 @@ static uptr sweep(vfasl_info *vfi, ptr p) {
     uptr len = Svector_length(p);
     sweep_ptrs(vfi, &INITVECTIT(p, 0), len);
     return size_vector(len);
-  } else if (TYPEP(tf, mask_string, type_string)) {
-    /* nothing to sweep */;
-    return size_string(Sstring_length(p));
-  } else if (TYPEP(tf, mask_bytevector, type_bytevector)) {
-    /* nothing to sweep */;
-    return size_bytevector(Sbytevector_length(p));
-  } else if (TYPEP(tf, mask_fxvector, type_fxvector)) {
-    /* nothing to sweep */;
-    return size_fxvector(Sfxvector_length(p));
   } else if (TYPEP(tf, mask_record, type_record)) {
     return sweep_record(vfi, p);
   } else if (TYPEP(tf, mask_box, type_box)) {
@@ -1023,21 +1011,10 @@ static uptr sweep(vfasl_info *vfi, ptr p) {
     vfasl_relocate(vfi, &RATNUM(p));
     vfasl_relocate(vfi, &RATDEN(p));
     return size_ratnum;
-  } else if ((iptr)tf == type_tlc) {
-    vfasl_relocate(vfi, &INITTLCKEYVAL(p));
-    vfasl_relocate(vfi, &INITTLCHT(p));
-    vfasl_relocate(vfi, &INITTLCNEXT(p));
-    return size_tlc;
   } else if ((iptr)tf == type_exactnum) {
     vfasl_relocate(vfi, &EXACTNUM_REAL_PART(p));
     vfasl_relocate(vfi, &EXACTNUM_IMAG_PART(p));
     return size_exactnum;
-  } else if ((iptr)tf == type_inexactnum) {
-    /* nothing to sweep */;
-    return size_inexactnum;
-  } else if (TYPEP(tf, mask_bignum, type_bignum)) {
-    /* nothing to sweep */;
-    return size_bignum(BIGLEN(p));
   } else if (TYPEP(tf, mask_code, type_code)) {
     return sweep_code_object(vfi, p);
   } else {
