@@ -389,7 +389,7 @@ ptr S_intern4(sym) ptr sym; {
     } else {
       const string_char *uname = &STRIT(uname_str, 0);
       iptr ulen = Sstring_length(uname_str);
-      iptr hc = hash_uname(uname, ulen);
+      iptr hc = UNFIX(SYMHASH(sym));
       iptr idx = hc % S_G.oblist_length;
       bucket *b;
 
@@ -412,7 +412,6 @@ ptr S_intern4(sym) ptr sym; {
         b = b->next;
       }
 
-      INITSYMHASH(sym) = FIX(hc);
       oblist_insert(sym, idx, GENERATION(sym));
 
       return sym;

@@ -907,7 +907,7 @@ static ptr copy(vfasl_info *vfi, ptr pp, seginfo *si) {
         INITSYMPLIST(p) = Snil;
         INITSYMSPLIST(p) = Snil;
         INITSYMNAME(p) = SYMNAME(pp);
-        INITSYMHASH(p) = Sfalse;
+        INITSYMHASH(p) = SYMHASH(pp);
     } else if (t == type_flonum) {
         FIND_ROOM(vfi, vspace_data, type_flonum, size_flonum, p);
         FLODAT(p) = FLODAT(pp);
@@ -1052,8 +1052,19 @@ static uptr sweep_record(vfasl_info *vfi, ptr x)
 
     rtd = RECORDINSTTYPE(x);
     if (rtd == S_G.base_rtd) {
-      /* base_rtd is reset directly in all rtds */
+      /* base-rtd is reset directly in all rtds */
       RECORDINSTTYPE(x) = vfi->base_rtd;
+
+      if (x == vfi->base_rtd) {
+        /* Don't need to save fields of base-rtd */
+        ptr *pp = &RECORDINSTIT(x,0);
+        ptr *ppend = (ptr *)((uptr)pp + UNFIX(RECORDDESCSIZE(rtd))) - 1;
+        while (pp < ppend) {
+          *pp = Snil;
+          pp += 1;
+        }
+        return size_record_inst(UNFIX(RECORDDESCSIZE(rtd)));
+      }
     } else
       vfasl_relocate(vfi, &RECORDINSTTYPE(x));
     
