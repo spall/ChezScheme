@@ -226,24 +226,19 @@ ptr S_vfasl(ptr bv, void *stream, iptr input_len)
     ptr *p = data;
     while (bm != bm_end) {
       octet m;
-      if ((m = *bm) == 0) {
-        /* zero is followed by a run length: */
-        p += bm[1] * byte_bits;
-        bm += 2;
-      } else {
-#       define MAYBE_FIXUP(i) if (m & (1 << i)) ((uptr *)p)[i] += (uptr)data
-        MAYBE_FIXUP(0);
-        MAYBE_FIXUP(1);
-        MAYBE_FIXUP(2);
-        MAYBE_FIXUP(3);
-        MAYBE_FIXUP(4);
-        MAYBE_FIXUP(5);
-        MAYBE_FIXUP(6);
-        MAYBE_FIXUP(7);
-#       undef MAYBE_FIXUP
-        p += byte_bits;
-        bm++;
-      }
+      m = *bm;
+#     define MAYBE_FIXUP(i) if (m & (1 << i)) ((uptr *)p)[i] += (uptr)data
+      MAYBE_FIXUP(0);
+      MAYBE_FIXUP(1);
+      MAYBE_FIXUP(2);
+      MAYBE_FIXUP(3);
+      MAYBE_FIXUP(4);
+      MAYBE_FIXUP(5);
+      MAYBE_FIXUP(6);
+      MAYBE_FIXUP(7);
+#     undef MAYBE_FIXUP
+      p += byte_bits;
+      bm++;
     }
   }
 
@@ -494,9 +489,7 @@ ptr S_to_vfasl(ptr v)
 
   bitmap_size = (data_size + (byte_bits-1)) >> log2_byte_bits;
 
-  /* Worst case for run-length encoding 0s is about 1.5 times
-     size of direct bitmap. */
-  size += (2 * bitmap_size);
+  size += bitmap_size;
 
   bv = S_bytevector(size);
   memset(&BVIT(bv, 0), 0, size);
@@ -541,7 +534,6 @@ ptr S_to_vfasl(ptr v)
 
   vfi->graph = make_vfasl_hash_table();
 
-  p = ptr_add(p, bitmap_size); /* leave space for compaction using 0 run lengths */
   vfi->ptr_bitmap = p;
 
   /* Write data */
@@ -556,56 +548,34 @@ ptr S_to_vfasl(ptr v)
     uptr base_addr = (uptr)vfi->base_addr;
     octet *bm = vfi->ptr_bitmap;
     octet *bm_end = bm + bitmap_size;
+    uptr zeros = 0;
     for (; bm != bm_end; bm++, p2 += byte_bits) {
       octet m = *bm;
-#     define MAYBE_FIXUP(i) if (m & (1 << i)) ((uptr *)p2)[i] -= base_addr;
-      MAYBE_FIXUP(0);
-      MAYBE_FIXUP(1);
-      MAYBE_FIXUP(2);
-      MAYBE_FIXUP(3);
-      MAYBE_FIXUP(4);
-      MAYBE_FIXUP(5);
-      MAYBE_FIXUP(6);
-      MAYBE_FIXUP(7);
-#     undef MAYBE_FIXUP
-    }
-  }
-
-  /* Compact bitmaps using a run-length encoding of zeros */
-  {
-    octet *dest_bm = ptr_add(&BVIT(bv, 0), pre_bitmap_size);
-    octet *bm = vfi->ptr_bitmap;
-    octet *bm_end = bm + bitmap_size;
-    int zeros = 0;
-    uptr j = 0;
-
-    for (; bm != bm_end; bm++) {
-      octet m = *bm;
-      if (m == 0)
+      if (m == 0) {
         zeros++;
-      else {
-        while (zeros) {
-          dest_bm[j++] = 0;
-          if (zeros > 255) {
-            dest_bm[j++] = 255;
-            zeros -= 255;
-          } else {
-            dest_bm[j++] = zeros;
-            zeros = 0;
-          }
-        }
-        dest_bm[j++] = m;
+      } else {
+#       define MAYBE_FIXUP(i) if (m & (1 << i)) ((uptr *)p2)[i] -= base_addr;
+        MAYBE_FIXUP(0);
+        MAYBE_FIXUP(1);
+        MAYBE_FIXUP(2);
+        MAYBE_FIXUP(3);
+        MAYBE_FIXUP(4);
+        MAYBE_FIXUP(5);
+        MAYBE_FIXUP(6);
+        MAYBE_FIXUP(7);
+#       undef MAYBE_FIXUP
+        zeros = 0;
       }
     }
+
     /* We can ignore trailing zeros */
+    header.table_size += (bitmap_size - zeros);
+  }
 
-    header.table_size += j;
-
-    /* Truncate bytevector to match end of bitmaps */
-    {
-      uptr sz = sizeof(vfasl_header) + header.data_size + header.table_size;
-      BYTEVECTOR_TYPE(bv) = (sz << bytevector_length_offset) | type_bytevector;
-    }
+  /* Truncate bytevector to match end of bitmaps */
+  {
+    uptr sz = sizeof(vfasl_header) + header.data_size + header.table_size;
+    BYTEVECTOR_TYPE(bv) = (sz << bytevector_length_offset) | type_bytevector;
   }
 
   memcpy(&BVIT(bv, 0), &header, sizeof(vfasl_header));

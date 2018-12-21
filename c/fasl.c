@@ -1113,13 +1113,9 @@ int S_fasl_intern_rtd(ptr *x)
     if (Scar(ls) == S_G.rtd_key) {
       ptr old_rtd = Scar(Scdr(ls));
       /* if so, check new rtd against old rtd and return old rtd */
-      if (!rtd_equiv(rtd, old_rtd)) {
-        ptr x = rtd, y = old_rtd;
-        printf("%p %p [%p]\n",
-               RECORDINSTTYPE(x), RECORDINSTTYPE(y),
-               S_G.base_rtd);
+      if (!rtd_equiv(rtd, old_rtd))
         return -1;
-      } else
+      else
         *x = old_rtd;
       return 1;
     }
