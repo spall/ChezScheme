@@ -190,7 +190,7 @@ static void sort_offsets(vfoff *p, vfoff len);
 /************************************************************/
 /* Loading                                                  */
 
-ptr S_vfasl(ptr bv, void *stream, iptr input_len)
+ptr S_vfasl(ptr bv, void *stream, iptr offset, iptr input_len)
 {
   ptr vspaces[vspaces_count];
   uptr vspace_offsets[vspaces_count+1];
@@ -210,7 +210,7 @@ ptr S_vfasl(ptr bv, void *stream, iptr input_len)
     S_error("fasl-read", "input length mismatch");
 
   if (bv)
-    memcpy(&header, &BVIT(bv, 0), sizeof(vfasl_header));
+    memcpy(&header, &BVIT(bv, offset), sizeof(vfasl_header));
   else {
     if (S_fasl_stream_read(stream, (octet*)&header, sizeof(header)) < 0)
       S_error("fasl-read", "input truncated");
@@ -227,7 +227,7 @@ ptr S_vfasl(ptr bv, void *stream, iptr input_len)
   vspace_offsets[vspaces_count] = header.data_size;
 
   if (bv) {
-    ptr base_addr = &BVIT(bv, sizeof(vfasl_header));
+    ptr base_addr = &BVIT(bv, sizeof(vfasl_header) + offset);
     thread_find_room(tc, typemod, header.data_size, data);
     memcpy(data, base_addr, header.data_size);
     table = ptr_add(base_addr, header.data_size);
@@ -283,6 +283,7 @@ ptr S_vfasl(ptr bv, void *stream, iptr input_len)
            "clos %ld\n"
            "code %ld\n"
            "rloc %ld\n"
+           "data %ld\n"
            "othr %ld\n"
            "tabl %ld  symref %ld  rtdref %ld  sglref %ld\n",
            sizeof(vfasl_header),
@@ -291,10 +292,10 @@ ptr S_vfasl(ptr bv, void *stream, iptr input_len)
            VSPACE_LENGTH(vspace_closure),
            VSPACE_LENGTH(vspace_code),
            VSPACE_LENGTH(vspace_reloc),
+           VSPACE_LENGTH(vspace_data),
            (VSPACE_LENGTH(vspace_impure)
             + VSPACE_LENGTH(vspace_pure_typed)
-            + VSPACE_LENGTH(vspace_impure_record)
-            + VSPACE_LENGTH(vspace_data)),
+            + VSPACE_LENGTH(vspace_impure_record)),
            header.table_size,
            header.symref_count * sizeof(vfoff),
            header.rtdref_count * sizeof(vfoff),
@@ -510,7 +511,7 @@ ptr S_vfasl(ptr bv, void *stream, iptr input_len)
 
 ptr S_vfasl_to(ptr bv)
 {
-  return S_vfasl(bv, (ptr)0, Sbytevector_length(bv));
+  return S_vfasl(bv, (ptr)0, 0, Sbytevector_length(bv));
 }
 
 /************************************************************/
@@ -1317,7 +1318,7 @@ static void relink_code(ptr co, ptr sym_base, ptr *vspaces, uptr *vspace_offsets
     n = 0;
     while (n < m) {
       uptr entry, item_off, code_off; ptr obj;
- 
+
         entry = RELOCIT(t, n); n += 1;
         if (RELOC_EXTENDED_FORMAT(entry)) {
             item_off = RELOCIT(t, n); n += 1;
