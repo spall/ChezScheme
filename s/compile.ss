@@ -461,9 +461,9 @@
       [else (c-mkcode x)])))
 
 (define c-print-vfasl
-  (let ([->vfasl (foreign-procedure "(cs)to_vfasl" (scheme-object) scheme-object)])
+  (let ([->vfasl (foreign-procedure "(cs)to_vfasl" (scheme-object boolean) scheme-object)])
     (lambda (x p)
-      (let ([bv (->vfasl (c-vfaslobj x))])
+      (let ([bv (->vfasl (c-vfaslobj x) #t)])
         (put-u8 p (constant fasl-type-vfasl-size))
         (put-uptr p (bytevector-length bv))
         (put-bytevector p bv)))))
@@ -1614,7 +1614,7 @@
       (do-make-boot-header who out machine bootfiles)))
   
   (set-who! vfasl-convert-file
-    (let ([->vfasl (foreign-procedure "(cs)to_vfasl" (scheme-object) scheme-object)]
+    (let ([->vfasl (foreign-procedure "(cs)to_vfasl" (scheme-object boolean) scheme-object)]
           [vfasl-can-combine? (foreign-procedure "(cs)vfasl_can_combinep" (scheme-object) boolean)])
       (lambda (in-file out-file bootfile*)
         (let ([op ($open-file-output-port who out-file
@@ -1629,7 +1629,7 @@
                 (on-reset (close-port ip)
                   (let* ([write-out (lambda (x)
                                       (emit-header op (constant machine-type))
-                                      (let ([bv (->vfasl x)])
+                                      (let ([bv (->vfasl x (not bootfile*))])
                                         (put-u8 op (constant fasl-type-vfasl-size))
                                         (put-uptr op (bytevector-length bv))
                                         (put-bytevector op bv)))]

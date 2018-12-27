@@ -105,7 +105,7 @@ extern int S_fasl_stream_read PROTO((void *stream, octet *dest, iptr n));
 extern int S_fasl_intern_rtd(ptr *x);
 
 /* vfasl.c */
-extern ptr S_to_vfasl PROTO((ptr v));
+extern ptr S_to_vfasl PROTO((ptr v, IBOOL use_symdata));
 extern ptr S_vfasl PROTO((ptr bv, void *stream, iptr offset, iptr len));
 extern ptr S_vfasl_to PROTO((ptr v));
 extern IBOOL S_vfasl_can_combinep(ptr v);
