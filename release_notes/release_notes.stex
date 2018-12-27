@@ -58,6 +58,15 @@ Online versions of both books can be found at
 %-----------------------------------------------------------------------------
 \section{Functionality Changes}\label{section:functionality}
 
+\subsection{Faster loading format (9.5.1)}
+
+The new procedure \scheme{vfasl-convert-file} converts a file to a
+format that can be loaded more quickly, especially for an uncompressed
+boot file. When the new \scheme{compile-vfasl} parameter is set to
+\scheme{#t}, then functions like \scheme{compile-to-port} generate
+that format directly.
+
+
 \subsection{Procedure arity-mask adjustment and redirection (9.5.1)}
 
 The new procedure \scheme{make-arity-wrapper-procedure} creates a

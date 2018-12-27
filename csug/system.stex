@@ -1603,6 +1603,19 @@ as part of a binary-only package.
 
 %----------------------------------------------------------------------------
 \entryheader
+\formdef{vfasl-convert-file}{\categoryprocedure}{(vfasl-convert-file \var{input-path} \var{output-path} \var{base-boots})}
+\returns unspecified
+\listlibraries
+\endentryheader
+
+Converts a compiled file to one that may load more quickly, especially
+in the case of a boot file. The converted file is a boot file if
+\var{base-boots} is a list of strings, otherwise \var{base-boots} must
+be \scheme{#f} to create a non-boot file.
+
+
+%----------------------------------------------------------------------------
+\entryheader
 \formdef{machine-type}{\categoryprocedure}{(machine-type)}
 \returns the current machine type
 \listlibraries
@@ -2471,6 +2484,20 @@ When this parameter is \scheme{#t}, the default, \scheme{compile-file},
 \scheme{compile-program}, \scheme{compile-to-file},
 \scheme{compile-whole-program}, and \scheme{strip-fasl-file} compress
 the object files they create.
+
+
+%----------------------------------------------------------------------------
+\entryheader
+\formdef{compile-vfasl}{\categorythreadparameter}{compile-vfasl}
+\listlibraries
+\endentryheader
+
+\noindent
+When this parameter is \scheme{#t}, \scheme{compile-file},
+\scheme{compile-library}, \scheme{compile-script},
+\scheme{compile-program}, \scheme{compile-to-file}, \scheme{compile-to-port}, and
+\scheme{compile-whole-program} generate output in the same format
+as \scheme{vfasl-convert-file}, instead of the default format.
 
 
 %----------------------------------------------------------------------------

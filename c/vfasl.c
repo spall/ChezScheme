@@ -41,11 +41,16 @@ a |     [impure_record] ...  -> space_impure_record
 t  /    [rtd reference offset] ...
 a |     [singleton reference offset] ...
 b |
-l |     [symbol data]        ; to be interned; empty for boot mode
+l |     [symdata]             ; for interning; empty for boot mode
 e  \
     \_  [bitmap of pointers to relocate]
 
-        
+   Symbols make sense as in-memory form only for boot files that are
+   loaded directly into the static generation. Otherwise, symbol
+   strings are stored in a more fasl-like form in a "symdata" table
+   (but that's incompatible with loading directly into the static
+   generation.)
+
    The bitmap at the end has one bit for each pointer-sized word in
    the data, but it's shorter than the "data" size (divided by the
    pointer size then divided by 8 bits per byte) because the trailing
@@ -57,7 +62,9 @@ e  \
 
 typedef uptr vfoff;
 
-/* Similar to allocation spaces, but more detailed in some cases: */
+/* Similar to allocation spaces, but not all allocation spaces are
+   represented, and these spaces are more fine-grained in some
+   cases: */
 enum {
   vspace_symbol,
   vspace_rtd,
@@ -73,7 +80,8 @@ enum {
   vspaces_count
 };
 
-/* Needs to match order above: */
+/* Needs to match order above, maps vfasl spaces to allocation
+   spaces: */
 static ISPC vspace_spaces[] = {
   space_symbol,
   space_pure, /* rtd */
@@ -341,11 +349,11 @@ ptr S_vfasl(ptr bv, void *stream, iptr offset, iptr input_len)
   else
     symdata_syms = (ptr)0;
   
-  /* Fix up pointers. The initial content has all pointers relative to
-     the start of the data. If the data were all still contiguous,
-     we'd add the `data` address to all pointers. Since the spaces may
-     be disconnected, though, use `find_pointer_from_offset`. */
-  {
+  /* Fix up pointers. The initiaal content has all pointers relative to
+     the start of the data. In not-to-static mode, we can just add the
+     `data` address to all pointers. In to-static mode, since the
+     spaces may be discontiguous, use `find_pointer_from_offset`. */
+  if (to_static) {
     SPACE_OFFSET_DECLS;
     uptr p_off = 0;
     while (bm != bm_end) {
@@ -369,6 +377,25 @@ ptr S_vfasl(ptr bv, void *stream, iptr offset, iptr input_len)
       MAYBE_FIXUP(7);
 
 #     undef MAYBE_FIXUP
+      bm++;
+    }
+  } else {
+    ptr *p = (ptr *)data;
+    while (bm != bm_end) {
+      octet m = *bm;
+#     define MAYBE_FIXUP(i) if (m & (1 << i)) p[i] = ptr_add(p[i], (uptr)data)
+
+      MAYBE_FIXUP(0);
+      MAYBE_FIXUP(1);
+      MAYBE_FIXUP(2);
+      MAYBE_FIXUP(3);
+      MAYBE_FIXUP(4);
+      MAYBE_FIXUP(5);
+      MAYBE_FIXUP(6);
+      MAYBE_FIXUP(7);
+
+#     undef MAYBE_FIXUP
+      p += byte_bits;
       bm++;
     }
   }
@@ -888,6 +915,20 @@ static ptr vfasl_lookup_forward(vfasl_info *vfi, ptr p) {
   return vfasl_hash_table_ref(vfi->graph, p);
 }
 
+static void vfasl_relocate_parents(vfasl_info *vfi, ptr p) {
+  ptr ancestors = Snil;
+
+  while ((p != Sfalse) && !vfasl_lookup_forward(vfi, p)) {
+    ancestors = Scons(p, ancestors);
+    p = RECORDDESCPARENT(p);
+  }
+
+  while (ancestors != Snil) {
+    (void)vfasl_relocate_help(vfi, Scar(ancestors));
+    ancestors = Scdr(ancestors);
+  }
+}
+
 static ptr vfasl_find_room(vfasl_info *vfi, int s, ITYPE t, iptr n) {
   ptr p;
 
@@ -939,14 +980,12 @@ static ptr copy(vfasl_info *vfi, ptr pp, seginfo *si) {
               /* make sure base_rtd is first one registered */
               (void)vfasl_relocate_help(vfi, S_G.base_rtd);
             }
-            /* need type and parent before child; FIXME: stack overflow possible */
-            if (RECORDDESCPARENT(pp) != Sfalse) {
-              (void)vfasl_relocate_help(vfi, RECORDDESCPARENT(pp));
-            }
+            /* need parent before child */
+            vfasl_relocate_parents(vfi, RECORDDESCPARENT(pp));
 
             s = vspace_rtd;
           } else {
-            /* See gc.c for original rationale but the fine-grained
+            /* See gc.c for original rationale, but the fine-grained
                choices only matter when loading into the static
                generation, so we make */
             s = (RECORDDESCMPM(rtd) == FIX(0)
@@ -1440,6 +1479,7 @@ static ptr find_pointer_from_offset(uptr p_off, ptr *vspaces, uptr *vspace_offse
 }
 
 /*************************************************************/
+/* Symbols as symdata                                        */
 
 static uptr uptr_fasl_length(uptr v) {
   uptr len = 1;
@@ -1573,6 +1613,7 @@ static ptr *extract_symbols_from_symdata(ptr symdata, ptr symdata_end) {
 }
 
 /*************************************************************/
+/* C and library entries                                     */
 
 static void fasl_init_entry_tables()
 {
@@ -1617,53 +1658,36 @@ static void vfasl_check_install_library_entry(vfasl_info *vfi, ptr name)
 }
 
 /*************************************************************/
+/* Singletons, such as ""                                    */
+
+static ptr *singleton_refs[] = { &S_G.null_string,
+                                 &S_G.null_vector,
+                                 &S_G.null_fxvector,
+                                 &S_G.null_bytevector,
+                                 &S_G.null_immutable_string,
+                                 &S_G.null_immutable_vector,
+                                 &S_G.null_immutable_fxvector,
+                                 &S_G.null_immutable_bytevector,
+                                 &S_G.eqp,
+                                 &S_G.eqvp,
+                                 &S_G.equalp,
+                                 &S_G.symboleqp };
 
 static int detect_singleton(ptr p) {
-  if (p == S_G.null_string)
-    return 1;
-  else if (p == S_G.null_vector)
-    return 2;
-  else if (p == S_G.null_fxvector)
-    return 3;
-  else if (p == S_G.null_bytevector)
-    return 4;
-  else if (p == S_G.eqp)
-    return 5;
-  else if (p == S_G.eqvp)
-    return 6;
-  else if (p == S_G.equalp)
-    return 7;
-  else if (p == S_G.symboleqp)
-    return 8;
-  else
-    return 0;
+  unsigned i;
+  for (i = 0; i < sizeof(singleton_refs) / sizeof(ptr*); i++) {
+    if (p == *(singleton_refs[i]))
+      return i+1;
+  }
+  return 0;
 }
 
 static ptr lookup_singleton(int which) {
-  switch (which) {
-  case 1:
-    return S_G.null_string;
-  case 2:
-    return S_G.null_vector;
-  case 3:
-    return S_G.null_fxvector;
-  case 4:
-    return S_G.null_bytevector;
-  case 5:
-    return S_G.eqp;
-  case 6:
-    return S_G.eqvp;
-  case 7:
-    return S_G.equalp;
-  case 8:
-    return S_G.symboleqp;
-  default:
-    S_error("vfasl", "bad singleton index");
-    return (ptr)0;
-  }
+  return *(singleton_refs[which-1]);
 }  
   
 /*************************************************************/
+/* `eq?`-based hash table during saving as critical section  */
 
 typedef struct hash_entry {
   ptr key, value;
@@ -1768,7 +1792,6 @@ static ptr vfasl_calloc(uptr sz, uptr n) {
   memset(p, 0, sz);
   return p;
 }
-
 
 /*************************************************************/
 
