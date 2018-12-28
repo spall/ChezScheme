@@ -1522,7 +1522,10 @@ static void vfasl_register_symdata_string(vfasl_info *vfi, ptr str, IBOOL flag) 
 }
 
 static void vfasl_register_symdata(vfasl_info *vfi, ptr name) {
-  if (Sstringp(name)) {
+  if (name == Sfalse) {
+    vfasl_register_symdata_string(vfi, Sfalse, 1);
+    vfasl_register_symdata_string(vfi, Sfalse, 1);
+  } else if (Sstringp(name)) {
     vfasl_register_symdata_string(vfi, name, 0);
   } else {
     ptr unique_name = Scar(name), pretty_name = Scdr(name);
@@ -1592,11 +1595,16 @@ static ptr *extract_symbols_from_symdata(ptr symdata, ptr symdata_end) {
         symdata = string_fasl_read(symdata, &str, len, len2);
         syms[i] = S_intern3(&STRIT(str, len), len2, &STRIT(str, 0), len, Sfalse, Sfalse);
       } else {
-        /* has only pretty name */
+        /* has only pretty name or neither */
         len = uptr_fasl_read(&symdata);
-        len = (len >> 1);
-        symdata = string_fasl_read(symdata, &str, 0, len);
-        syms[i] = S_symbol(Scons(Sfalse, string_copy(str, len)));
+        if (len & 0x1) {
+          /* neither */
+          syms[i] = S_symbol(Sfalse);
+        } else {
+          len = (len >> 1);
+          symdata = string_fasl_read(symdata, &str, 0, len);
+          syms[i] = S_symbol(Scons(Sfalse, string_copy(str, len)));
+        }
       }
     } else {
       /* non-gensym */
