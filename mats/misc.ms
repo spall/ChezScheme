@@ -2314,28 +2314,17 @@
                     (printf "~s ~s\n" a b)))
               vfasl-content
               v))
-    (parameterize ([compile-vfasl #t])
-      (compile-to-file (list `(define (vfasled) ',vfasl-content)
-                             `(define (get-vfasled) vfasled)
-                             `(define (call-vfasled) (vfasled)))
-                       "testfile-vfasl.so"))
+    (compile-to-file (list `(define (vfasled) ',vfasl-content)
+                           `(define (get-vfasled) vfasled)
+                           `(define (call-vfasled) (vfasled)))
+                     "testfile-fasl.so")
+    (vfasl-convert-file "testfile-fasl.so" "testfile-vfasl.so" #f)
     (load "testfile-vfasl.so")
-    (parameterize ([compile-vfasl #f])
-      (compile-to-file (list `(define (also-vfasled) ',vfasl-content)
-                             `(define (get-also-vfasled) also-vfasled)
-                             `(define (call-also-vfasled) (also-vfasled)))
-                       "testfile-fasl.so"))
-    (vfasl-convert-file "testfile-fasl.so" "testfile-also-vfasl.so" #f)
-    (load "testfile-also-vfasl.so")
     #t)
   
   (same-vfasl-content? (vfasled))
   (eq? vfasled (get-vfasled))
-  (eq? (vfasled) (call-vfasled))
-
-  (same-vfasl-content? (also-vfasled))
-  (eq? also-vfasled (get-also-vfasled))
-  (eq? (also-vfasled) (call-also-vfasled)))
+  (eq? (vfasled) (call-vfasled)))
 
 (mat cost-center
   (error? ; wrong number of arguments

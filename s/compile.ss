@@ -441,32 +441,10 @@
       [else (c-assembler-output-error x)])))
 
 (define (c-print-fasl x p)
-  (cond
-   [(compile-vfasl) (c-print-vfasl x p)]
-   [else
-    (let ([t ($fasl-table)] [a? (or (generate-inspector-information) (eq? ($compile-profile) 'source))])
-       (c-build-fasl x t a?)
-       ($fasl-start p t
-         (lambda (p) (c-faslobj x t p a?))))]))
-
-(define (c-vfaslobj x)
-  (let f ([x x])
-    (record-case x
-      [(group) elt*
-       (apply vector (map c-vfaslobj elt*))]
-      [(visit-stuff) elt
-       (cons (constant visit-tag) (c-vfaslobj elt))]
-      [(revisit-stuff) elt
-       (cons (constant revisit-tag) (c-vfaslobj elt))]
-      [else (c-mkcode x)])))
-
-(define c-print-vfasl
-  (let ([->vfasl (foreign-procedure "(cs)to_vfasl" (scheme-object boolean) scheme-object)])
-    (lambda (x p)
-      (let ([bv (->vfasl (c-vfaslobj x) #t)])
-        (put-u8 p (constant fasl-type-vfasl-size))
-        (put-uptr p (bytevector-length bv))
-        (put-bytevector p bv)))))
+  (let ([t ($fasl-table)] [a? (or (generate-inspector-information) (eq? ($compile-profile) 'source))])
+     (c-build-fasl x t a?)
+     ($fasl-start p t
+       (lambda (p) (c-faslobj x t p a?)))))
 
 (define-record-type visit-chunk
   (nongenerative)
@@ -1614,7 +1592,7 @@
       (do-make-boot-header who out machine bootfiles)))
   
   (set-who! vfasl-convert-file
-    (let ([->vfasl (foreign-procedure "(cs)to_vfasl" (scheme-object boolean) scheme-object)]
+    (let ([->vfasl (foreign-procedure "(cs)to_vfasl" (scheme-object) scheme-object)]
           [vfasl-can-combine? (foreign-procedure "(cs)vfasl_can_combinep" (scheme-object) boolean)])
       (lambda (in-file out-file bootfile*)
         (let ([op ($open-file-output-port who out-file
@@ -1629,7 +1607,7 @@
                 (on-reset (close-port ip)
                   (let* ([write-out (lambda (x)
                                       (emit-header op (constant machine-type))
-                                      (let ([bv (->vfasl x (not bootfile*))])
+                                      (let ([bv (->vfasl x)])
                                         (put-u8 op (constant fasl-type-vfasl-size))
                                         (put-uptr op (bytevector-length bv))
                                         (put-bytevector op bv)))]

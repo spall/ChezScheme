@@ -27,7 +27,7 @@
 
         [vfasl_header]
      _
-    /   [symbol] ...         -> space_symbol  ; empty for non-boot mode
+    /   [symbol] ...         -> space_symbol
    /    [rtd] ...            -> space_pure
 d |     [closure] ...        -> space_pure
 a |     [impure] ...         -> space_impure
@@ -37,19 +37,11 @@ a |     [impure_record] ...  -> space_impure_record
    \    [data] ...           -> space_data
     \_  [reloc] ...          -> (not kept for direct-to-static)
      _
-    /   [symbol reference offset] ...
-t  /    [rtd reference offset] ...
-a |     [singleton reference offset] ...
-b |
-l |     [symdata]             ; for interning; empty for boot mode
-e  \
-    \_  [bitmap of pointers to relocate]
-
-   Symbols make sense as in-memory form only for boot files that are
-   loaded directly into the static generation. Otherwise, symbol
-   strings are stored in a more fasl-like form in a "symdata" table
-   (but that's incompatible with loading directly into the static
-   generation.)
+t   /   [symbol reference offset] ...
+a  /    [rtd reference offset] ...
+b |     [singleton reference offset] ...
+l  \
+e   \_  [bitmap of pointers to relocate]
 
    The bitmap at the end has one bit for each pointer-sized word in
    the data, but it's shorter than the "data" size (divided by the
@@ -97,7 +89,6 @@ static ISPC vspace_spaces[] = {
 typedef struct vfasl_header {
   vfoff data_size;
   vfoff table_size;
-  vfoff symdata_size; /* also included in table_size */
 
   vfoff result_offset;
 
@@ -129,13 +120,9 @@ struct vfasl_count_and_chunk {
 };
 
 typedef struct vfasl_info {
-  IBOOL use_symdata;
-
   ptr base_addr; /* address to make relocations relative to */
 
   uptr sym_count;
-  uptr symdata_size;
-  ptr symdata;
 
   vfoff symref_count;
   vfoff *symrefs;
@@ -172,8 +159,7 @@ static uptr sweep_code_object(vfasl_info *vfi, ptr co);
 static uptr sweep_record(vfasl_info *vfi, ptr co);
 static uptr sweep(vfasl_info *vfi, ptr p);
 
-static void relink_code(ptr co, ptr sym_base, ptr *symdata_syms,
-                        ptr *vspaces, uptr *vspace_offsets, IBOOL to_static);
+static void relink_code(ptr co, ptr sym_base, ptr *vspaces, uptr *vspace_offsets, IBOOL to_static);
 static ptr find_pointer_from_offset(uptr p_off, ptr *vspaces, uptr *vspace_offsets);
 
 static void vfasl_relocate(vfasl_info *vfi, ptr *ppp);
@@ -190,14 +176,6 @@ static void vfasl_check_install_library_entry(vfasl_info *vfi, ptr name);
 
 static int detect_singleton(ptr p);
 static ptr lookup_singleton(int which);
-
-static uptr uptr_fasl_length(uptr v);
-static ptr uptr_fasl_write(ptr p, uptr v, uptr carry);
-static void vfasl_register_symdata_string(vfasl_info *vfi, ptr str, IBOOL flag);
-static void vfasl_register_symdata(vfasl_info *vfi, ptr name);
-static ptr string_fasl_read(ptr symdata, ptr *_str, uptr offset, uptr len);
-static ptr string_copy(ptr str, uptr len);
-static ptr *extract_symbols_from_symdata(ptr symdata, ptr symdata_end);
 
 typedef struct vfasl_hash_table vfasl_hash_table;
 static vfasl_hash_table *make_vfasl_hash_table(IBOOL permanent);
@@ -222,7 +200,7 @@ ptr S_vfasl(ptr bv, void *stream, iptr offset, iptr input_len)
 # define VSPACE_END(s) ptr_add(vspaces[(s)], VSPACE_LENGTH(s))
   ptr tc = get_thread_context();
   vfasl_header header;
-  ptr data, table, symdata, *symdata_syms;
+  ptr data, table;
   vfoff *symrefs, *rtdrefs, *singletonrefs;
   octet *bm, *bm_end;
   iptr used_len;
@@ -256,7 +234,7 @@ ptr S_vfasl(ptr bv, void *stream, iptr offset, iptr input_len)
     memcpy(data, base_addr, header.data_size);
     table = ptr_add(base_addr, header.data_size);
   } else {
-    if ((S_vfasl_boot_mode > 0) && (header.symdata_size == 0)) {
+    if (S_vfasl_boot_mode > 0) {
       for (s = 0; s < vspaces_count; s++) {
         uptr sz = vspace_offsets[s+1] - vspace_offsets[s];
         if (sz > 0) {
@@ -296,14 +274,13 @@ ptr S_vfasl(ptr bv, void *stream, iptr offset, iptr input_len)
   symrefs = table;
   rtdrefs = ptr_add(symrefs, header.symref_count * sizeof(vfoff));
   singletonrefs = ptr_add(rtdrefs, header.rtdref_count * sizeof(vfoff));
-  symdata = ptr_add(singletonrefs, header.singletonref_count * sizeof(vfoff));
-  bm = ptr_add(symdata, header.symdata_size);
+  bm = ptr_add(singletonrefs, header.singletonref_count * sizeof(vfoff));
   bm_end = ptr_add(table, header.table_size);
 
   if (0)
     printf("\n"
            "hdr  %ld\n"
-           "syms %ld | %ld\n"
+           "syms %ld\n"
            "rtds %ld\n"
            "clos %ld\n"
            "code %ld\n"
@@ -312,7 +289,7 @@ ptr S_vfasl(ptr bv, void *stream, iptr offset, iptr input_len)
            "othr %ld\n"
            "tabl %ld  symref %ld  rtdref %ld  sglref %ld\n",
            sizeof(vfasl_header),
-           VSPACE_LENGTH(vspace_symbol), header.symdata_size,
+           VSPACE_LENGTH(vspace_symbol),
            VSPACE_LENGTH(vspace_rtd),
            VSPACE_LENGTH(vspace_closure),
            VSPACE_LENGTH(vspace_code),
@@ -344,11 +321,6 @@ ptr S_vfasl(ptr bv, void *stream, iptr offset, iptr input_len)
   } while (0)
 #define SPACE_PTR(off) ptr_add(vspaces[s2], (off) - offset2)
 
-  if (header.symdata_size)
-    symdata_syms = extract_symbols_from_symdata(symdata, bm);
-  else
-    symdata_syms = (ptr)0;
-  
   /* Fix up pointers. The initiaal content has all pointers relative to
      the start of the data. In not-to-static mode, we can just add the
      `data` address to all pointers. In to-static mode, since the
@@ -455,13 +427,9 @@ ptr S_vfasl(ptr bv, void *stream, iptr offset, iptr input_len)
       INC_SPACE_OFFSET(p2_off);
       p2 = SPACE_PTR(p2_off);
       sym_pos = UNFIX(*(ptr **)p2);
-      if (symdata_syms)
-        sym = symdata_syms[sym_pos];
-      else {
-        sym = TYPE(ptr_add(syms, sym_pos * size_symbol), type_symbol);
-        if ((val = SYMVAL(sym)) != sunbound)
-          sym = val;
-      }
+      sym = TYPE(ptr_add(syms, sym_pos * size_symbol), type_symbol);
+      if ((val = SYMVAL(sym)) != sunbound)
+        sym = val;
       *(ptr **)p2 = sym;
     }
   }
@@ -543,7 +511,7 @@ ptr S_vfasl(ptr bv, void *stream, iptr offset, iptr input_len)
     ptr code = TYPE(vspaces[vspace_code], type_typed_object);
     ptr code_end = TYPE(VSPACE_END(vspace_code), type_typed_object);
     while (code != code_end) {
-      relink_code(code, sym_base, symdata_syms, vspaces, vspace_offsets, to_static);
+      relink_code(code, sym_base, vspaces, vspace_offsets, to_static);
       code = ptr_add(code, size_code(CODELEN(code)));
     }
   }
@@ -570,14 +538,11 @@ ptr S_vfasl_to(ptr bv)
 /************************************************************/
 /* Saving                                                   */
 
-static void vfasl_init(vfasl_info *vfi, IBOOL use_symdata) {
+static void vfasl_init(vfasl_info *vfi) {
   int s;
   
-  vfi->use_symdata = use_symdata;
   vfi->base_addr = (ptr)0;
   vfi->sym_count = 0;
-  vfi->symdata_size = 0;
-  vfi->symdata = (ptr)0;
   vfi->symref_count = 0;
   vfi->symrefs = (ptr)0;
   vfi->base_rtd = S_G.base_rtd;
@@ -604,7 +569,7 @@ static void vfasl_init(vfasl_info *vfi, IBOOL use_symdata) {
   }
 }
 
-ptr S_to_vfasl(ptr v, IBOOL use_symdata)
+ptr S_to_vfasl(ptr v)
 {
   vfasl_info *vfi;
   vfasl_header header;
@@ -630,7 +595,7 @@ ptr S_to_vfasl(ptr v, IBOOL use_symdata)
 
   vfi = vfasl_malloc(sizeof(vfasl_info));
 
-  vfasl_init(vfi, use_symdata);
+  vfasl_init(vfi);
 
   /* First pass: determine sizes */
 
@@ -640,10 +605,7 @@ ptr S_to_vfasl(ptr v, IBOOL use_symdata)
 
   size = sizeof(vfasl_header);
 
-  if (!use_symdata)
-    data_size = vfi->spaces[0].total_bytes;
-  else
-    data_size = 0;
+  data_size = vfi->spaces[0].total_bytes;
   for (s = 1; s < vspaces_count; s++) {
     header.vspace_rel_offsets[s-1] = data_size;
     data_size += vfi->spaces[s].total_bytes;
@@ -658,12 +620,6 @@ ptr S_to_vfasl(ptr v, IBOOL use_symdata)
   header.symref_count = vfi->symref_count;
   header.rtdref_count = vfi->rtdref_count;
   header.singletonref_count = vfi->singletonref_count;
-
-  if (use_symdata && vfi->sym_count)
-    vfi->symdata_size += uptr_fasl_length(vfi->sym_count);
-  header.symdata_size = vfi->symdata_size;
-
-  size += vfi->symdata_size;
 
   header.table_size = size - data_size - sizeof(header); /* doesn't yet include the bitmap */
 
@@ -686,18 +642,14 @@ ptr S_to_vfasl(ptr v, IBOOL use_symdata)
     vfasl_chunk *c;
 
     c = vfasl_malloc(sizeof(vfasl_chunk));
-    if ((s == vspace_symbol) && use_symdata)
-      c->bytes = vfasl_malloc(vfi->spaces[s].total_bytes);
-    else
-      c->bytes = p;
+    c->bytes = p;
     c->length = vfi->spaces[s].total_bytes;
     c->used = 0;
     c->swept = 0;
     c->next = (ptr)0;
     vfi->spaces[s].first = c;
 
-    if ((s != vspace_symbol) || !use_symdata)
-      p = ptr_add(p, vfi->spaces[s].total_bytes);
+    p = ptr_add(p, vfi->spaces[s].total_bytes);
     vfi->spaces[s].total_bytes = 0;
   }
 
@@ -710,11 +662,6 @@ ptr S_to_vfasl(ptr v, IBOOL use_symdata)
 
   vfi->singletonrefs = p;
   p = ptr_add(p, sizeof(vfoff) * vfi->singletonref_count);
-
-  if (use_symdata && vfi->sym_count) {
-    vfi->symdata = uptr_fasl_write(p, vfi->sym_count, 0);
-    p = ptr_add(p, vfi->symdata_size);
-  }
 
   vfi->sym_count = 0;
   vfi->symref_count = 0;
@@ -796,7 +743,7 @@ IBOOL S_vfasl_can_combinep(ptr v)
   /* Run a "first pass" */
   
   vfi = vfasl_malloc(sizeof(vfasl_info));
-  vfasl_init(vfi, 0);
+  vfasl_init(vfi);
   (void)vfasl_copy_all(vfi, v);
 
   installs = vfi->installs_library_entry;
@@ -829,10 +776,8 @@ static ptr vfasl_copy_all(vfasl_info *vfi, ptr v) {
 
         switch(s) {
         case vspace_symbol:
-          if (!vfi->use_symdata) {
-            while (pp < pp_end) {
-              pp = ptr_add(pp, sweep(vfi, TYPE((ptr)pp, type_symbol)));
-            }
+          while (pp < pp_end) {
+            pp = ptr_add(pp, sweep(vfi, TYPE((ptr)pp, type_symbol)));
           }
           break;
         case vspace_closure:
@@ -1108,17 +1053,18 @@ static ptr copy(vfasl_info *vfi, ptr pp, seginfo *si) {
         }
     } else if (t == type_symbol) {
         iptr pos = vfi->sym_count++;
+        ptr name = SYMNAME(pp);
+        if (Sstringp(name))
+          vfasl_check_install_library_entry(vfi, name);
+        else if (!Spairp(name) || (Scar(name) == Sfalse))
+          vfasl_fail(vfi, "gensym without unique name");
         FIND_ROOM(vfi, vspace_symbol, type_symbol, size_symbol, p);
         INITSYMVAL(p) = FIX(pos);   /* stores symbol index for now; will get reset on load */
         INITSYMPVAL(p) = Snil;      /* will get reset on load */
         INITSYMPLIST(p) = Snil;
         INITSYMSPLIST(p) = Snil;
-        INITSYMNAME(p) = SYMNAME(pp);
+        INITSYMNAME(p) = name;
         INITSYMHASH(p) = SYMHASH(pp);
-        if (Sstringp(SYMNAME(pp)))
-          vfasl_check_install_library_entry(vfi, SYMNAME(pp));
-        if (vfi->use_symdata)
-          vfasl_register_symdata(vfi, SYMNAME(pp));
     } else if (t == type_flonum) {
         FIND_ROOM(vfi, vspace_data, type_flonum, size_flonum, p);
         FLODAT(p) = FLODAT(pp);
@@ -1388,8 +1334,7 @@ static uptr sweep_code_object(vfasl_info *vfi, ptr co) {
     return size_code(CODELEN(co));
 }
 
-static void relink_code(ptr co, ptr sym_base, ptr *symdata_syms,
-                        ptr *vspaces, uptr *vspace_offsets, IBOOL to_static) {
+static void relink_code(ptr co, ptr sym_base, ptr *vspaces, uptr *vspace_offsets, IBOOL to_static) {
     ptr t; iptr a, m, n;
 
     t = CODERELOC(co);
@@ -1433,14 +1378,10 @@ static void relink_code(ptr co, ptr sym_base, ptr *symdata_syms,
               if (tag == VFASL_RELOC_LIBRARY_ENTRY_CODE_TAG)
                 obj = CLOSCODE(obj);
             } else if (tag == VFASL_RELOC_SYMBOL_TAG) {
-              if (symdata_syms)
-                obj = symdata_syms[pos];
-              else {
-                ptr val;
-                obj = TYPE(ptr_add(sym_base, pos * size_symbol), type_symbol);
-                if ((val = SYMVAL(obj)) != sunbound)
-                  obj = val;
-              }
+              ptr val;
+              obj = TYPE(ptr_add(sym_base, pos * size_symbol), type_symbol);
+              if ((val = SYMVAL(obj)) != sunbound)
+                obj = val;
             } else {
               S_error_abort("vfasl: bad relocation tag");
             }
@@ -1476,148 +1417,6 @@ static ptr find_pointer_from_offset(uptr p_off, ptr *vspaces, uptr *vspace_offse
     s++;
 
   return TYPE(ptr_add(vspaces[s], p_off - vspace_offsets[s]), t);
-}
-
-/*************************************************************/
-/* Symbols as symdata                                        */
-
-static uptr uptr_fasl_length(uptr v) {
-  uptr len = 1;
-  while (v > 0x7F) {
-    v >>= 7;
-    len++;
-  }
-  return len;
-}
-
-static ptr uptr_fasl_write(ptr p, uptr v, uptr carry) {
-  if (v > 0x7F)
-    p = uptr_fasl_write(p, v >> 7, 0x80);
-  *(unsigned char*)p = ((v & 0x7F) | carry);
-  return ptr_add(p, 1);
-}
-
-static void vfasl_register_symdata_string(vfasl_info *vfi, ptr str, IBOOL flag) {
-  if (str == Sfalse) {
-    /* assert: flag == 1; a "length" of 0 means Sfalse */
-    if (vfi->symdata)
-      vfi->symdata = uptr_fasl_write(vfi->symdata, flag, 0);
-    else
-      vfi->symdata_size += uptr_fasl_length(flag);
-  } else {
-    uptr len = Sstring_length(str), len_val = len, i;
-    if (flag) len_val++; /* increment to distinguish from Sfalse */
-    len_val = (len_val << 1) | flag;
-    if (vfi->symdata)
-      vfi->symdata = uptr_fasl_write(vfi->symdata, len_val, 0);
-    else
-      vfi->symdata_size += uptr_fasl_length(len_val);
-    for (i = 0; i < len; i++) {
-      if (vfi->symdata)
-        vfi->symdata = uptr_fasl_write(vfi->symdata, Sstring_ref(str, i), 0);
-      else
-        vfi->symdata_size += uptr_fasl_length(Sstring_ref(str, i));
-    }
-  }
-}
-
-static void vfasl_register_symdata(vfasl_info *vfi, ptr name) {
-  if (name == Sfalse) {
-    vfasl_register_symdata_string(vfi, Sfalse, 1);
-    vfasl_register_symdata_string(vfi, Sfalse, 1);
-  } else if (Sstringp(name)) {
-    vfasl_register_symdata_string(vfi, name, 0);
-  } else {
-    ptr unique_name = Scar(name), pretty_name = Scdr(name);
-    vfasl_register_symdata_string(vfi, unique_name, 1);
-    vfasl_register_symdata_string(vfi, pretty_name, 0);
-  }
-}
-
-static uptr uptr_fasl_read(ptr *pp)
-{
-  ptr p = *pp;
-  uptr v = 0, c;
-  do {
-    c = *(unsigned char *)p;
-    p = ptr_add(p, 1);
-    v = (v << 7) + (c & 0x7F);
-  } while (c & 0x80);
-  *pp = p;
-  return v;
-}
-
-static ptr string_fasl_read(ptr symdata, ptr *_str, uptr offset, uptr len) {
-  uptr i;
-  ptr str = *_str;
-
-  if ((uptr)Sstring_length(str) < offset+len) {
-    uptr size = 2 * (Sstring_length(str) + offset + len);
-    str = S_string(NULL, size);
-    memcpy(&STRIT(str, 0), &STRIT(*_str, 0), offset * string_char_bytes);
-    *_str = str;
-  }
-
-  for (i = 0; i < len; i++) {
-    uptr c = uptr_fasl_read(&symdata);
-    Sstring_set(str, i+offset, c);
-  }
-
-  return symdata;
-}
-
-static ptr string_copy(ptr str, uptr len) {
-  ptr str2 = S_string(NULL, len);
-  memcpy(&STRIT(str2, 0), &STRIT(str, 0), len * string_char_bytes);
-  return str2;
-}
-
-static ptr *extract_symbols_from_symdata(ptr symdata, ptr symdata_end) {
-  ptr tc = get_thread_context(), str;
-  uptr count, len, len2, i;
-  ptr *syms;
-
-  count = uptr_fasl_read(&symdata);
-  thread_find_room(tc, typemod, ptr_align(count * sizeof(ptr)), syms);
-
-  str = S_string(NULL, 64); /* allocate initial buffer */
-
-  for (i = 0; i < count; i++) {
-    len = uptr_fasl_read(&symdata);
-    if (len & 0x1) {
-      /* gensym */
-      len >>= 1;
-      if (len > 0) {
-        len--;
-        symdata = string_fasl_read(symdata, &str, 0, len);
-        len2 = uptr_fasl_read(&symdata);
-        len2 = (len2 >> 1);
-        symdata = string_fasl_read(symdata, &str, len, len2);
-        syms[i] = S_intern3(&STRIT(str, len), len2, &STRIT(str, 0), len, Sfalse, Sfalse);
-      } else {
-        /* has only pretty name or neither */
-        len = uptr_fasl_read(&symdata);
-        if (len & 0x1) {
-          /* neither */
-          syms[i] = S_symbol(Sfalse);
-        } else {
-          len = (len >> 1);
-          symdata = string_fasl_read(symdata, &str, 0, len);
-          syms[i] = S_symbol(Scons(Sfalse, string_copy(str, len)));
-        }
-      }
-    } else {
-      /* non-gensym */
-      len >>= 1;
-      symdata = string_fasl_read(symdata, &str, 0, len);
-      syms[i] = S_intern_sc(&STRIT(str, 0), len, Sfalse);
-    }
-  }
-
-  if (symdata != symdata_end)
-    S_error_abort("symdata extract failed");
-
-  return syms;
 }
 
 /*************************************************************/
