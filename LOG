@@ -1050,3 +1050,6 @@
 - adjust cp0 to avoid turning errors like `(let ([x (values 1 2)]) x)`
   into programs that return multiple values
     cp0.ss, primdata.ss, cmacros.ss, syntax.ss, cp0.ms
+- added `compute-size-increments`
+    inspect.ss, bitset.ss, cmacros.ss, primdata.ss, Mf-base,
+    misc.ms, debug.stex
