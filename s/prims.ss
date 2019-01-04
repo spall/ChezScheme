@@ -1518,6 +1518,18 @@
       ($oops '$thread-tc "~s is not a thread" thread))
     ($thread-tc thread)))
 
+;; call with tc-mutex on a thread that hasn't terminated
+(define-who $thread-stack-token
+  (lambda (thread)
+    (include "types.ss")
+    (unless (thread? thread)
+      ($oops who "~s is not a thread" thread))
+    (let ([tc ($thread-tc thread)])
+      (or ($tc-field 'stack-token tc)
+          (let ([st (make-stack-token thread)])
+            ($tc-field 'stack-token tc st)
+            st)))))
+
 (when-feature pthreads
 
 (define $raw-collect-cond (lambda () ($raw-collect-cond)))
@@ -1535,6 +1547,9 @@
 (define $close-resurrected-mutexes&conditions)
 (define $tc-mutex)
 (define $collect-cond)
+(define thread-continuation-roots)
+(define thread-terminated?)
+(define get-initial-thread)
 (let ()
 ; scheme-object's below are mutex and condition addresses, which are
 ; assumed to be at least ptr aligned and therefore look like fixnums
@@ -1551,6 +1566,7 @@
 (define cw (foreign-procedure "(cs)condition_wait" (scheme-object scheme-object scheme-object) boolean))
 (define cb (foreign-procedure "(cs)condition_broadcast" (scheme-object) void))
 (define cs (foreign-procedure "(cs)condition_signal" (scheme-object) void))
+(define ts (foreign-procedure "(cs)threads" () scheme-object))
 
 (define-record-type (condition $make-condition $condition?)
   (fields (mutable addr $condition-addr $condition-addr-set!))
@@ -1683,6 +1699,32 @@
 
 (set! $tc-mutex ($make-mutex ($raw-tc-mutex)))
 (set! $collect-cond ($make-condition ($raw-collect-cond)))
+
+(set-who! thread-continuation-roots
+  (lambda (thread)
+    (unless (thread? thread)
+      ($oops who "~s is not a thread" thread))
+    (with-tc-mutex
+     (let ([tc ($thread-tc thread)])
+       (cond
+        [(eqv? tc 0)
+         ;; Thread has terminated
+         '()]
+        [else
+         (list ($thread-stack-token thread)
+               ($tc-field 'stack-link tc)
+               ($tc-field 'winders tc)
+               ($tc-field 'attachments tc))])))))
+
+(set-who! thread-terminated?
+  (lambda (thread)
+    (unless (thread? thread)
+      ($oops who "~s is not a thread" thread))
+    (eqv? ($thread-tc thread) 0)))
+
+(set! get-initial-thread
+  (let ([thread (car (ts))])
+    (lambda () thread)))
 ))
 
 (let ()

@@ -2387,6 +2387,7 @@
     (make-object x)))
 
 (let ()
+  (include "types.ss")
   (define rtd-size (csv7:record-field-accessor #!base-rtd 'size))
   (define rtd-flds (csv7:record-field-accessor #!base-rtd 'flds))
   (define $generation (foreign-procedure "(cs)generation" (ptr) ptr))
@@ -2428,6 +2429,52 @@
     (lambda (n)
       (fxlogand (fx+ n (fx- (constant byte-alignment) 1)) (fx- (constant byte-alignment)))))
   (include "bitset.ss")
+
+  (define (thread->stack-objects thread)
+    (with-tc-mutex
+     (let ([tc ($thread-tc thread)])
+       (cond
+        [(eqv? tc 0)
+         ;; Thread terminated
+         '()]
+        [#t '()]
+        [(zero? ($object-ref 'integer-32 tc (constant tc-active-disp)))
+         ;; Inactive, so we can traverse it while holding the tc mutex
+         (let ([stack ($object-ref 'scheme-object tc (constant tc-scheme-stack-disp))])
+           (let loop ([frame ($object-ref 'scheme-object tc (constant tc-sfp-disp))] [x* '()])
+             (cond
+              [(fx= frame stack)
+               x*]
+              [else
+               (let* ([ret ($object-ref 'scheme-object frame 0)]
+                      [size ($object-ref 'scheme-object ret (constant return-address-frame-size-disp))]
+                      [livemask ($object-ref 'scheme-object ret (constant return-address-livemask-disp))]
+                      [next-frame (fx- frame size)])
+                 (let frame-loop ([p (fx+ next-frame 1)] [livemask livemask] [x* x*])
+                   (if (eqv? livemask 0)
+                       (loop next-frame x*)
+                       (frame-loop (fx+ p 1)
+                                   (bitwise-arithmetic-shift-right livemask 1)
+                                   (if (bitwise-bit-set? livemask 0)
+                                       (cons ($object-ref 'scheme-object p 0) x*)
+                                       x*)))))])))]
+        [else
+         ;; Can't inspect active thread
+         '()]))))
+
+  (define (thread->objects thread)
+    ;; Get immediate content while holding the tc mutex to be sure
+    ;; that the thread doesn't terminate while getting its content
+    (with-tc-mutex
+     (let ([tc ($thread-tc thread)])
+       (cond
+        [(eqv? tc 0)
+         ;; Thread terminated
+         '()]
+        [else
+         ($thread-stack-token thread) ; force creation
+         (map (lambda (disp) ($object-ref 'scheme-object tc disp))
+              tc-ptr-offsets)]))))
 
   ;; call with interrupts disabled if not `single-inspect-mode?`
   (set-who! $compute-size-increments
@@ -2517,6 +2564,10 @@
                     ((fx= i n) size)))]
                [(fxvector? x) (align (fx+ (constant header-size-fxvector) (fx* (fxvector-length x) (constant ptr-bytes))))]
                [(bytevector? x) (align (fx+ (constant header-size-bytevector) (bytevector-length x)))]
+               [(stack-token? x)
+                (fold-left (lambda (size x) (fx+ size (compute-size x)))
+                           (align (rtd-size (record-type-descriptor stack-token)))
+                           (thread->stack-objects (stack-token-thread x)))]
                [($record? x)
                 (let ([rtd ($record-type-descriptor x)])
                   (fold-left (lambda (size fld)
@@ -2595,12 +2646,10 @@
                   (compute-size ($port-info x))
                   (compute-size (port-name x)))]
                [(thread? x)
-                (let ([tc ($object-ref 'scheme-object x (constant thread-tc-disp))])
-                  (fold-left
-                    (lambda (size disp)
-                      (fx+ size (compute-size ($object-ref 'scheme-object tc disp))))
-                    (constant size-thread)
-                    tc-ptr-offsets))]
+                (fold-left (lambda (size x)
+                             (fx+ size (compute-size x)))
+                           (constant size-thread)
+                           (thread->objects x))]
                [($tlc? x)
                 (fx+ (constant size-tlc)
                   (compute-size ($tlc-ht x))
@@ -2622,11 +2671,16 @@
                        (eq-bitset-add! size-ht-or-bitset x)
                        (eq-hashtable-set! ephemeron-non-keys x #t))
                      x*)
-           (map (lambda (x)
-                  (eq-bitset-remove! size-ht-or-bitset x)
-                  (eq-hashtable-delete! ephemeron-non-keys x)
-                  (compute-size x))
-                x*)])])))
+           ;; Traverse `x*` in order:
+           (let loop ([x* x*])
+             (cond
+              [(null? x*) '()]
+              [else
+               (let ([x (car x*)])
+                 (eq-bitset-remove! size-ht-or-bitset x)
+                 (eq-hashtable-delete! ephemeron-non-keys x)
+                 (cons (compute-size x)
+                       (loop (cdr x*))))]))])])))
 
   (set-who! $compute-size
     (case-lambda
@@ -2659,7 +2713,7 @@
       (define-counters (type-names type-counts incr!)
         pair symbol vector fxvector bytevector string box flonum bignum ratnum exactnum
         inexactnum continuation stack procedure code-object reloc-table port thread tlc
-        rtd-counts)
+        rtd-counts stack-token)
       (define compute-composition!
         (lambda (x)
           (unless (or ($immediate? x)
@@ -2687,6 +2741,9 @@
              (vector-for-each compute-composition! x)]
             [(fxvector? x) (incr! fxvector (align (fx+ (constant header-size-fxvector) (fx* (fxvector-length x) (constant ptr-bytes)))))]
             [(bytevector? x) (incr! bytevector (align (fx+ (constant header-size-bytevector) (bytevector-length x))))]
+            [(stack-token? x)
+             (incr! stack-token (align (rtd-size (record-type-descriptor stack-token))))
+             (for-each compute-composition! (thread->stack-objects (stack-token-thread x)))]
             [($record? x)
              (let ([rtd ($record-type-descriptor x)])
                (let ([p (eq-hashtable-ref rtd-ht rtd #f)] [size (align (rtd-size rtd))])
@@ -2772,8 +2829,7 @@
              (compute-composition! (port-name x))]
             [(thread? x)
              (incr! thread (constant size-thread))
-             (let ([tc ($object-ref 'scheme-object x (constant thread-tc-disp))])
-               (for-each (lambda (disp) (compute-composition! ($object-ref 'scheme-object tc disp))) tc-ptr-offsets))]
+             (for-each compute-composition! (thread->objects x))]
             [($tlc? x)
              (incr! tlc (constant size-tlc))
              (compute-composition! ($tlc-ht x))

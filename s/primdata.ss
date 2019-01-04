@@ -893,6 +893,7 @@
 
 (define-symbol-flags* ([libraries] [flags primitive proc]) ; constant parameters
   (directory-separator [sig [() -> (char)]] [flags pure unrestricted true cp02])
+  (get-initial-thread [sig [() -> (boolean)]] [flags pure unrestricted true])
   (get-process-id [sig [() -> (uint)]] [flags pure unrestricted])
   (get-thread-id [sig [() -> (uint)]] [flags discard unrestricted])
   (machine-type [sig [() -> (symbol)]] [flags pure unrestricted true cp02])
@@ -1687,6 +1688,8 @@
   (textual-port-output-size [sig [(textual-output-port) -> (length)]] [flags discard])
   (thread? [sig [(ptr) -> (boolean)]] [flags pure unrestricted mifoldable discard])
   (thread-condition? [feature pthreads] [sig [(ptr) -> (boolean)]] [flags pure unrestricted mifoldable discard])
+  (thread-continuation-roots [sig [(ptr) -> (ptr)]] [flags discard true])
+  (thread-terminated? [sig [(ptr) -> (boolean)]] [flags discard])
   (top-level-bound? [sig [(symbol) (symbol environment) -> (boolean)]] [flags discard])
   (top-level-mutable? [sig [(symbol) (symbol environment) -> (boolean)]] [flags discard])
   (top-level-syntax [sig [(symbol) (symbol environment) -> (ptr)]] [flags discard])
@@ -2239,6 +2242,7 @@
   ($tc-field [flags])
   ($tc [flags])
   ($thread-list [flags])
+  ($thread-stack-token [flags])
   ($thread-tc [flags])
   ($tlc? [flags pure unrestricted mifoldable discard])
   ($tlc-ht [flags mifoldable discard])

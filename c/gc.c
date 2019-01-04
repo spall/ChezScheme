@@ -1773,6 +1773,7 @@ static void sweep_thread(p) ptr p; {
     /* iptr SCHEMESTACKSIZE */
     relocate(&WINDERS(tc))
     relocate(&ATTACHMENTS(tc))
+    relocate(&STACKTOKEN(tc))
     relocate_return_addr(&FRAME(tc,0))
     sweep_stack((uptr)SCHEMESTACK(tc), (uptr)SFP(tc), (uptr)FRAME(tc,0));
     relocate(&U(tc))

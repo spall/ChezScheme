@@ -110,6 +110,9 @@
                            (define profile-counter-count-set! (record-mutator '#,rtd 0))))]))])
   (a profile-counter? make-profile-counter profile-counter-count profile-counter-count-set!))
 
+(define-record-type stack-token
+  (fields thread)
+  (nongenerative #{stack-token e381obst208v7wijlkhcy2e1f-0}))
 
 (define-record-type winder
   (fields (immutable in) (immutable out) (immutable attachments))

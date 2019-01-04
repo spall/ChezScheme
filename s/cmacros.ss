@@ -1357,6 +1357,7 @@
    [iptr scheme-stack-size]
    [ptr winders]
    [ptr attachments]
+   [ptr stack-token]
    [ptr U]
    [ptr V]
    [ptr W]

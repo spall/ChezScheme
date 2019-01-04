@@ -83,6 +83,7 @@ ptr S_create_thread_object(who, p_tc) const char *who; ptr p_tc; {
   ATTACHMENTS(tc) = Snil;
   STACKLINK(tc) = SYMVAL(S_G.null_continuation_id);
   STACKCACHE(tc) = Snil;
+  STACKTOKEN(tc) = Sfalse;
 
  /* S_reset_scheme_stack initializes stack, size, esp, and sfp */
   S_reset_scheme_stack(tc, stack_slop);
