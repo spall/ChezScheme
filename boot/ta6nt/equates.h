@@ -87,8 +87,8 @@ typedef unsigned long long U64;
 #define bytevector_length_factor 0x8
 #define bytevector_length_offset 0x3
 #define bytevector_type_disp 0x1
-#define c_entry_name_vector #(thread-context get-thread-context handle-apply-overflood handle-docall-error handle-overflow handle-overflood handle-nonprocedure-symbol thread-list split-and-resize raw-collect-cond raw-tc-mutex activate-thread deactivate-thread unactivate-thread handle-values-error handle-mvlet-error handle-arg-error foreign-entry install-library-entry get-more-room scan-remembered-set instantiate-code-object Sreturn Scall-one-result Scall-any-results)
-#define c_entry_vector_size 0x19
+#define c_entry_name_vector #(thread-context get-thread-context handle-apply-overflood handle-docall-error handle-overflow handle-overflood handle-nonprocedure-symbol thread-list split-and-resize raw-collect-cond raw-tc-mutex activate-thread deactivate-thread unactivate-thread handle-values-error handle-mvlet-error handle-arg-error foreign-entry install-library-entry get-more-room scan-remembered-set instantiate-code-object Sreturn Scall-one-result Scall-any-results segment-info)
+#define c_entry_vector_size 0x1A
 #define cached_stack_link_disp 0x8
 #define cached_stack_size_disp 0x0
 #define card_offset_bits 0x9
@@ -169,6 +169,20 @@ typedef unsigned long long U64;
 #define ephemeron_cdr_disp 0xF
 #define ephemeron_next_disp 0x17
 #define ephemeron_trigger_next_disp 0x1F
+#define eq_bitset_discard_bits 0x1
+#define eq_bitset_l1_bits 0xE
+#define eq_bitset_l1_shift 0x2F
+#define eq_bitset_l2_bits 0xE
+#define eq_bitset_l2_mask 0x3FFF
+#define eq_bitset_l2_shift 0x21
+#define eq_bitset_l3_bits 0xE
+#define eq_bitset_l3_mask 0x3FFF
+#define eq_bitset_l3_shift 0x13
+#define eq_bitset_l4_bits 0xD
+#define eq_bitset_l4_mask 0x1FFF
+#define eq_bitset_l4_shift 0x6
+#define eq_bitset_lo_bits 0x5
+#define eq_bitset_lo_mask 0x1F
 #define eq_hashtable_subtype_ephemeron 0x2
 #define eq_hashtable_subtype_normal 0x0
 #define eq_hashtable_subtype_weak 0x1
@@ -734,6 +748,7 @@ typedef unsigned long long U64;
 #define CENTRY_raw_collect_cond 9
 #define CENTRY_raw_tc_mutex 10
 #define CENTRY_scan_remembered_set 20
+#define CENTRY_segment_info 25
 #define CENTRY_split_and_resize 8
 #define CENTRY_thread_context 0
 #define CENTRY_thread_list 7
