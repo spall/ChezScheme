@@ -2696,5 +2696,6 @@
      Sreturn
      Scall-one-result
      Scall-any-results
+     segment-info
   ))
 )
