@@ -88,8 +88,8 @@ typedef unsigned long long U64;
 #define bytevector_length_offset 0x3
 #define bytevector_pad_disp 0x5
 #define bytevector_type_disp 0x1
-#define c_entry_name_vector #(thread-context get-thread-context handle-apply-overflood handle-docall-error handle-overflow handle-overflood handle-nonprocedure-symbol thread-list split-and-resize raw-collect-cond raw-tc-mutex activate-thread deactivate-thread unactivate-thread handle-values-error handle-mvlet-error handle-arg-error foreign-entry install-library-entry get-more-room scan-remembered-set instantiate-code-object Sreturn Scall-one-result Scall-any-results segment-info)
-#define c_entry_vector_size 0x1A
+#define c_entry_name_vector #(thread-context get-thread-context handle-apply-overflood handle-docall-error handle-overflow handle-overflood handle-nonprocedure-symbol thread-list split-and-resize raw-collect-cond raw-tc-mutex activate-thread deactivate-thread unactivate-thread handle-values-error handle-mvlet-error handle-arg-error foreign-entry install-library-entry get-more-room scan-remembered-set instantiate-code-object Sreturn Scall-one-result Scall-any-results segment-info bignum-mask-test)
+#define c_entry_vector_size 0x1B
 #define cached_stack_link_disp 0x4
 #define cached_stack_size_disp 0x0
 #define card_offset_bits 0x8
@@ -284,7 +284,7 @@ typedef unsigned long long U64;
 #define int_bits 0x20
 #define integer_divide_instruction 1
 #define keyboard_interrupt_index 0x3
-#define library_entry_vector_size 0x218
+#define library_entry_vector_size 0x21A
 #define libspec_closure_index 0xD
 #define libspec_does_not_expect_headroom_index 0x0
 #define libspec_error_index 0xE
@@ -729,6 +729,7 @@ typedef unsigned long long U64;
 #define CENTRY_Scall_one_result 23
 #define CENTRY_Sreturn 22
 #define CENTRY_activate_thread 11
+#define CENTRY_bignum_mask_test 26
 #define CENTRY_deactivate_thread 12
 #define CENTRY_foreign_entry 17
 #define CENTRY_get_more_room 19
