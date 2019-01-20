@@ -231,6 +231,7 @@ typedef unsigned long long U64;
 #define fasl_type_library 0xE
 #define fasl_type_library_code 0xF
 #define fasl_type_pair 0x7
+#define fasl_type_phantom 0x2A
 #define fasl_type_ratnum 0x3
 #define fasl_type_record 0x17
 #define fasl_type_revisit 0x23
@@ -373,6 +374,7 @@ typedef unsigned long long U64;
 #define mask_other_number 0xF
 #define mask_output_port 0x2FF
 #define mask_pair 0x7
+#define mask_phantom 0xFFFFFFFFFFFFFFFF
 #define mask_port 0xFF
 #define mask_ratnum 0xFFFFFFFFFFFFFFFF
 #define mask_record 0x7
@@ -409,6 +411,8 @@ typedef unsigned long long U64;
 #define pair_car_disp 0x7
 #define pair_cdr_disp 0xF
 #define pair_shift 0x4
+#define phantom_length_disp 0x9
+#define phantom_type_disp 0x1
 #define port_flag_binary 0x4
 #define port_flag_block_buffered 0x200
 #define port_flag_bol 0x80
@@ -515,6 +519,7 @@ typedef unsigned long long U64;
 #define size_guardian_entry 0x30
 #define size_inexactnum 0x20
 #define size_pair 0x10
+#define size_phantom 0x10
 #define size_port 0x50
 #define size_ratnum 0x20
 #define size_record_type 0x50
@@ -681,6 +686,7 @@ typedef unsigned long long U64;
 #define type_other_number 0x6
 #define type_output_port 0x21E
 #define type_pair 0x1
+#define type_phantom 0x7E
 #define type_port 0x1E
 #define type_positive_bignum 0x6
 #define type_ratnum 0x16
@@ -804,6 +810,8 @@ typedef unsigned long long U64;
 #define INITTLCHT(x) (*((ptr *)((uptr)(x)+17)))
 #define INITTLCNEXT(x) (*((ptr *)((uptr)(x)+25)))
 #define SETTLCNEXT(x,y) DIRTYSET(((ptr *)((uptr)(x)+25)),(y))
+#define PHANTOMTYPE(x) (*((iptr *)((uptr)(x)+1)))
+#define PHANTOMLEN(x) (*((uptr *)((uptr)(x)+9)))
 #define SYMVAL(x) (*((ptr *)((uptr)(x)+5)))
 #define SYMPVAL(x) (*((ptr *)((uptr)(x)+13)))
 #define SYMPLIST(x) (*((ptr *)((uptr)(x)+21)))
