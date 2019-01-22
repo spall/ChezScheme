@@ -103,6 +103,7 @@ typedef unsigned long U64;
 #define code_flag_arity_in_closure 0x8
 #define code_flag_continuation 0x2
 #define code_flag_mutable_closure 0x4
+#define code_flag_single_valued 0x10
 #define code_flag_system 0x1
 #define code_flags_offset 0x8
 #define code_info_disp 0x31
@@ -354,6 +355,7 @@ typedef unsigned long U64;
 #define mask_code 0xFF
 #define mask_code_arity_in_closure 0x8FF
 #define mask_code_mutable_closure 0x4FF
+#define mask_code_single_valued 0x10FF
 #define mask_continuation_code 0x2FF
 #define mask_eof 0xFFFFFFFFFFFFFFFF
 #define mask_exactnum 0xFFFFFFFFFFFFFFFF
@@ -662,6 +664,7 @@ typedef unsigned long U64;
 #define type_code 0x3E
 #define type_code_arity_in_closure 0x83E
 #define type_code_mutable_closure 0x43E
+#define type_code_single_valued 0x103E
 #define type_continuation_code 0x23E
 #define type_exactnum 0x56
 #define type_fixnum 0x0
