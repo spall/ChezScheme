@@ -409,6 +409,7 @@ typedef unsigned long long U64;
 #define most_positive_fixnum (iptr)0xFFFFFFFFFFFFFFF
 #define native_endianness little
 #define one_shot_headroom 0xC00
+#define opportunistic_1_shot_flag 0x0
 #define ordinary_type_bits 0x8
 #define pair_car_disp 0x7
 #define pair_cdr_disp 0xF
