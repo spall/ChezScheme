@@ -106,6 +106,7 @@ typedef unsigned long long U64;
 #define code_flag_mutable_closure 0x4
 #define code_flag_single_valued 0x10
 #define code_flag_system 0x1
+#define code_flag_template 0x4
 #define code_flags_offset 0x8
 #define code_info_disp 0x19
 #define code_length_disp 0x5
@@ -257,6 +258,7 @@ typedef unsigned long long U64;
 #define forward_address_disp 0x4
 #define forward_marker (ptr)0x2E
 #define forward_marker_disp 0x0
+#define ftype_guardian_rep (ptr)0x56
 #define fxvector_data_disp 0x5
 #define fxvector_immutable_flag 0x8
 #define fxvector_length_factor 0x10
