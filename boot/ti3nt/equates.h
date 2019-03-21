@@ -14,8 +14,8 @@ typedef short I16;
 typedef unsigned short U16;
 typedef int I32;
 typedef unsigned int U32;
-typedef __int64 I64;
-typedef unsigned __int64 U64;
+typedef long long I64;
+typedef unsigned long long U64;
 
 /* constants from cmacros.ss */
 #define $c_func_closure_index 0x4
@@ -101,10 +101,10 @@ typedef unsigned __int64 U64;
 #define code_arity_mask_disp 0x11
 #define code_closure_length_disp 0x15
 #define code_data_disp 0x21
-#define code_flag_arity_in_closure 0x8
+#define code_flag_arity_in_closure 0x10
 #define code_flag_continuation 0x2
-#define code_flag_mutable_closure 0x4
-#define code_flag_single_valued 0x10
+#define code_flag_mutable_closure 0x8
+#define code_flag_single_valued 0x20
 #define code_flag_system 0x1
 #define code_flag_template 0x4
 #define code_flags_offset 0x8
@@ -356,9 +356,9 @@ typedef unsigned __int64 U64;
 #define mask_char 0xFF
 #define mask_closure 0x7
 #define mask_code 0xFF
-#define mask_code_arity_in_closure 0x8FF
-#define mask_code_mutable_closure 0x4FF
-#define mask_code_single_valued 0x10FF
+#define mask_code_arity_in_closure 0x10FF
+#define mask_code_mutable_closure 0x8FF
+#define mask_code_single_valued 0x20FF
 #define mask_continuation_code 0x2FF
 #define mask_eof 0xFFFFFFFF
 #define mask_exactnum 0xFFFFFFFF
@@ -664,9 +664,9 @@ typedef unsigned __int64 U64;
 #define type_char 0x16
 #define type_closure 0x5
 #define type_code 0x3E
-#define type_code_arity_in_closure 0x83E
-#define type_code_mutable_closure 0x43E
-#define type_code_single_valued 0x103E
+#define type_code_arity_in_closure 0x103E
+#define type_code_mutable_closure 0x83E
+#define type_code_single_valued 0x203E
 #define type_continuation_code 0x23E
 #define type_exactnum 0x56
 #define type_fixnum 0x0
@@ -710,14 +710,14 @@ typedef unsigned __int64 U64;
 #define typed_object_type_disp 0x1
 #define typedef_i16 "short"
 #define typedef_i32 "int"
-#define typedef_i64 "__int64"
+#define typedef_i64 "long long"
 #define typedef_i8 "char"
 #define typedef_iptr "int"
 #define typedef_ptr "void *"
 #define typedef_string_char "unsigned int"
 #define typedef_u16 "unsigned short"
 #define typedef_u32 "unsigned int"
-#define typedef_u64 "unsigned __int64"
+#define typedef_u64 "unsigned long long"
 #define typedef_u8 "unsigned char"
 #define typedef_uptr "unsigned int"
 #define typemod 0x8
