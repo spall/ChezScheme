@@ -9767,7 +9767,8 @@
               x)))
         (define make-info-call-like
           (lambda (info shift-consumer-attachment?*)
-            (make-info-call (info-call-src info) (info-call-sexpr info) #f #f #f
+            (make-info-call (info-call-src info) (info-call-sexpr info)
+                            (info-call-check? info) (info-call-pariah? info) (info-call-error? info)
                             (info-call-shift-attachment? info)
                             shift-consumer-attachment?*)))
         (define Mvcall
