@@ -252,6 +252,7 @@ typedef char *memcpy_t;
 #endif
 
 #if (machine_type == machine_type_i3ob || machine_type == machine_type_ti3ob || machine_type == machine_type_a6ob || machine_type == machine_type_ta6ob)
+#define OPENBSD
 #if (machine_type == machine_type_ti3ob || machine_type == machine_type_ta6ob)
 #define PTHREADS
 #endif

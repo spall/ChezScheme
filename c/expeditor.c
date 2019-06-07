@@ -549,7 +549,7 @@ static void s_ee_write_char(wchar_t c) {
 #include <sys/ioctl.h>
 #include <wchar.h>
 #include <locale.h>
-#ifndef __GLIBC__
+#if !defined(__GLIBC__) && !defined(OPENBSD)
 #include <xlocale.h>
 #endif
 
