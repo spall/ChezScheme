@@ -61,9 +61,9 @@
   (fxdiv0-and-mod0 [sig [(fixnum fixnum) -> (fixnum fixnum)]] [flags discard])
   (fxdiv0 [sig [(fixnum fixnum) -> (fixnum)]] [flags arith-op cp02])
   (fxmod0 [sig [(fixnum fixnum) -> (fixnum)]] [flags arith-op cp02])
-  (fx+/carry [sig [(fixnum fixnum fixnum) -> (fixnum fixnum)]] [flags arith-op cp02])
-  (fx-/carry [sig [(fixnum fixnum fixnum) -> (fixnum fixnum)]] [flags arith-op cp02])
-  (fx*/carry [sig [(fixnum fixnum fixnum) -> (fixnum fixnum)]] [flags arith-op cp02])
+  (fx+/carry [sig [(fixnum fixnum fixnum) -> (fixnum fixnum)]] [flags cp02])
+  (fx-/carry [sig [(fixnum fixnum fixnum) -> (fixnum fixnum)]] [flags cp02])
+  (fx*/carry [sig [(fixnum fixnum fixnum) -> (fixnum fixnum)]] [flags cp02])
   (fxnot [sig [(fixnum) -> (fixnum)]] [flags arith-op cp02])
   (fxand [sig [(fixnum ...) -> (fixnum)]] [flags arith-op partial-folder])
   (fxior [sig [(fixnum ...) -> (fixnum)]] [flags arith-op partial-folder])
@@ -240,7 +240,7 @@
   (acos [sig [(number) -> (number)]] [flags arith-op mifoldable discard ieee r5rs])
   (atan [sig [(number) (real real) -> (number)]] [flags arith-op mifoldable discard ieee r5rs])
   (sqrt [sig [(number) -> (number)]] [flags arith-op mifoldable discard ieee r5rs])
-  (exact-integer-sqrt [sig [(exact-integer) -> (exact-integer exact-integer)]] [flags arith-op mifoldable discard])
+  (exact-integer-sqrt [sig [(integer) -> (integer integer)]] [flags discard discard]) ; could be mifoldable if multiple values were handled
   (expt [sig [(number number) -> (number)]] [flags pure discard true cp02 ieee r5rs]) ; can take too long to fold
   (make-rectangular [sig [(real real) -> (number)]] [flags arith-op mifoldable discard ieee r5rs])
   (make-polar [sig [(real real) -> (number)]] [flags arith-op mifoldable discard ieee r5rs])
@@ -530,7 +530,7 @@
   (hashtable-copy [sig [(hashtable) (hashtable ptr) -> (hashtable)]] [flags alloc])
   (hashtable-clear! [sig [(hashtable) (hashtable sub-uint) -> (void)]] [flags true])
   ((r6rs: hashtable-keys) [sig [(hashtable) -> (vector)]] [flags alloc])           ; no size argument
-  ((r6rs: hashtable-entries) [sig [(hashtable) -> (vector vector)]] [flags alloc]) ; no size argument
+  ((r6rs: hashtable-entries) [sig [(hashtable) -> (vector vector)]] [flags discard]) ; no size argument
   (hashtable-equivalence-function [sig [(hashtable) -> (ptr)]] [flags])
   (hashtable-hash-function [sig [(hashtable) -> (ptr)]] [flags])
   (hashtable-mutable? [sig [(hashtable) -> (boolean)]] [flags mifoldable discard])
@@ -613,7 +613,7 @@
   (open-file-output-port [sig [(pathname) (pathname file-options) (pathname file-options sub-symbol) (pathname file-options sub-symbol maybe-transcoder) -> (output-port)]] [flags true])
   (open-bytevector-output-port [sig [() (maybe-transcoder) -> (output-port procedure)]] [flags discard])
   (call-with-bytevector-output-port [sig [(procedure) (procedure maybe-transcoder) -> (bytevector)]] [flags])
-  (open-string-output-port [sig [() -> (textual-output-port procedure)]] [flags alloc])
+  (open-string-output-port [sig [() -> (textual-output-port procedure)]] [flags discard])
   (call-with-string-output-port [sig [(procedure) -> (string)]] [flags])
   ((r6rs: standard-output-port) [sig [() -> (binary-output-port)]] [flags true])
   ((r6rs: standard-error-port) [sig [() -> (binary-output-port)]] [flags true])
@@ -900,7 +900,7 @@
   (most-positive-fixnum [sig [() -> (ufixnum)]] [flags pure unrestricted true cp02])
   (petite? [sig [() -> (boolean)]] [flags pure unrestricted])
   (scheme-version [sig [() -> (string)]] [flags pure unrestricted true])
-  (scheme-version-number [sig [() -> (uint uint uint)]] [flags pure unrestricted true])
+  (scheme-version-number [sig [() -> (uint uint uint)]] [flags discard unrestricted])
   (threaded? [sig [() -> (boolean)]] [flags pure unrestricted cp02])
 )
 
@@ -1389,7 +1389,7 @@
   (hash-table-map [sig [(old-hash-table procedure) -> (list)]] [flags true])
   (hashtable-cell [sig [(old-hash-table ptr ptr) -> ((ptr . ptr))]] [flags true])
   (hashtable-cells [sig [(hashtable) -> (vector)] [(hashtable uint) -> (vector)]] [flags alloc])
-  (hashtable-entries [sig [(hashtable) -> (vector vector)] [(hashtable uint) -> (vector vector)]] [flags alloc]) ; has size argument
+  (hashtable-entries [sig [(hashtable) -> (vector vector)] [(hashtable uint) -> (vector vector)]] [flags discard]) ; has size argument
   (hashtable-keys [sig [(hashtable) -> (vector)] [(hashtable uint) -> (vector)]] [flags alloc])                  ; has size argument
   (hashtable-values [sig [(hashtable) -> (vector)] [(hashtable uint) -> (vector)]] [flags alloc])
   (hashtable-weak? [sig [(hashtable) -> (boolean)]] [flags pure mifoldable discard])
@@ -2076,7 +2076,7 @@
   ($last-new-vector-element [flags])
   ($lexical-error [flags])
   ($library-search [flags])
-  ($list-length [flags])
+  ($list-length [flags single-valued])
   ($load-library [flags])
   ($locate-source [flags])
   ($logand [flags])
@@ -2246,7 +2246,7 @@
   ($system-library? [flags])
   ($system-procedure? [flags])
   ($system-property-list [flags])
-  ($tc-field [flags])
+  ($tc-field [flags single-valued])
   ($tc [flags])
   ($thread-list [flags])
   ($thread-tc [flags])
@@ -2254,8 +2254,8 @@
   ($tlc-ht [flags mifoldable discard])
   ($tlc-keyval [flags pure mifoldable discard])
   ($tlc-next [flags mifoldable discard])
-  ($top-level-bound? [flags discard])
-  ($top-level-value [flags discard cp02])
+  ($top-level-bound? [flags discard single-valued])
+  ($top-level-value [flags discard cp02 single-valued])
   ($trace-closure [flags pure alloc])
   ($trace [flags])
   ($track-dynamic-closure-counts [flags])      ; added for closure instrumentation
@@ -2276,6 +2276,7 @@
   ($undefined-violation [flags abort-op])
   ($untrace [flags])
   ($unwrap-ftype-pointer [flags])
+  ($value [flags unrestricted discard single-valued cp02])
   ($vector-ref-check? [flags])
   ($vector-set!-check? [flags])
   ($vector-set-immutable! #;[sig [(vector) -> (ptr)]] [flags true])
