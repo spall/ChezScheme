@@ -217,6 +217,12 @@
     (unless (procedure? x) ($oops who "~s is not a procedure" x))
     ($code-arity-mask ($closure-code x))))
 
+(define-who procedure-known-single-valued?
+  (lambda (x)
+    (unless (procedure? x) ($oops who "~s is not a procedure" x))
+    (let ([c ($closure-code x)])
+      ($code-single-valued? c))))
+
 (let ()
   (define-syntax frob-proc
     (syntax-rules ()
@@ -427,6 +433,11 @@
   (lambda (x)
     (unless ($code? x) ($oops who "~s is not code" x))
     ($code-pinfo* x)))
+
+(define-who $code-single-valued?
+  (lambda (x)
+    (unless ($code? x) ($oops who "~s is not code" x))
+    ($code-single-valued? x)))
 
 (define $object-address ; not safe and can't be
   (lambda (x offset)
