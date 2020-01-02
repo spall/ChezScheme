@@ -10647,6 +10647,23 @@
          `(mvset ,info (,mdcl ,t0? ,t1 ...) (,t* ...) ((,x** ...) ...)
             ,(flatten-mvclauses x** interface* l*))]))
 
+    (define-syntax %mv-jump
+      (lambda (x)
+        (syntax-case x ()
+          [(k ret live)
+           (with-implicit (k quasiquote %mref %inline)
+              #'`(if ,(%inline u< ,(%mref ret ,(constant return-address-mv-return-address-disp)) (immediate 2))
+                     (if ,(%inline < ,(%mref ret ,(constant return-address-mv-return-address-disp)) (immediate 1))
+                         ;; 0 => error
+                         (jump (literal ,(make-info-literal #f 'library-code
+                                                            (lookup-libspec values-error)
+                                                            (constant code-data-disp)))
+                               live)
+                         ;; 1 => fallhrough to normal return
+                         (jump ret live))
+                     ;; more than 1 => use as absolute return address
+                     (jump ,(%mref ret ,(constant return-address-mv-return-address-disp)) live)))])))
+    
     (define-pass np-impose-calling-conventions : L12 (ir) -> L13 ()
       (definitions
         (import (only asm-module asm-foreign-call asm-foreign-callable asm-enter))
@@ -11070,13 +11087,13 @@
                                  (%seq
                                    ; must leave RA in %ret for values-error
                                    (set! ,%ret ,(get-fv 0))
-                                   (jump ,(%mref ,%ret ,(constant return-address-mv-return-address-disp))
-                                     (,%ac0 ,%ret ,reg* ... ,fv* ...)))]
+                                   ,(%mv-jump ,%ret
+                                              (,%ac0 ,%ret ,reg* ... ,fv* ...)))]
                                 [else
                                  (%seq
                                    (set! ,%xp ,(get-fv 0))
-                                   (jump ,(%mref ,%xp ,(constant return-address-mv-return-address-disp))
-                                     (,%ac0 ,reg* ... ,(get-fv 0) ,fv* ...)))])))))))))))
+                                   ,(%mv-jump ,%xp
+                                              (,%ac0 ,reg* ... ,(get-fv 0) ,fv* ...)))])))))))))))
         (define-syntax do-return
           (lambda (x)
             (syntax-case x ()
@@ -11715,15 +11732,15 @@
                                        [(real-register? '%ret)
                                         (%seq
                                           (set! ,%ret ,(%mref ,xp/cp ,(constant continuation-return-address-disp)))
-                                          (jump ,(%mref ,%ret ,(constant return-address-mv-return-address-disp))
-                                            (,%ac0 ,%ret ,arg-registers ...)))]
+                                          ,(%mv-jump ,%ret
+                                                     (,%ac0 ,%ret ,arg-registers ...)))]
                                        [else
                                          (let ([fv0 (get-fv 0)])
                                            (%seq
                                              (set! ,%xp ,(%mref ,xp/cp ,(constant continuation-return-address-disp)))
                                              (set! ,fv0 ,%xp)
-                                             (jump ,(%mref ,%xp ,(constant return-address-mv-return-address-disp))
-                                               (,%ac0 ,arg-registers ... ,fv0))))]))))))))))))
+                                             ,(%mv-jump ,%xp
+                                                        (,%ac0 ,arg-registers ... ,fv0))))]))))))))))))
         (define reify-cc-help
           (lambda (1-shot? always? finish)
             (with-output-language (L13 Tail)
@@ -12050,10 +12067,9 @@
                         `(seq (set! ,x ,(uvar-location x)) ,(f (cdr x*)))
                         (f (cdr x*)))))))]
         [(mvcall ,info ,mdcl ,t0? ,t1* ... (,t* ...))
-         (let ([mrvl (make-local-label 'mrvl)])
-           (build-nontail-call info mdcl t0? t1* t* '() mrvl #f
-             (lambda (newframe-info)
-               (%seq (label ,mrvl) (remove-frame ,newframe-info) (restore-local-saves ,newframe-info)))))]
+         (build-nontail-call info mdcl t0? t1* t* '() 'direct #f
+           (lambda (newframe-info)
+             (%seq (remove-frame ,newframe-info) (restore-local-saves ,newframe-info))))]
         [(mvset ,info (,mdcl ,t0? ,t1* ...) (,t* ...) ((,x** ...) ...) ,ebody)
          (let* ([frame-x** (map (lambda (x*) (set-formal-registers! x*)) x**)]
                 [nfv** (map (lambda (x*) (map (lambda (x)
@@ -12738,14 +12754,13 @@
                        (jump ,%ref-ret (,%ac0)))
                      ,(meta-cond
                         [(real-register? '%ret)
-                         `(jump ,(%mref ,%ret ,(constant return-address-mv-return-address-disp))
-                            (,%ac0 ,%ret ,arg-registers ...))]
+                         (%mv-jump ,%ret
+                                   (,%ac0 ,%ret ,arg-registers ...))]
                         [else
                           (%seq
                             (set! ,%xp ,%ref-ret)
-                            (jump ,(%mref ,%xp
-                                     ,(constant return-address-mv-return-address-disp))
-                              (,%ac0 ,arg-registers ... ,(get-fv 0))))]))))]
+                            ,(%mv-jump ,%xp
+                                       (,%ac0 ,arg-registers ... ,(get-fv 0))))]))))]
            [($apply-procedure)
             (let ([Lloop (make-local-label 'loop)]
                   [Ldone (make-local-label 'done)])

@@ -297,6 +297,10 @@
     (lambda (x)
       (or (eq? x #f) (label? x))))
 
+  (define maybe-return-label?
+    (lambda (x)
+      (or (eq? x #f) (eq? x 'direct) (label? x))))
+
  ; language to replace prelex with uvar, create info records out of some of the complex
  ; records, and make sure other record types have been discarded.  also formally sets up
  ; CaseLambdaClause as entry point for language.
@@ -823,7 +827,7 @@
       (immediate (imm fs))
       (exact-integer (lpm))
       (info (info))
-      (maybe-label (mrvl))
+      (maybe-return-label (mrvl))
       (label (l rpl))
       (source-object (src))
       (symbol (sym)))
@@ -954,7 +958,7 @@
       (live-info (live-info))
       (info (info))
       (label (l rpl))
-      (maybe-label (mrvl))
+      (maybe-return-label (mrvl))
       (fixnum (max-fv offset))
       (block (block entry-block)))
     (Program (pgm)

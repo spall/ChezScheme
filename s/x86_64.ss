@@ -2446,12 +2446,25 @@
               (aop-cons* `(asm code-top-link)
                 `(,size . ,fs)
                 (aop-cons* `(asm "frame size:" ,fs)
-                  (if mrvl
-                      (asm-data-label code* mrvl 0 func code-size)
-                      (cons*
-                        mrv-error
-                        (aop-cons* `(asm "mrv point:" ,mrv-error)
-                          code*)))))))))))
+                  (cond
+                   [(not mrvl)
+                    (cons*
+                     `(,size . 0) ; => values-error
+                     (aop-cons* `(asm "mrv point: values-error")
+                                code*))]
+                   [(not mrvl)
+                    ;; Old way
+                    (cons*
+                     mrv-error
+                     (aop-cons* `(asm "mrv point:" ,mrv-error)
+                                code*))]
+                   [(eq? mrvl 'direct)
+                    (cons*
+                     `(,size . 1) ; => return like single value
+                     (aop-cons* `(asm "mrv point: direct")
+                                code*))]
+                   [else
+                    (asm-data-label code* mrvl 0 func code-size)])))))))))
 
   (define-syntax asm-enter
     (lambda (x)
