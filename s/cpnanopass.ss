@@ -9306,16 +9306,17 @@
                                                              (immediate ,(fx+ (constant header-size-stencil-vector)
                                                                               (fx- (constant byte-alignment) 1))))
                                                          (immediate ,(- (constant byte-alignment)))))])
-                               (seq
-                                (set! ,(%mref ,t-vec ,(constant stencil-vector-type-disp))
-                                      ,(%inline logor
+                               ,(%seq
+                                 (set! ,(%mref ,t-vec ,(constant stencil-vector-type-disp))
+                                       ,(%inline logor
                                           (immediate ,(constant type-stencil-vector))
                                           ,(%inline sll ,e-mask (immediate ,(fx- (constant stencil-vector-mask-offset)
                                                                                  (constant fixnum-offset))))))
-                                ;; Content not filled! This function is meant to be called by
-                                ;; `$stencil-vector-update`, which has GC disabled between
-                                ;; allocation and filling in the data
-                                ,t-vec)))))))
+                                 ,(build-stencil-vector-fill t-vec e-length `(immediate ,(fix 0)))
+                                 ;; Content not filled! This function is meant to be called by
+                                 ;; `$stencil-vector-update`, which has GC disabled between
+                                 ;; allocation and filling in the data
+                                 ,t-vec)))))))
             (define-inline 3 stencil-vector
               [(e-mask . e-val*)
                (do-stencil-vector e-mask e-val*)])

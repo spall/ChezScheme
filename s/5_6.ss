@@ -542,7 +542,7 @@
       ;; `new-v` is not initialized, so don't let a GC happen until we're done filling it in
       (stencil-vector-copy! new-v 0 v 0 n)
       (let ([i (fxpopcount (fxand mask (fx- bit 1)))])
-        (stencil-vector-set! new-v i val))
+        ($stencil-vector-set! new-v i val))
       new-v))
 
   (define (stencil-vector-replace-two v bits val1 val2)
@@ -552,9 +552,9 @@
       ;; `new-v` is not initialized, so don't let a GC happen until we're done filling it in
       (stencil-vector-copy! new-v 0 v 0 n)
       (let ([i1 (fxpopcount (fxand mask (fx- (fxxor bits (fxand bits (fx- bits 1))) 1)))])
-        (stencil-vector-set! new-v i1 val1)
+        ($stencil-vector-set! new-v i1 val1)
         (let ([i2 (fxpopcount (fxand mask (fx- (fxand bits (fx- bits 1)) 1)))])
-          (stencil-vector-set! new-v i2 val2)))
+          ($stencil-vector-set! new-v i2 val2)))
       new-v))
 
   (set! $stencil-vector-update*
