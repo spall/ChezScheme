@@ -1195,6 +1195,19 @@
   (lambda (s)
     (#3%immutable-fxvector? s)))
 
+(define stencil-vector-mask
+   (lambda (v)
+      (#2%stencil-vector-mask v)))
+
+(define $make-stencil-vector
+  (lambda (len mask)
+    ($make-stencil-vector len mask)))
+
+; not safe; assumes `val` is older than `v`
+(define $stencil-vector-set!
+  (lambda (v i val)
+    ($stencil-vector-set! v i val)))
+
 ; not safe
 (define $record-ref
    (lambda (v i)
@@ -1279,6 +1292,8 @@
 (define vector? (lambda (x) (vector? x)))
 
 (define fxvector? (lambda (x) (fxvector? x)))
+
+(define stencil-vector? (lambda (x) (stencil-vector? x)))
 
 (define procedure? (lambda (x) (procedure? x)))
 

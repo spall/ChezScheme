@@ -298,6 +298,9 @@
   (define index-oops
     (lambda (who x i)
       ($oops who "~s is not a valid index for ~s" i x)))
+  (define stencil-vector-oops
+    (lambda (who x)
+      ($oops who "~s is not a vector" x)))
 
   (define-library-entry (char->integer x) (char-oops 'char->integer x))
 
@@ -388,6 +391,9 @@
 
   (define-library-entry (bytevector-length v)
     (bytevector-oops 'bytevector-length v))
+
+  (define-library-entry (stencil-vector-mask v)
+    (stencil-vector-oops 'stencil-vector-mask v))
 
   (define-library-entry (char=? x y) (char-oops 'char=? (if (char? x) y x)))
   (define-library-entry (char<? x y) (char-oops 'char<? (if (char? x) y x)))
