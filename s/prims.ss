@@ -1199,12 +1199,9 @@
    (lambda (v)
       (#2%stencil-vector-mask v)))
 
-;; especially unsafe; allocates without initializing on the
-;; assumption that the allocated memory will be filled before
-;; a GC
-(define $make-stencil-vector
+(define-who $make-stencil-vector
   (lambda (len mask)
-    ($make-stencil-vector len mask)))
+    ($oops who "should only be used as inlined with GC disabled")))
 
 ; not safe; assumes `val` is older than `v`
 (define $stencil-vector-set!

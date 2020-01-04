@@ -1399,4 +1399,31 @@
   ;; remove all
   (eqv? 0 (stencil-vector-length (stencil-vector-update alphabet-sv #b10101010101010101010 0)))
 
+  ;; try to check GC interaction
+  (let loop ([n 100000]
+             [v1 (stencil-vector 7 'a 'b 'c)]
+             [v2 (stencil-vector 28 "a" "b" "c")]
+             [v3 (stencil-vector 15 (vector 'x) (vector 'y) (vector 'z)  (vector 'w))])
+    (or (fx= n 0)
+        (and
+         (fx= (stencil-vector-mask v1) 7)
+         (eqv? (stencil-vector-ref v1 1) 'b)
+         (fx= (stencil-vector-mask v2) 28)
+         (equal? (stencil-vector-ref v2 0) "a")
+         (equal? (stencil-vector-ref v2 1) "b")
+         (equal? (stencil-vector-ref v2 2) "c")
+         (fx= (stencil-vector-mask v3) 15)
+         (equal? (stencil-vector-ref v3 0) '#(x))
+         (equal? (stencil-vector-ref v3 1) '#(y))
+         (equal? (stencil-vector-ref v3 2) '#(z))
+         (equal? (stencil-vector-ref v3 3) '#(w))
+         (loop (fx- n 1)
+               (stencil-vector-update
+                (stencil-vector-update v1 3 1 'a)
+                0 2 'b)
+               (stencil-vector-update v2 12 12 (string #\a) (string #\b))
+               (stencil-vector-update
+                (stencil-vector-update v3 6 16 (vector 'extra))
+                16 6 (vector 'y) (vector 'z))))))
+
   )

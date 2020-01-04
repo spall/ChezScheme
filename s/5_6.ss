@@ -425,69 +425,8 @@
       (dolmerge! elt< ls1 ls2 (list '())))))
 )
 
-(let ()
-  (set-who! stencil-vector-mask-width (lambda () (constant stencil-vector-mask-bits)))
-
-  (set-who! stencil-vector-length
-    (lambda (v)
-      (unless (stencil-vector? v)
-        ($oops who "~s is not a stencil vector" v))
-      (fxpopcount (stencil-vector-mask v))))
-
-  (set-who! stencil-vector-ref
-    (lambda (v i)
-      (unless (stencil-vector? v)
-        ($oops who "~s is not a stencil vector" v))
-      (unless (and (fixnum? i)
-                   (fx< -1 i (fxpopcount (stencil-vector-mask v))))
-        ($oops who "invalid index ~s" i))
-      (#3%stencil-vector-ref v i)))
-
-  (set-who! stencil-vector-set!
-    (lambda (v i val)
-      (unless (stencil-vector? v)
-        ($oops who "~s is not a stencil vector" v))
-      (unless (and (fixnum? i)
-                   (fx< -1 i (fxpopcount (stencil-vector-mask v))))
-        ($oops who "invalid index ~s" i))
-      (#3%stencil-vector-set! v i val)))
-  
-  (set-who! stencil-vector
-    (lambda (mask . vals)
-      (unless (and (fixnum? mask)
-                   (fx< -1 mask (fxsll 1 (constant stencil-vector-mask-bits))))
-        ($oops who "invalid mask ~s" mask))
-      (let ([n (fxpopcount mask)])
-        (unless (fx= (length vals) n)
-          ($oops who "mask ~s does not match given number of items ~s" mask (length vals)))
-        (let ([v ($make-stencil-vector n mask)])
-          (let loop ([i 0] [vals vals])
-            (unless (fx= i n)
-              ($stencil-vector-set! v i (car vals))
-              (loop (fx+ i 1) (cdr vals))))
-          v))))
-
-  (set-who! stencil-vector-update
-    (lambda (v remove-bits add-bits . vals)
-      (unless (stencil-vector? v)
-        ($oops who "~s is not a stencil vector" v))
-      (let ([mask (stencil-vector-mask v)])
-        (unless (and (fixnum? remove-bits)
-                     (fx< -1 remove-bits (fxsll 1 (constant stencil-vector-mask-bits))))
-          ($oops who "invalid removal mask ~s" remove-bits))
-        (unless (fx= remove-bits (fxand remove-bits mask))
-          ($oops who "stencil does not have all bits in ~s" remove-bits))
-        (unless (and (fixnum? add-bits)
-                     (fx< -1 add-bits (fxsll 1 (constant stencil-vector-mask-bits))))
-          ($oops who "invalid addition mask ~s" add-bits))
-        (unless (fx= 0 (fxand add-bits (fx- mask remove-bits)))
-          ($oops who "stencil already has bits in ~s" add-bits))
-        (unless (fx= (fxpopcount add-bits) (length vals))
-          ($oops who "addition mask ~s does not match given number of items ~s" mask (length vals)))
-        ($stencil-vector-update* v mask remove-bits add-bits vals)))))
-
 ;; compiled with generate-interrupt-trap #f and optimize-level 3 so
-;; that stencip updates won't be interrupted by a GC while a newly
+;; that stencil updates won't be interrupted by a GC while a newly
 ;; allocated stencil is filled in
 (eval-when (compile)
   (generate-interrupt-trap #f)
@@ -557,9 +496,66 @@
           ($stencil-vector-set! new-v i2 val2)))
       new-v))
 
-  (set! $stencil-vector-update*
-     (lambda (v mask remove-bits add-bits vals)
-       (do-stencil-vector-update v mask remove-bits add-bits vals)))
+  (set-who! stencil-vector-mask-width (lambda () (constant stencil-vector-mask-bits)))
+
+  (set-who! stencil-vector-length
+    (lambda (v)
+      (unless (stencil-vector? v)
+        ($oops who "~s is not a stencil vector" v))
+      (fxpopcount (stencil-vector-mask v))))
+
+  (set-who! stencil-vector-ref
+    (lambda (v i)
+      (unless (stencil-vector? v)
+        ($oops who "~s is not a stencil vector" v))
+      (unless (and (fixnum? i)
+                   (fx< -1 i (fxpopcount (stencil-vector-mask v))))
+        ($oops who "invalid index ~s" i))
+      (#3%stencil-vector-ref v i)))
+
+  (set-who! stencil-vector-set!
+    (lambda (v i val)
+      (unless (stencil-vector? v)
+        ($oops who "~s is not a stencil vector" v))
+      (unless (and (fixnum? i)
+                   (fx< -1 i (fxpopcount (stencil-vector-mask v))))
+        ($oops who "invalid index ~s" i))
+      (#3%stencil-vector-set! v i val)))
+  
+  (set-who! stencil-vector
+    (lambda (mask . vals)
+      (unless (and (fixnum? mask)
+                   (fx< -1 mask (fxsll 1 (constant stencil-vector-mask-bits))))
+        ($oops who "invalid mask ~s" mask))
+      (let ([n (fxpopcount mask)])
+        (unless (fx= (length vals) n)
+          ($oops who "mask ~s does not match given number of items ~s" mask (length vals)))
+        (let ([v ($make-stencil-vector n mask)])
+          ;; `new-v` is not initialized, so don't let a GC happen until we're done filling it in
+          (let loop ([i 0] [vals vals])
+            (unless (fx= i n)
+              ($stencil-vector-set! v i (car vals))
+              (loop (fx+ i 1) (cdr vals))))
+          v))))
+
+  (set-who! stencil-vector-update
+    (lambda (v remove-bits add-bits . vals)
+      (unless (stencil-vector? v)
+        ($oops who "~s is not a stencil vector" v))
+      (let ([mask (stencil-vector-mask v)])
+        (unless (and (fixnum? remove-bits)
+                     (fx< -1 remove-bits (fxsll 1 (constant stencil-vector-mask-bits))))
+          ($oops who "invalid removal mask ~s" remove-bits))
+        (unless (fx= remove-bits (fxand remove-bits mask))
+          ($oops who "stencil does not have all bits in ~s" remove-bits))
+        (unless (and (fixnum? add-bits)
+                     (fx< -1 add-bits (fxsll 1 (constant stencil-vector-mask-bits))))
+          ($oops who "invalid addition mask ~s" add-bits))
+        (unless (fx= 0 (fxand add-bits (fx- mask remove-bits)))
+          ($oops who "stencil already has bits in ~s" add-bits))
+        (unless (fx= (fxpopcount add-bits) (length vals))
+          ($oops who "addition mask ~s does not match given number of items ~s" add-bits (length vals)))
+        (do-stencil-vector-update v mask remove-bits add-bits vals))))
 
   ;; unsafe variant, which assumes that the arguments are consistent;
   ;; recognize the case where all slots are replaced

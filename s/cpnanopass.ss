@@ -4493,51 +4493,78 @@
                                 #,(if (number? (syntax->datum #'a2))
                                       #`(immediate a2)
                                       #`,a2))])))
-              (define (build-popcount32 unfix-e)
+              (define (build-popcount16 e)
                 (let ([x (make-tmp 'x 'uptr)]
                       [x2 (make-tmp 'x2 'uptr)]
                       [x3 (make-tmp 'x3 'uptr)]
                       [x4 (make-tmp 'x4 'uptr)])
-                  `(let ([,x ,unfix-e])
+                  `(let ([,x ,(build-unfix e)])
+                     (let ([,x2 ,(build-fx - x (build-fx logand (build-fx srl x 1) #x5555))])
+                       (let ([,x3 ,(build-fx + (build-fx logand x2 #x3333) (build-fx logand (build-fx srl x2 2) #x3333))])
+                         (let ([,x4 ,(build-fx logand (build-fx + x3 (build-fx srl x3 4)) #x0f0f)])
+                           ,(build-fix (build-fx logand (build-fx + x4 (build-fx srl x4 8)) #x1f))))))))
+              (define (build-popcount32 e)
+                (let ([x (make-tmp 'x 'uptr)]
+                      [x2 (make-tmp 'x2 'uptr)]
+                      [x3 (make-tmp 'x3 'uptr)]
+                      [x4 (make-tmp 'x4 'uptr)])
+                  `(let ([,x ,(build-unfix e)])
                      (let ([,x2 ,(build-fx - x (build-fx logand (build-fx srl x 1) #x55555555))])
                        (let ([,x3 ,(build-fx + (build-fx logand x2 #x33333333) (build-fx logand (build-fx srl x2 2) #x33333333))])
                          (let ([,x4 ,(build-fx logand (build-fx + x3 (build-fx srl x3 4)) #x0f0f0f0f)])
                            ,(build-fix (build-fx logand (build-fx srl (build-fx * x4 #x01010101) 24) #x3f))))))))
-              (define-inline 3 fxpopcount
-                [(e)
-                 (bind #f (e)
-                   (constant-case ptr-bits
-                     [(32) (build-popcount32 (build-unfix e))]
-                     [(64)
-                      (let ([x (make-tmp 'x 'uptr)]
-                            [x2 (make-tmp 'x2 'uptr)]
-                            [x3 (make-tmp 'x3 'uptr)]
-                            [x4 (make-tmp 'x4 'uptr)]
-                            [x5 (make-tmp 'x5 'uptr)])
-                        `(let ([,x ,(build-unfix e)])
-                           (let ([,x2 ,(build-fx - x (build-fx logand (build-fx srl x 1) #x5555555555555555))])
-                             (let ([,x3 ,(build-fx + (build-fx logand x2 #x3333333333333333) (build-fx logand (build-fx srl x2 2) #x3333333333333333))])
-                               (let ([,x4 ,(build-fx logand (build-fx + x3 (build-fx srl x3 4)) #x0f0f0f0f0f0f0f0f)])
-                                 (let ([,x5 ,(build-fx logand (build-fx + x4 (build-fx srl x4 8)) #x00ff00ff00ff00ff)])
-                                   ,(build-fix (build-fx logand (build-fx srl (build-fx * x5 #x0101010101010101) 56) #x7f))))))))]))])
-              (define-inline 3 fxpopcount32
-                [(e)
-                 (bind #f (e)
-                   (constant-case ptr-bits
-                     [(32) (build-popcount32 (build-unfix e))]
-                     [(64) (build-popcount32 (build-fx logand #xffffffff (build-unfix e)))]))])
-              (define-inline 3 fxpopcount16
-                [(e)
-                 (bind #f (e)
+              (define (build-popcount e)
+                (constant-case ptr-bits
+                  [(32) (build-popcount32 e)]
+                  [(64)
                    (let ([x (make-tmp 'x 'uptr)]
                          [x2 (make-tmp 'x2 'uptr)]
                          [x3 (make-tmp 'x3 'uptr)]
-                         [x4 (make-tmp 'x4 'uptr)])
-                     `(let ([,x ,(build-fx logand #xFFFF (build-unfix e))])
-                        (let ([,x2 ,(build-fx - x (build-fx logand (build-fx srl x 1) #x5555))])
-                          (let ([,x3 ,(build-fx + (build-fx logand x2 #x3333) (build-fx logand (build-fx srl x2 2) #x3333))])
-                            (let ([,x4 ,(build-fx logand (build-fx + x3 (build-fx srl x3 4)) #x0f0f)])
-                              ,(build-fix (build-fx logand (build-fx + x4 (build-fx srl x4 8)) #x1f))))))))]))))
+                         [x4 (make-tmp 'x4 'uptr)]
+                         [x5 (make-tmp 'x5 'uptr)])
+                     `(let ([,x ,(build-unfix e)])
+                        (let ([,x2 ,(build-fx - x (build-fx logand (build-fx srl x 1) #x5555555555555555))])
+                          (let ([,x3 ,(build-fx + (build-fx logand x2 #x3333333333333333) (build-fx logand (build-fx srl x2 2) #x3333333333333333))])
+                            (let ([,x4 ,(build-fx logand (build-fx + x3 (build-fx srl x3 4)) #x0f0f0f0f0f0f0f0f)])
+                              (let ([,x5 ,(build-fx logand (build-fx + x4 (build-fx srl x4 8)) #x00ff00ff00ff00ff)])
+                                ,(build-fix (build-fx logand (build-fx srl (build-fx * x5 #x0101010101010101) 56) #x7f))))))))]))
+              (define-inline 3 fxpopcount
+                [(e)
+                 (bind #f (e)
+                   (build-popcount e))])
+              (define-inline 2 fxpopcount
+                [(e)
+                 (bind #t (e)
+                   `(if ,(%type-check mask-fixnum type-fixnum ,e)
+                        ,(build-popcount e)
+                        ,(build-libcall #t #f sexpr fxpopcount e)))])
+              (define-inline 3 fxpopcount32
+                [(e)
+                 (bind #f (e)
+                   (build-popcount32 e))])
+              (define-inline 2 fxpopcount32
+                [(e)
+                 (bind #t (e)
+                       `(if ,(constant-case ptr-bits
+                               [(32) (%type-check mask-fixnum type-fixnum ,e)]
+                               [(64)
+                                `(if ,(%type-check mask-fixnum type-fixnum ,e)
+                                     ,(%inline u< ,e (immediate ,(fix #x100000000)))
+                                     #f)])
+                            ,(build-popcount32 e)
+                            ,(build-libcall #t #f sexpr fxpopcount32 e)))])
+              (define-inline 3 fxpopcount16
+                [(e)
+                 (bind #f (e)
+                   (build-popcount16 e))])
+              (define-inline 2 fxpopcount16
+                [(e)
+                 (bind #f (e)
+                       `(if (if ,(%type-check mask-fixnum type-fixnum ,e)
+                                ,(%inline u< ,e (immediate ,(fix #x10000)))
+                                #f)
+                            ,(build-popcount16 e)
+                            ,(build-libcall #t #f sexpr fxpopcount16 e)))]))))
         (let ()
           (define do-fxsll
             (lambda (e1 e2)
@@ -9272,13 +9299,12 @@
                       (do-make-vector e-length e-fill))]))))
 
         (let ()
-          (define build-stencil-vector-fill
-            (make-build-fill (constant ptr-bytes) (constant stencil-vector-data-disp)))
           (meta-assert (= (constant log2-ptr-bytes) (constant fixnum-offset)))
           (let ()
             (define do-stencil-vector
               (lambda (e-mask e-val*)
-                (bind #f (e-mask)
+                (list-bind #f (e-val*)
+                  (bind #f (e-mask)
                       (let ([t-vec (make-tmp 'tvec)])
                         `(let ([,t-vec ,(%constant-alloc type-typed-object
                                                          (fx+ (constant header-size-stencil-vector)
@@ -9294,7 +9320,7 @@
                                      ,t-vec)
                                   `(seq
                                     (set! ,(%mref ,t-vec ,(fx+ i (constant stencil-vector-data-disp))) ,(car e-val*))
-                                    ,(loop (cdr e-val*) (fx+ i (constant ptr-bytes)))))))))))
+                                    ,(loop (cdr e-val*) (fx+ i (constant ptr-bytes))))))))))))
             (define do-make-stencil-vector
               (lambda (e-length e-mask)
                 (bind #t (e-length)
@@ -9312,7 +9338,6 @@
                                           (immediate ,(constant type-stencil-vector))
                                           ,(%inline sll ,e-mask (immediate ,(fx- (constant stencil-vector-mask-offset)
                                                                                  (constant fixnum-offset))))))
-                                 ,(build-stencil-vector-fill t-vec e-length `(immediate ,(fix 0)))
                                  ;; Content not filled! This function is meant to be called by
                                  ;; `$stencil-vector-update`, which has GC disabled between
                                  ;; allocation and filling in the data
@@ -9320,6 +9345,8 @@
             (define-inline 3 stencil-vector
               [(e-mask . e-val*)
                (do-stencil-vector e-mask e-val*)])
+            (define-inline 2 $make-stencil-vector
+              [(e-length e-mask) (do-make-stencil-vector e-length e-mask)])
             (define-inline 3 $make-stencil-vector
               [(e-length e-mask) (do-make-stencil-vector e-length e-mask)])
             (define-inline 3 stencil-vector-update

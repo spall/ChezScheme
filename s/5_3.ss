@@ -2425,21 +2425,6 @@
       [(bignum?) (biglength x)]
       [else (nonexact-integer-error who x)])))
 
-(set-who! fxpopcount
-  (lambda (x)
-    (unless (fixnum? x) ($oops who "~s is not a fixnum" x))
-    (fxpopcount x)))
-
-(set-who! fxpopcount32
-  (lambda (x)
-    (unless (fixnum? x) ($oops who "~s is not a fixnum" x))
-    (fxpopcount32 x)))
-
-(set-who! fxpopcount16
-  (lambda (x)
-    (unless (fixnum? x) ($oops who "~s is not a fixnum" x))
-    (fxpopcount16 x)))
-
 (set-who! bitwise-length ; same as integer-length
   (lambda (x)
     (type-case x
