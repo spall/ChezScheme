@@ -9296,9 +9296,7 @@
                                     (set! ,(%mref ,t-vec ,(fx+ i (constant stencil-vector-data-disp))) ,(car e-val*))
                                     ,(loop (cdr e-val*) (fx+ i (constant ptr-bytes)))))))))))
             (define do-make-stencil-vector
-              (lambda (e-length e-mask e-fill)
-                ; NB: caller must bind e-fill
-                (safe-assert (no-need-to-bind? #f e-fill))
+              (lambda (e-length e-mask)
                 (bind #t (e-length)
                       (bind #f (e-mask)
                             (let ([t-vec (make-tmp 'tvec)])
@@ -9314,12 +9312,15 @@
                                           (immediate ,(constant type-stencil-vector))
                                           ,(%inline sll ,e-mask (immediate ,(fx- (constant stencil-vector-mask-offset)
                                                                                  (constant fixnum-offset))))))
-                                ,(build-stencil-vector-fill t-vec e-length e-fill))))))))
+                                ;; Content not filled! This function is meant to be called by
+                                ;; `$stencil-vector-update`, which has GC disabled between
+                                ;; allocation and filling in the data
+                                ,t-vec)))))))
             (define-inline 3 stencil-vector
               [(e-mask . e-val*)
                (do-stencil-vector e-mask e-val*)])
             (define-inline 3 $make-stencil-vector
-              [(e-length e-mask) (do-make-stencil-vector e-length e-mask `(immediate ,(fix 0)))])
+              [(e-length e-mask) (do-make-stencil-vector e-length e-mask)])
             (define-inline 3 stencil-vector-update
               [(e-vec e-sub-mask e-add-mask . e-val*)
                `(call ,(make-info-call src sexpr #f #f #f) #f

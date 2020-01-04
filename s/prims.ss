@@ -1199,6 +1199,9 @@
    (lambda (v)
       (#2%stencil-vector-mask v)))
 
+;; especially unsafe; allocates without initializing on the
+;; assumption that the allocated memory will be filled before
+;; a GC
 (define $make-stencil-vector
   (lambda (len mask)
     ($make-stencil-vector len mask)))

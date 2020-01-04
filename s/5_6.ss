@@ -426,37 +426,6 @@
 )
 
 (let ()
-  (define (stencil-vector-copy! to-v to-i from-v from-i n)
-    (unless (fx= n 0)
-      ($stencil-vector-set! to-v to-i (stencil-vector-ref from-v from-i))
-      (stencil-vector-copy! to-v (fx+ to-i 1) from-v (fx+ from-i 1) (fx- n 1))))
-
-  (define (do-stencil-vector-update v mask remove-bits add-bits vals)
-    (let* ([n (stencil-vector-length v)]
-           [new-n (fx+ (fx- n (fxpopcount remove-bits)) (fxpopcount add-bits))])
-      (let ([new-v ($make-stencil-vector new-n (fxior (fx- mask remove-bits) add-bits))])
-        (let loop ([to-i 0] [from-i 0] [mask mask] [remove-bits remove-bits] [add-bits add-bits] [vals vals])
-          (unless (fx= to-i new-n)
-            (let* ([pre-remove-mask (fx- (fxxor remove-bits (fxand remove-bits (fx- remove-bits 1))) 1)]
-                   [pre-add-mask (fx- (fxxor add-bits (fxand add-bits (fx- add-bits 1))) 1)]
-                   [keep-mask (fxand mask pre-remove-mask pre-add-mask)]
-                   [keep-n (fxpopcount keep-mask)])
-              (unless (fx= keep-n 0)
-                (stencil-vector-copy! new-v to-i v from-i keep-n))
-              (let ([to-i (fx+ to-i keep-n)]
-                    [from-i (fx+ from-i keep-n)]
-                    [mask (fx- mask keep-mask)])
-                (cond
-                 [($fxu< pre-add-mask pre-remove-mask)
-                  ;; an add bit happens before a remove bit
-                  ($stencil-vector-set! new-v to-i (car vals))
-                  (loop (fx+ to-i 1) from-i mask remove-bits (fx- add-bits (fx+ pre-add-mask 1)) (cdr vals))]
-                 [else
-                  ;; a remove bit happens before an add bit (or we're at the end)
-                  (let ([remove-bit (fx+ pre-remove-mask 1)])
-                    (loop to-i (fx+ from-i 1) (fx- mask remove-bit) (fx- remove-bits remove-bit) add-bits vals))])))))
-        new-v)))
-
   (set-who! stencil-vector-mask-width (lambda () (constant stencil-vector-mask-bits)))
 
   (set-who! stencil-vector-length
@@ -515,9 +484,113 @@
           ($oops who "stencil already has bits in ~s" add-bits))
         (unless (fx= (fxpopcount add-bits) (length vals))
           ($oops who "addition mask ~s does not match given number of items ~s" mask (length vals)))
-        (do-stencil-vector-update v mask remove-bits add-bits vals))))
+        ($stencil-vector-update* v mask remove-bits add-bits vals)))))
 
-  ;; unsafe system variant:
+;; compiled with generate-interrupt-trap #f and optimize-level 3 so
+;; that stencip updates won't be interrupted by a GC while a newly
+;; allocated stencil is filled in
+(eval-when (compile)
+  (generate-interrupt-trap #f)
+  (optimize-level 3))
+
+(let ()
+  ;; Call with non-zero n
+  (define (stencil-vector-copy! to-v to-i from-v from-i n)
+    (cond
+     [(fx= n 1)
+      ($stencil-vector-set! to-v to-i (stencil-vector-ref from-v from-i))]
+     [else
+      ($stencil-vector-set! to-v to-i (stencil-vector-ref from-v from-i))
+      ($stencil-vector-set! to-v (fx+ to-i 1) (stencil-vector-ref from-v (fx+ from-i 1)))
+      (let ([n (fx- n 2)])
+        (unless (fx= n 0)
+          (stencil-vector-copy! to-v (fx+ to-i 2) from-v (fx+ from-i 2) n)))]))
+
+  (define (do-stencil-vector-update v mask remove-bits add-bits vals)
+    (let* ([new-n (fxpopcount (fxior (fx- mask remove-bits) add-bits))]
+           [new-v ($make-stencil-vector new-n (fxior (fx- mask remove-bits) add-bits))])
+      ;; `new-v` is not initialized, so don't let a GC happen until we're done filling it in
+      (let loop ([to-i 0] [from-i 0] [mask mask] [remove-bits remove-bits] [add-bits add-bits] [vals vals])
+        (unless (fx= to-i new-n)
+          (let* ([pre-remove-mask (fx- (fxxor remove-bits (fxand remove-bits (fx- remove-bits 1))) 1)]
+                 [pre-add-mask (fx- (fxxor add-bits (fxand add-bits (fx- add-bits 1))) 1)]
+                 [keep-mask (fxand mask pre-remove-mask pre-add-mask)]
+                 [kept-n (cond
+                          [(fx= 0 keep-mask) 0]
+                          [else
+                           (let ([keep-n (fxpopcount keep-mask)])
+                             (stencil-vector-copy! new-v to-i v from-i keep-n)
+                             keep-n)])])
+            (let ([to-i (fx+ to-i kept-n)]
+                  [from-i (fx+ from-i kept-n)]
+                  [mask (fx- mask keep-mask)])
+              (cond
+               [($fxu< pre-add-mask pre-remove-mask)
+                ;; an add bit happens before a remove bit
+                ($stencil-vector-set! new-v to-i (car vals))
+                (loop (fx+ to-i 1) from-i mask remove-bits (fx- add-bits (fx+ pre-add-mask 1)) (cdr vals))]
+               [else
+                ;; a remove bit happens before an add bit (or we're at the end)
+                (let ([remove-bit (fx+ pre-remove-mask 1)])
+                  (loop to-i (fx+ from-i 1) (fx- mask remove-bit) (fx- remove-bits remove-bit) add-bits vals))])))))
+      new-v))
+
+  (define (stencil-vector-replace-one v bit val)
+    (let* ([mask (stencil-vector-mask v)]
+           [n (fxpopcount mask)]
+           [new-v ($make-stencil-vector n mask)])
+      ;; `new-v` is not initialized, so don't let a GC happen until we're done filling it in
+      (stencil-vector-copy! new-v 0 v 0 n)
+      (let ([i (fxpopcount (fxand mask (fx- bit 1)))])
+        (stencil-vector-set! new-v i val))
+      new-v))
+
+  (define (stencil-vector-replace-two v bits val1 val2)
+    (let* ([mask (stencil-vector-mask v)]
+           [n (fxpopcount mask)]
+           [new-v ($make-stencil-vector n mask)])
+      ;; `new-v` is not initialized, so don't let a GC happen until we're done filling it in
+      (stencil-vector-copy! new-v 0 v 0 n)
+      (let ([i1 (fxpopcount (fxand mask (fx- (fxxor bits (fxand bits (fx- bits 1))) 1)))])
+        (stencil-vector-set! new-v i1 val1)
+        (let ([i2 (fxpopcount (fxand mask (fx- (fxand bits (fx- bits 1)) 1)))])
+          (stencil-vector-set! new-v i2 val2)))
+      new-v))
+
+  (set! $stencil-vector-update*
+     (lambda (v mask remove-bits add-bits vals)
+       (do-stencil-vector-update v mask remove-bits add-bits vals)))
+
+  ;; unsafe variant, which assumes that the arguments are consistent;
+  ;; recognize the case where all slots are replaced
   (set-who! $stencil-vector-update
-    (lambda (v remove-bits add-bits . vals)
-      (do-stencil-vector-update v (stencil-vector-mask v) remove-bits add-bits vals))))
+    (case-lambda
+     [(v remove-bits add-bits x)
+      (let ([mask (stencil-vector-mask v)])
+        (cond
+         [(fx= 0 (fx- mask remove-bits))
+          ;; not using any data from `v`
+          (stencil-vector add-bits x)]
+         [(fx= add-bits remove-bits)
+          ;; updating one element of `v`:
+          (stencil-vector-replace-one v add-bits x)]
+         [else
+          (do-stencil-vector-update v mask remove-bits add-bits (list x))]))]
+     [(v remove-bits add-bits x y)
+      (let ([mask (stencil-vector-mask v)])
+        (cond
+         [(fx= 0 (fx- mask remove-bits))
+          ;; not using any data from `v`
+          (stencil-vector add-bits x y)]
+         [(fx= add-bits remove-bits)
+          ;; updating two elements of `v`:
+          (stencil-vector-replace-two v add-bits x y)]
+         [else
+          (do-stencil-vector-update v mask remove-bits add-bits (list x y))]))]
+     [(v remove-bits add-bits x y z)
+      (let ([mask (stencil-vector-mask v)])
+        (if (fx= 0 (fx- mask remove-bits))
+            (stencil-vector add-bits x y z)
+            (do-stencil-vector-update v mask remove-bits add-bits (list x y z))))]
+     [(v remove-bits add-bits . vals)
+      (do-stencil-vector-update v (stencil-vector-mask v) remove-bits add-bits vals)])))
