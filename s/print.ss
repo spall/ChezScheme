@@ -676,7 +676,7 @@ floating point returns with (1 0 -1 ...).
           [(string?) (if d? (display-string x p) (wrstring x p))]
           [(vector?) (wrvector vector-length vector-ref #f x r lev len d? env p)]
           [(stencil-vector?) (wrvector stencil-vector-length stencil-vector-ref
-                                       (string-append "stencil[" (number->string (stencil-vector-mask x)) "]")
+                                       (string-append "stencil[" (number->string (stencil-vector-mask x) 16) "]")
                                        x r lev len d? env p)]
           [(fxvector?) (wrvector fxvector-length fxvector-ref "vfx" x r lev len d? env p)]
           [(bytevector?) (wrvector bytevector-length bytevector-u8-ref "vu8" x r lev len d? env p)]
