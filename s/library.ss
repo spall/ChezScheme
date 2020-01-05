@@ -518,7 +518,7 @@
 (define-library-entry (fxxor x y) (fxnonfixnum2 'fxxor x y))
 (define-library-entry (fxand x y) (fxnonfixnum2 'fxand x y))
 (define-library-entry (fxnot x) (fxnonfixnum1 'fxnot x))
-(define-library-entry (fxpopcount x) (fxnonfixnum1 'fxpopcount x))
+(define-library-entry (fxpopcount x) ($oops 'fxpopcount32 "~s is not a non-negative fixnum" x))
 (define-library-entry (fxpopcount32 x) ($oops 'fxpopcount32 "~s is not a 32-bit fixnum" x))
 (define-library-entry (fxpopcount16 x) ($oops 'fxpopcount16 "~s is not a 16-bit fixnum" x))
 

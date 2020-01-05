@@ -4535,7 +4535,9 @@
               (define-inline 2 fxpopcount
                 [(e)
                  (bind #t (e)
-                   `(if ,(%type-check mask-fixnum type-fixnum ,e)
+                   `(if ,(build-and
+                          (%type-check mask-fixnum type-fixnum ,e)
+                          (%inline >= ,e (immediate ,0)))
                         ,(build-popcount e)
                         ,(build-libcall #t #f sexpr fxpopcount e)))])
               (define-inline 3 fxpopcount32
@@ -4546,11 +4548,12 @@
                 [(e)
                  (bind #t (e)
                        `(if ,(constant-case ptr-bits
-                               [(32) (%type-check mask-fixnum type-fixnum ,e)]
+                               [(32)
+                                (build-and (%type-check mask-fixnum type-fixnum ,e)
+                                           (%inline >= ,e (immediate ,0)))]
                                [(64)
-                                `(if ,(%type-check mask-fixnum type-fixnum ,e)
-                                     ,(%inline u< ,e (immediate ,(fix #x100000000)))
-                                     #f)])
+                                (build-and (%type-check mask-fixnum type-fixnum ,e)
+                                           (%inline u< ,e (immediate ,(fix #x100000000))))])
                             ,(build-popcount32 e)
                             ,(build-libcall #t #f sexpr fxpopcount32 e)))])
               (define-inline 3 fxpopcount16
@@ -4560,9 +4563,9 @@
               (define-inline 2 fxpopcount16
                 [(e)
                  (bind #f (e)
-                       `(if (if ,(%type-check mask-fixnum type-fixnum ,e)
-                                ,(%inline u< ,e (immediate ,(fix #x10000)))
-                                #f)
+                       `(if ,(build-and
+                              (%type-check mask-fixnum type-fixnum ,e)
+                              (%inline u< ,e (immediate ,(fix #x10000))))
                             ,(build-popcount16 e)
                             ,(build-libcall #t #f sexpr fxpopcount16 e)))]))))
         (let ()
