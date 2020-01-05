@@ -557,6 +557,18 @@
           ($oops who "addition mask ~s does not match given number of items ~s" add-bits (length vals)))
         (do-stencil-vector-update v mask remove-bits add-bits vals))))
 
+  (set-who! stencil-vector-truncate!
+    (lambda (v new-mask)
+      (unless (stencil-vector? v)
+        ($oops who "~s is not a stencil vector" v))
+      (unless (and (fixnum? new-mask)
+                   (fx< -1 new-mask (fxsll 1 (constant stencil-vector-mask-bits))))
+        ($oops who "invalid mask ~s" new-mask))
+      (let ([old-mask (stencil-vector-mask v)])
+        (unless (fx<= (fxpopcount new-mask) (fxpopcount old-mask))
+          ($oops who "new mask ~s is larger than old mask ~s" new-mask old-mask))
+        (stencil-vector-truncate! v new-mask))))
+
   ;; unsafe variant, which assumes that the arguments are consistent;
   ;; recognize the case where all slots are replaced
   (set-who! $stencil-vector-update

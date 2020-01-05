@@ -9301,6 +9301,12 @@
         (let ()
           (meta-assert (= (constant log2-ptr-bytes) (constant fixnum-offset)))
           (let ()
+            (define build-stencil-vector-type
+              (lambda (e-mask) ; e-mask is used only once
+                (%inline logor
+                         (immediate ,(constant type-stencil-vector))
+                         ,(%inline sll ,e-mask (immediate ,(fx- (constant stencil-vector-mask-offset)
+                                                                (constant fixnum-offset)))))))
             (define do-stencil-vector
               (lambda (e-mask e-val*)
                 (list-bind #f (e-val*)
@@ -9313,10 +9319,7 @@
                               (if (null? e-val*)
                                   `(seq
                                      (set! ,(%mref ,t-vec ,(constant stencil-vector-type-disp))
-                                           ,(%inline logor
-                                                     (immediate ,(constant type-stencil-vector))
-                                                     ,(%inline sll ,e-mask (immediate ,(fx- (constant stencil-vector-mask-offset)
-                                                                                            (constant fixnum-offset))))))
+                                           ,(build-stencil-vector-type e-mask))
                                      ,t-vec)
                                   `(seq
                                     (set! ,(%mref ,t-vec ,(fx+ i (constant stencil-vector-data-disp))) ,(car e-val*))
@@ -9334,10 +9337,7 @@
                                                          (immediate ,(- (constant byte-alignment)))))])
                                ,(%seq
                                  (set! ,(%mref ,t-vec ,(constant stencil-vector-type-disp))
-                                       ,(%inline logor
-                                          (immediate ,(constant type-stencil-vector))
-                                          ,(%inline sll ,e-mask (immediate ,(fx- (constant stencil-vector-mask-offset)
-                                                                                 (constant fixnum-offset))))))
+                                       ,(build-stencil-vector-type e-mask))
                                  ;; Content not filled! This function is meant to be called by
                                  ;; `$stencil-vector-update`, which has GC disabled between
                                  ;; allocation and filling in the data
@@ -9353,8 +9353,14 @@
               [(e-vec e-sub-mask e-add-mask . e-val*)
                `(call ,(make-info-call src sexpr #f #f #f) #f
                       ,(lookup-primref 3 '$stencil-vector-update)
-                      ,e-vec ,e-sub-mask ,e-add-mask ,e-val* ...)])))
-
+                      ,e-vec ,e-sub-mask ,e-add-mask ,e-val* ...)])
+            (define-inline 3 stencil-vector-truncate!
+              [(e-vec e-mask)
+               (bind #f (e-vec e-mask)
+                 `(seq
+                   (set! ,(%mref ,e-vec ,(constant stencil-vector-type-disp))
+                         ,(build-stencil-vector-type e-mask))
+                   ,(%constant svoid)))])))
         (let ()
           (meta-assert (= (constant log2-ptr-bytes) (constant fixnum-offset)))
           (define-inline 3 $make-eqhash-vector

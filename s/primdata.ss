@@ -1677,7 +1677,8 @@
   (stencil-vector-mask [sig [(stencil-vector) -> (uptr)]] [flags true])
   (stencil-vector-mask-width [sig [() -> (fixnum)]] [flags pure unrestricted true cp02])
   (stencil-vector-ref [sig [(stencil-vector uptr) -> (ptr)]] [flags pure])
-  (stencil-vector-set! [sig [(stencil-vector uptr ptr) -> (ptr)]] [flags true])
+  (stencil-vector-set! [sig [(stencil-vector uptr ptr) -> (void)]] [flags true])
+  (stencil-vector-truncate! [sig [(stencil-vector uptr) -> (void)]] [flags true])
   (stencil-vector-update [sig [(stencil-vector uptr uptr ptr ...) -> (stencil-vector)]] [flags true])
   (string->multibyte [feature windows] [sig [(sub-uint string) -> (bytevector)]] [flags true discard])
   (string->number [sig [(string) (string sub-ufixnum) -> (maybe-number)]] [flags discard]) ; radix not restricted to 2, 4, 8, 16
