@@ -1416,6 +1416,12 @@
          (eqv? (stencil-vector-ref sv 0) 1)
          (eqv? (stencil-vector-ref sv 1) 2)))
 
+  ;; check fasl:
+  (let ([s (stencil-vector 42 'a 'b 'c)])
+    (define-values (o get) (open-bytevector-output-port))
+    (fasl-write s o)
+    (equal? s (fasl-read (open-bytevector-input-port (get)))))
+   
   ;; try to check GC interaction
   (let loop ([n 100000]
              [v1 (stencil-vector 7 'a 'b 'c)]

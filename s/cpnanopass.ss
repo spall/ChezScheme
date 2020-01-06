@@ -4494,40 +4494,49 @@
                                       #`(immediate a2)
                                       #`,a2))])))
               (define (build-popcount16 e)
-                (let ([x (make-tmp 'x 'uptr)]
-                      [x2 (make-tmp 'x2 'uptr)]
-                      [x3 (make-tmp 'x3 'uptr)]
-                      [x4 (make-tmp 'x4 'uptr)])
-                  `(let ([,x ,(build-unfix e)])
-                     (let ([,x2 ,(build-fx - x (build-fx logand (build-fx srl x 1) #x5555))])
-                       (let ([,x3 ,(build-fx + (build-fx logand x2 #x3333) (build-fx logand (build-fx srl x2 2) #x3333))])
-                         (let ([,x4 ,(build-fx logand (build-fx + x3 (build-fx srl x3 4)) #x0f0f)])
-                           ,(build-fix (build-fx logand (build-fx + x4 (build-fx srl x4 8)) #x1f))))))))
-              (define (build-popcount32 e)
-                (let ([x (make-tmp 'x 'uptr)]
-                      [x2 (make-tmp 'x2 'uptr)]
-                      [x3 (make-tmp 'x3 'uptr)]
-                      [x4 (make-tmp 'x4 'uptr)])
-                  `(let ([,x ,(build-unfix e)])
-                     (let ([,x2 ,(build-fx - x (build-fx logand (build-fx srl x 1) #x55555555))])
-                       (let ([,x3 ,(build-fx + (build-fx logand x2 #x33333333) (build-fx logand (build-fx srl x2 2) #x33333333))])
-                         (let ([,x4 ,(build-fx logand (build-fx + x3 (build-fx srl x3 4)) #x0f0f0f0f)])
-                           ,(build-fix (build-fx logand (build-fx srl (build-fx * x4 #x01010101) 24) #x3f))))))))
-              (define (build-popcount e)
-                (constant-case ptr-bits
-                  [(32) (build-popcount32 e)]
-                  [(64)
+                (constant-case popcount-instruction
+                  [(#t) (build-fix (%inline popcount ,e))] ; no unfix needed, since not specialized to 16-bit
+                  [else
                    (let ([x (make-tmp 'x 'uptr)]
                          [x2 (make-tmp 'x2 'uptr)]
                          [x3 (make-tmp 'x3 'uptr)]
-                         [x4 (make-tmp 'x4 'uptr)]
-                         [x5 (make-tmp 'x5 'uptr)])
+                         [x4 (make-tmp 'x4 'uptr)])
                      `(let ([,x ,(build-unfix e)])
-                        (let ([,x2 ,(build-fx - x (build-fx logand (build-fx srl x 1) #x5555555555555555))])
-                          (let ([,x3 ,(build-fx + (build-fx logand x2 #x3333333333333333) (build-fx logand (build-fx srl x2 2) #x3333333333333333))])
-                            (let ([,x4 ,(build-fx logand (build-fx + x3 (build-fx srl x3 4)) #x0f0f0f0f0f0f0f0f)])
-                              (let ([,x5 ,(build-fx logand (build-fx + x4 (build-fx srl x4 8)) #x00ff00ff00ff00ff)])
-                                ,(build-fix (build-fx logand (build-fx srl (build-fx * x5 #x0101010101010101) 56) #x7f))))))))]))
+                        (let ([,x2 ,(build-fx - x (build-fx logand (build-fx srl x 1) #x5555))])
+                          (let ([,x3 ,(build-fx + (build-fx logand x2 #x3333) (build-fx logand (build-fx srl x2 2) #x3333))])
+                            (let ([,x4 ,(build-fx logand (build-fx + x3 (build-fx srl x3 4)) #x0f0f)])
+                              ,(build-fix (build-fx logand (build-fx + x4 (build-fx srl x4 8)) #x1f)))))))]))
+              (define (build-popcount32 e)
+                (constant-case popcount-instruction
+                  [(#t) (build-fix (%inline popcount ,e))] ; no unfix needed, since not specialized to 32-bit
+                  [else
+                   (let ([x (make-tmp 'x 'uptr)]
+                         [x2 (make-tmp 'x2 'uptr)]
+                         [x3 (make-tmp 'x3 'uptr)]
+                         [x4 (make-tmp 'x4 'uptr)])
+                     `(let ([,x ,(build-unfix e)])
+                        (let ([,x2 ,(build-fx - x (build-fx logand (build-fx srl x 1) #x55555555))])
+                          (let ([,x3 ,(build-fx + (build-fx logand x2 #x33333333) (build-fx logand (build-fx srl x2 2) #x33333333))])
+                            (let ([,x4 ,(build-fx logand (build-fx + x3 (build-fx srl x3 4)) #x0f0f0f0f)])
+                              ,(build-fix (build-fx logand (build-fx srl (build-fx * x4 #x01010101) 24) #x3f)))))))]))
+              (define (build-popcount e)
+                (constant-case popcount-instruction
+                  [(#t) (build-fix (%inline popcount ,e))] ; no unfix needed
+                  [else
+                   (constant-case ptr-bits
+                     [(32) (build-popcount32 e)]
+                     [(64)
+                      (let ([x (make-tmp 'x 'uptr)]
+                            [x2 (make-tmp 'x2 'uptr)]
+                            [x3 (make-tmp 'x3 'uptr)]
+                            [x4 (make-tmp 'x4 'uptr)]
+                            [x5 (make-tmp 'x5 'uptr)])
+                        `(let ([,x ,e]) ; no unfix needed
+                           (let ([,x2 ,(build-fx - x (build-fx logand (build-fx srl x 1) #x5555555555555555))])
+                             (let ([,x3 ,(build-fx + (build-fx logand x2 #x3333333333333333) (build-fx logand (build-fx srl x2 2) #x3333333333333333))])
+                               (let ([,x4 ,(build-fx logand (build-fx + x3 (build-fx srl x3 4)) #x0f0f0f0f0f0f0f0f)])
+                                 (let ([,x5 ,(build-fx logand (build-fx + x4 (build-fx srl x4 8)) #x00ff00ff00ff00ff)])
+                                   ,(build-fix (build-fx logand (build-fx srl (build-fx * x5 #x0101010101010101) 56) #x7f))))))))])]))
               (define-inline 3 fxpopcount
                 [(e)
                  (bind #f (e)
