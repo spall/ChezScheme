@@ -166,6 +166,7 @@ extern void S_gc_ocd PROTO((ptr tc, IGEN mcg, IGEN tg));
 
 /* gc-oce.c */
 extern void S_gc_oce PROTO((ptr tc, IGEN mcg, IGEN tg));
+extern ptr S_count_size_increments PROTO((ptr ls, IGEN generation));
 
 /* intern.c */
 extern void S_intern_init PROTO((void));

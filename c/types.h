@@ -133,12 +133,18 @@ typedef struct _seginfo {
   struct _seginfo **dirty_prev;             /* pointer to the next pointer on the previous seginfo in the DirtySegments list */
   struct _seginfo *dirty_next;              /* pointer to the next seginfo on the DirtySegments list */
   ptr trigger_ephemerons;                   /* ephemerons to re-check if object in segment is copied out */
-  ptr trigger_guardians;                    /* guardians to re-check if object in segment is copied out */
+  union {
+    ptr trigger_guardians;                  /* guardians to re-check if object in segment is copied out */
+    octet *nonkey_mask;                     /* objects to not treat as reachable, yet */
+  };
   ptr locked_objects;                       /* list of objects (including duplicates) for locked in this segment */
   ptr unlocked_objects;                     /* list of objects (no duplicates) for formerly locked */
+  union {
 #ifdef PRESERVE_FLONUM_EQ
-  octet *forwarded_flonums;                 /* bitmap of flonums whose payload is a forwarding pointer */
+    octet *forwarded_flonums;               /* bitmap of flonums whose payload is a forwarding pointer */
 #endif
+    octet *measured_mask;                   /* bitmap of objects that have been measured */
+  };
   octet dirty_bytes[cards_per_segment];     /* one dirty byte per card */
 } seginfo;
 
@@ -250,6 +256,10 @@ typedef struct _bucket_pointer_list {
 #define UNFIX(x) Sfixnum_value(x)
 
 #define TYPEP(x,mask,type) (((iptr)(x) & (mask)) == (type))
+
+#define segment_bitmap_index(si, p) (((uptr)UNTYPE_ANY(p) - (uptr)build_ptr(si->number, 0)) >> log2_ptr_bytes)
+#define segment_bitmap_byte(si, p)  (segment_bitmap_index(si, p) >> 3)
+#define segment_bitmap_bit(si, p)   (segment_bitmap_index(si, p) & 0x7)
 
 /* reloc fields */
 #define RELOC_EXTENDED_FORMAT(x) ((x)&reloc_extended_format)

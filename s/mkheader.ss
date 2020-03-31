@@ -76,6 +76,9 @@
          (lambda (a)
            (apply
              (lambda (field type disp len)
+               (putprop (string->symbol (format "~a-~a" struct field)) '*c-ref* (if len
+                                                                                    (cons name len)
+                                                                                    name))
                (if len
                    (def (format "~s(x,i)" name)
                         (format (if (eq? ref &ref) "(~a+i)" "(~a[i])")
@@ -170,7 +173,9 @@
 
   (set-who! mkscheme.h
     (lambda (ofn target-machine)
-      (fluid-let ([op (open-output-file ofn 'replace)])
+      (fluid-let ([op (if (output-port? ofn)
+                          ofn
+                          (open-output-file ofn 'replace))])
         (comment "scheme.h for Chez Scheme Version ~a (~a)" scheme-version target-machine)
   
         (nl)
@@ -706,7 +711,9 @@
 
   (set! mkequates.h
     (lambda (ofn)
-      (fluid-let ([op (open-output-file ofn 'replace)])
+      (fluid-let ([op (if (output-port? ofn)
+                          ofn
+                          (open-output-file ofn 'replace))])
         (comment "equates.h for Chez Scheme Version ~a" scheme-version)
   
         (nl)

@@ -3117,14 +3117,17 @@
       [(x g) ($compute-size x (filter-generation who g))]))
 
   (set-who! compute-size-increments
-    (rec compute-size-increments
-      (case-lambda
-       [(x*) (compute-size-increments x* (collect-maximum-generation))]
-       [(x* g)
-        (unless (list? x*) ($oops who "~s is not a list" x*))
-        (let ([g (filter-generation who g)])
-          (with-interrupts-disabled
-           ($compute-size-increments x* g)))])))
+    (let ([count_size_increments (foreign-procedure "(cs)count_size_increments" (ptr int) ptr)])
+      (rec compute-size-increments
+        (case-lambda
+         [(x*) (compute-size-increments x* (collect-maximum-generation))]
+         [(x* g)
+          (unless (list? x*) ($oops who "~s is not a list" x*))
+          (let ([g (filter-generation who g)])
+            (count_size_increments x* g)
+            #;
+            (with-interrupts-disabled
+             ($compute-size-increments x* g)))]))))
 
   (set-who! compute-composition
     (case-lambda
