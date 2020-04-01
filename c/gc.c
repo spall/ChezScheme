@@ -45,7 +45,6 @@ static void sweep_symbol PROTO((ptr p));
 static void sweep_port PROTO((ptr p));
 static void sweep_thread PROTO((ptr p));
 static void sweep_continuation PROTO((ptr p));
-static void sweep_stack PROTO((uptr base, uptr size, uptr ret));
 static void sweep_record PROTO((ptr x));
 static IGEN sweep_dirty_record PROTO((ptr x, IGEN tg, IGEN youngest));
 static IGEN sweep_dirty_port PROTO((ptr x, IGEN tg, IGEN youngest));
@@ -67,6 +66,17 @@ static int check_dirty_ephemeron PROTO((ptr pe, int tg, int youngest));
 static void clear_trigger_ephemerons PROTO(());
 static void sanitize_locked_segment PROTO((seginfo *si));
 
+#ifdef ENABLE_MEASURE
+static void measure(ptr p);
+static void init_measure_mask(seginfo *si);
+static void clear_measured_masks();
+static void push_measure(ptr p);
+static void add_ephemeron_to_pending_measure(ptr pe);
+static void add_trigger_ephemerons_to_pending_measure(ptr pe);
+static void check_ephemeron_measure(ptr pe);
+static void check_pending_measure_ephemerons();
+#endif
+
 /* MAXPTR is used to pad the sorted_locked_object vector.  The pad value must be greater than any heap address */
 #define MAXPTR ((ptr)-1)
 
@@ -84,6 +94,14 @@ static ptr sorted_locked_objects;
 static ptr tlcs_to_rehash;
 static ptr conts_to_promote;
 static ptr recheck_guardians_ls;
+
+#ifdef ENABLE_MEASURE
+static uptr measure_total; /* updated by `measure` */
+static IGEN measure_generation;
+static ptr *measure_stack_start, *measure_stack, *measure_stack_limit;
+static seginfo *measured_mask_chain, *nonkey_mask_chain;
+static ptr pending_measure_ephemerons;
+#endif
 
 #ifdef ENABLE_BACKREFERENCE
 static ptr sweep_from;
@@ -1171,183 +1189,10 @@ static iptr sweep_typed_object(tc, p) ptr tc; ptr p; {
     sweep_thread(p);
     return size_thread;
   } else {
-    /* We get here only if backreference mode pushed othertyped objects into
+    /* We get here only if backreference mode pushed other typed objects into
        a typed space */
     sweep(tc, p);
     return size_object(p);
-  }
-}
-
-static void sweep_symbol(p) ptr p; {
-  ptr val, code;
-  PUSH_BACKREFERENCE(p)
-
-  val = SYMVAL(p);
-  relocate(&val);
-  INITSYMVAL(p) = val;
-  code = Sprocedurep(val) ? CLOSCODE(val) : SYMCODE(p);
-  relocate(&code);
-  INITSYMCODE(p,code);
-  relocate(&INITSYMPLIST(p))
-  relocate(&INITSYMSPLIST(p))
-  relocate(&INITSYMNAME(p))
-  relocate(&INITSYMHASH(p))
-
-  POP_BACKREFERENCE()
-}
-
-static void sweep_port(p) ptr p; {
-  PUSH_BACKREFERENCE(p)
-  relocate(&PORTHANDLER(p))
-  relocate(&PORTINFO(p))
-  relocate(&PORTNAME(p))
-
-  if (PORTTYPE(p) & PORT_FLAG_OUTPUT) {
-    iptr n = (iptr)PORTOLAST(p) - (iptr)PORTOBUF(p);
-    relocate(&PORTOBUF(p))
-    PORTOLAST(p) = (ptr)((iptr)PORTOBUF(p) + n);
-  }
-
-  if (PORTTYPE(p) & PORT_FLAG_INPUT) {
-    iptr n = (iptr)PORTILAST(p) - (iptr)PORTIBUF(p);
-    relocate(&PORTIBUF(p))
-    PORTILAST(p) = (ptr)((iptr)PORTIBUF(p) + n);
-  }
-  POP_BACKREFERENCE()
-}
-
-static void sweep_thread(p) ptr p; {
-  ptr tc = (ptr)THREADTC(p);
-  INT i;
-  PUSH_BACKREFERENCE(p)
-
-  if (tc != (ptr)0) {
-    ptr old_stack = SCHEMESTACK(tc);
-    if (OLDSPACE(old_stack)) {
-      iptr clength = (uptr)SFP(tc) - (uptr)old_stack;
-     /* include SFP[0], which contains the return address */
-      SCHEMESTACK(tc) = copy_stack(old_stack, &SCHEMESTACKSIZE(tc), clength + sizeof(ptr));
-      SFP(tc) = (ptr)((uptr)SCHEMESTACK(tc) + clength);
-      ESP(tc) = (ptr)((uptr)SCHEMESTACK(tc) + SCHEMESTACKSIZE(tc) - stack_slop);
-    }
-    STACKCACHE(tc) = Snil;
-    relocate(&CCHAIN(tc))
-    /* U32 RANDOMSEED(tc) */
-    /* I32 ACTIVE(tc) */
-    relocate(&STACKLINK(tc))
-    /* iptr SCHEMESTACKSIZE */
-    relocate(&WINDERS(tc))
-    relocate(&ATTACHMENTS(tc))
-    CACHEDFRAME(tc) = Sfalse;
-    relocate_return_addr(&FRAME(tc,0))
-    sweep_stack((uptr)SCHEMESTACK(tc), (uptr)SFP(tc), (uptr)FRAME(tc,0));
-    relocate(&U(tc))
-    relocate(&V(tc))
-    relocate(&W(tc))
-    relocate(&X(tc))
-    relocate(&Y(tc))
-    /* immediate SOMETHINGPENDING(tc) */
-    /* immediate TIMERTICKS */
-    /* immediate DISABLE_COUNT */
-    /* immediate SIGNALINTERRUPTPENDING */
-    /* void* SIGNALINTERRUPTQUEUE(tc) */
-    /* immediate KEYBOARDINTERRUPTPENDING */
-    relocate(&THREADNO(tc))
-    relocate(&CURRENTINPUT(tc))
-    relocate(&CURRENTOUTPUT(tc))
-    relocate(&CURRENTERROR(tc))
-    /* immediate BLOCKCOUNTER */
-    relocate(&SFD(tc))
-    relocate(&CURRENTMSO(tc))
-    relocate(&TARGETMACHINE(tc))
-    relocate(&FXLENGTHBV(tc))
-    relocate(&FXFIRSTBITSETBV(tc))
-    relocate(&NULLIMMUTABLEVECTOR(tc))
-    relocate(&NULLIMMUTABLEFXVECTOR(tc))
-    relocate(&NULLIMMUTABLEBYTEVECTOR(tc))
-    relocate(&NULLIMMUTABLESTRING(tc))
-    /* immediate METALEVEL */
-    relocate(&COMPILEPROFILE(tc))
-    /* immediate GENERATEINSPECTORINFORMATION */
-    /* immediate GENERATEPROFILEFORMS */
-    /* immediate OPTIMIZELEVEL */
-    relocate(&SUBSETMODE(tc))
-    /* immediate SUPPRESSPRIMITIVEINLINING */
-    relocate(&DEFAULTRECORDEQUALPROCEDURE(tc))
-    relocate(&DEFAULTRECORDHASHPROCEDURE(tc))
-    relocate(&COMPRESSFORMAT(tc))
-    relocate(&COMPRESSLEVEL(tc))
-    /* void* LZ4OUTBUFFER(tc) */
-    /* U64 INSTRCOUNTER(tc) */
-    /* U64 ALLOCCOUNTER(tc) */
-    relocate(&PARAMETERS(tc))
-    for (i = 0 ; i < virtual_register_count ; i += 1) {
-      relocate(&VIRTREG(tc, i));
-    }
-  }
-
-  POP_BACKREFERENCE()
-}
-
-static void sweep_continuation(p) ptr p; {
-  PUSH_BACKREFERENCE(p)
-  relocate(&CONTWINDERS(p))
-  relocate(&CONTATTACHMENTS(p))
-
- /* bug out for shot 1-shot continuations */
-  if (CONTLENGTH(p) == scaled_shot_1_shot_flag) return;
-
-  if (OLDSPACE(CONTSTACK(p)))
-    CONTSTACK(p) = copy_stack(CONTSTACK(p), &CONTLENGTH(p), CONTCLENGTH(p));
-
-  relocate(&CONTLINK(p))
-  relocate_return_addr(&CONTRET(p))
-
- /* use CLENGTH to avoid sweeping unoccupied portion of one-shots */
-  sweep_stack((uptr)CONTSTACK(p), (uptr)CONTSTACK(p) + CONTCLENGTH(p), (uptr)CONTRET(p));
-
-  POP_BACKREFERENCE()
-}
-
-/* assumes stack has already been copied to newspace */
-static void sweep_stack(base, fp, ret) uptr base, fp, ret; {
-  ptr *pp; iptr oldret;
-  ptr num;
-
-  while (fp != base) {
-    if (fp < base)
-      S_error_abort("sweep_stack(gc): malformed stack");
-    fp = fp - ENTRYFRAMESIZE(ret);
-    pp = (ptr *)fp;
-
-    oldret = ret;
-    ret = (iptr)(*pp);
-    relocate_return_addr(pp)
-
-    num = ENTRYLIVEMASK(oldret);
-    if (Sfixnump(num)) {
-      uptr mask = UNFIX(num);
-      while (mask != 0) {
-        pp += 1;
-        if (mask & 0x0001) relocate(pp)
-        mask >>= 1;
-      }
-    } else {
-      iptr index;
-
-      relocate(ENTRYNONCOMPACTLIVEMASKADDR(oldret))
-      num = ENTRYLIVEMASK(oldret);
-      index = BIGLEN(num);
-      while (index-- != 0) {
-        INT bits = bigit_bits;
-        bigit mask = BIGIT(num,index);
-        while (bits-- > 0) {
-          pp += 1;
-          if (mask & 1) relocate(pp)
-          mask >>= 1;
-        }
-      }
-    }
   }
 }
 
@@ -1438,69 +1283,6 @@ static IGEN sweep_dirty_symbol(p, tg, youngest) ptr p; IGEN tg, youngest; {
   POP_BACKREFERENCE()
 
   return youngest;
-}
-
-static void sweep_code_object(tc, co) ptr tc, co; {
-    ptr t, oldco; iptr a, m, n;
-
-    PUSH_BACKREFERENCE(co)
-        
-#ifdef DEBUG
-    if ((CODETYPE(co) & mask_code) != type_code) {
-      (void)printf("unexpected type %x sweeping code object %p\n", CODETYPE(co), co);
-      (void)fflush(stdout);
-    }
-#endif
-
-    relocate(&CODENAME(co))
-    relocate(&CODEARITYMASK(co))
-    relocate(&CODEINFO(co))
-    relocate(&CODEPINFOS(co))
-
-    t = CODERELOC(co);
-    m = RELOCSIZE(t);
-    oldco = RELOCCODE(t);
-    a = 0;
-    n = 0;
-    while (n < m) {
-        uptr entry, item_off, code_off; ptr obj;
-        entry = RELOCIT(t, n); n += 1;
-        if (RELOC_EXTENDED_FORMAT(entry)) {
-            item_off = RELOCIT(t, n); n += 1;
-            code_off = RELOCIT(t, n); n += 1;
-        } else {
-            item_off = RELOC_ITEM_OFFSET(entry);
-            code_off = RELOC_CODE_OFFSET(entry);
-        }
-        a += code_off;
-        obj = S_get_code_obj(RELOC_TYPE(entry), oldco, a, item_off);
-        relocate(&obj)
-        S_set_code_obj("gc", RELOC_TYPE(entry), co, a, obj, item_off);
-    }
-
-    if (target_generation == static_generation && !S_G.retain_static_relocation && (CODETYPE(co) & (code_flag_template << code_flags_offset)) == 0) {
-      CODERELOC(co) = (ptr)0;
-    } else {
-      /* Don't copy non-oldspace relocation tables, since we may be
-         sweeping a locked code object that is older than target_generation
-         Doing so would be a waste of work anyway. */
-      if (OLDSPACE(t)) {
-        ptr oldt = t;
-        n = size_reloc_table(RELOCSIZE(oldt));
-#ifdef ENABLE_OBJECT_COUNTS
-        S_G.countof[target_generation][countof_relocation_table] += 1;
-        S_G.bytesof[target_generation][countof_relocation_table] += n;
-#endif /* ENABLE_OBJECT_COUNTS */
-        find_room(space_data, target_generation, typemod, n, t);
-        copy_ptrs(typemod, t, oldt, n);
-      }
-      RELOCCODE(t) = co;
-      CODERELOC(co) = t;
-    }
-
-    S_record_code_mod(tc, (uptr)&CODEIT(co,0), (uptr)CODELEN(co));
-
-    POP_BACKREFERENCE()
 }
 
 typedef struct _weakseginfo {
@@ -2106,3 +1888,213 @@ static void clear_trigger_ephemerons() {
     pe = EPHEMERONNEXT(pe);
   }
 }
+
+/* **************************************** */
+
+#ifdef ENABLE_MEASURE
+
+#define measure_unreached(si, p) \
+  (!si->measured_mask \
+   || !(si->measured_mask[segment_bitmap_byte(p)] & (1 << segment_bitmap_bit(p))))
+
+#define measured_mask_bytes (bytes_per_segment >> (log2_ptr_bytes+3))
+
+static void init_measure_mask(seginfo *si) {
+  find_room(space_data, 0, typemod, ptr_align(measured_mask_bytes+ptr_bytes), si->measured_mask);
+  memset(si->measured_mask, 0, measured_mask_bytes);
+  *(ptr *)(si->measured_mask + measured_mask_bytes) = measured_mask_chain;
+  measured_mask_chain = si;
+}
+
+static void init_nonkey_mask(seginfo *si) {
+  find_room(space_data, 0, typemod, ptr_align(measured_mask_bytes+ptr_bytes), si->nonkey_mask);
+  memset(si->nonkey_mask, 0, measured_mask_bytes);
+  *(ptr *)(si->nonkey_mask + measured_mask_bytes) = nonkey_mask_chain;
+  nonkey_mask_chain = si;
+}
+
+static void clear_measured_masks()
+{
+  while (measured_mask_chain) {
+    octet *mask = measured_mask_chain->measured_mask;
+    measured_mask_chain->measured_mask = NULL;
+    measured_mask_chain->trigger_ephemerons = NULL;
+    measured_mask_chain = *(seginfo **)(mask + measured_mask_bytes);
+  }
+  while (nonkey_mask_chain) {
+    octet *mask = nonkey_mask_chain->nonkey_mask;
+    nonkey_mask_chain->nonkey_mask = NULL;
+    nonkey_mask_chain = *(seginfo **)(mask + measured_mask_bytes);
+  }
+}
+
+#define measure_mask_set(mm, si, p) \
+  mm[segment_bitmap_byte(p)] |= (1 << segment_bitmap_bit(p))
+#define measure_mask_unset(mm, si, p) \
+  mm[segment_bitmap_byte(p)] -= (1 << segment_bitmap_bit(p))
+
+static void push_measure(ptr p)
+{
+  seginfo *si = MaybeSegInfo(ptr_get_segment(p));
+
+  if (!si)
+    return;
+
+  if (si->generation > measure_generation)
+    return;
+  else {
+    uptr byte = segment_bitmap_byte(p);
+    uptr bit = 1 << segment_bitmap_bit(p);
+
+    if (!si->measured_mask)
+      init_measure_mask(si);
+    else if (si->measured_mask[byte] & bit)
+      return;
+
+    si->measured_mask[byte] |= bit;
+  }
+
+  if (si->trigger_ephemerons) {
+    add_trigger_ephemerons_to_pending_measure(si->trigger_ephemerons);
+    si->trigger_ephemerons = NULL;
+  }
+
+  if (measure_stack == measure_stack_limit) {
+    uptr sz = ptr_bytes * (measure_stack_limit - measure_stack_start);
+    uptr new_sz = 2*sz;
+    ptr new_measure_stack;
+    find_room(space_data, 0, typemod, ptr_align(new_sz), new_measure_stack);
+    memcpy(new_measure_stack, measure_stack_start, sz);
+    measure_stack_start = (ptr *)new_measure_stack;
+    measure_stack_limit = (ptr *)((uptr)new_measure_stack + new_sz);
+    measure_stack = (ptr *)((uptr)new_measure_stack + sz);
+  }
+  
+  *(measure_stack++) = p;
+}
+
+static void add_ephemeron_to_pending_measure(ptr pe) {
+  EPHEMERONNEXT(pe) = pending_measure_ephemerons;
+  pending_measure_ephemerons = pe;
+}
+
+static void add_trigger_ephemerons_to_pending_measure(ptr pe) {
+  ptr last_pe = pe, next_pe = EPHEMERONNEXT(pe);
+
+  while (next_pe != NULL) {
+    last_pe = next_pe;
+    next_pe = EPHEMERONNEXT(next_pe);
+  }
+  EPHEMERONNEXT(last_pe) = pending_measure_ephemerons;
+  pending_measure_ephemerons = pe;
+}
+
+static void check_ephemeron_measure(ptr pe) {
+  ptr p;
+  seginfo *si;
+
+  p = Scar(pe);
+  if (!IMMEDIATE(p) && (si = MaybeSegInfo(ptr_get_segment(p))) != NULL && (si->generation < measure_generation)) {
+    if (measure_unreached(si, p)
+        || (si->nonkey_mask
+            && (si->nonkey_mask[segment_bitmap_byte(p)] & (1 << segment_bitmap_bit(p))))) {
+      /* Not reached, so far; install as trigger */
+      EPHEMERONNEXT(pe) = si->trigger_ephemerons;
+      si->trigger_ephemerons = pe;
+      if (!si->measured_mask)
+        init_measure_mask(si); /* so triggers are cleared at end */
+      return;
+    }
+  }
+
+  p = Scdr(pe);
+  if (!IMMEDIATE(p))
+    push_measure(p);
+}
+
+static void check_pending_measure_ephemerons() {
+  ptr pe, next_pe;
+
+  pe = pending_measure_ephemerons;
+  pending_measure_ephemerons = NULL;
+  while (pe != NULL) {
+    next_pe = EPHEMERONNEXT(pe);
+    check_ephemeron_measure(pe);
+    pe = next_pe;
+  }
+}
+
+void gc_measure_one(ptr p) {
+  seginfo *si = SegInfo(ptr_get_segment(p));
+
+  if (si->trigger_ephemerons) {
+    add_trigger_ephemerons_to_pending_measure(si->trigger_ephemerons);
+    si->trigger_ephemerons = NULL;
+  }
+  
+  measure(p);
+
+  while (1) {
+    while (measure_stack > measure_stack_start)
+      measure(*(--measure_stack));
+
+    if (!pending_measure_ephemerons)
+      break;
+    check_pending_measure_ephemerons();
+  }
+}
+
+ptr S_count_size_increments(ptr ls, IGEN generation) {
+  ptr l, totals = Snil, totals_prev = NULL;
+  uptr init_stack_len = 1024;
+
+  tc_mutex_acquire();
+
+  measure_generation = generation;
+  
+  find_room(space_data, 0, typemod, init_stack_len, measure_stack_start);
+  measure_stack = (ptr *)measure_stack_start;
+  measure_stack_limit = (ptr *)((uptr)measure_stack_start + init_stack_len);
+
+  for (l = ls; l != Snil; l = Scdr(l)) {
+    ptr p = Scar(l);
+    if (!IMMEDIATE(p)) {
+      seginfo *si = si = SegInfo(ptr_get_segment(p));
+
+      if (!si->measured_mask)
+        init_measure_mask(si);
+      measure_mask_set(si->measured_mask, si, p);
+
+      if (!si->nonkey_mask)
+        init_nonkey_mask(si);
+      measure_mask_set(si->nonkey_mask, si, p);
+    }
+  }
+
+  for (l = ls; l != Snil; l = Scdr(l)) {
+    ptr p = Scar(l);
+
+    measure_total = 0;
+
+    if (!IMMEDIATE(p)) {
+      seginfo *si = si = SegInfo(ptr_get_segment(p));
+      measure_mask_unset(si->nonkey_mask, si, p);
+      gc_measure_one(p);
+    }
+
+    p = Scons(FIX(measure_total), Snil);
+    if (totals_prev)
+      Scdr(totals_prev) = p;
+    else
+      totals = p;
+    totals_prev = p;
+  }
+
+  clear_measured_masks();
+
+  tc_mutex_release();
+
+  return totals;
+}
+
+#endif

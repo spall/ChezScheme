@@ -85,10 +85,13 @@
                        countof-pair)])]
 
    [closure
-    (define code : ptr (CLOSCODE _))
-    (trace-early (just code))
+    (unless-assume-continuation
+     (define code : ptr (CLOSCODE _)))
+    (unless-code-relocated
+     (trace-early (just code)))
     (cond
-      [(& (code-type code) (<< code-flag-continuation code-flags-offset))
+      [(or-assume-continuation
+        (& (code-type code) (<< code-flag-continuation code-flags-offset)))
        ;; continuation
        (space space-continuation)
        (size size-continuation)
@@ -219,7 +222,7 @@
       ;; if not, vectors will need their own space
       (space
        (cond
-         [(& (cast uptr tf) vector_immutable_flag)
+         [(& (cast uptr _tf_) vector_immutable_flag)
           (case-backreferences
            [keep-backreferences space-pure-typed-object]
            [no-backreferences space-pure])]
@@ -440,7 +443,8 @@
    [copy
     (SETCLOSCODE _copy_ code)]
    [sweep
-    (SETCLOSCODE _copy_ code)]
+    (unless-code-relocated
+     (SETCLOSCODE _copy_ code))]
    [else]))
 
 (define-trace-macro (copy-stack-length continuation-stack-length continuation-stack-clength)
@@ -456,6 +460,21 @@
        (copy continuation-stack-length)])]
    [else
     (copy continuation-stack-length)]))
+
+(define-trace-macro (unless-code-relocated stmt)
+  (case-flag code-relocated?
+   [on]
+   [off stmt]))
+
+(define-trace-macro (unless-assume-continuation stmt)
+  (case-flag assume-continuation?
+   [on]
+   [off stmt]))
+
+(define-trace-macro (or-assume-continuation e)
+  (case-flag assume-continuation?
+   [on 1]
+   [off e]))
 
 (define-trace-macro (trace/define ref val)
   
@@ -554,7 +573,7 @@
     (copy port-last)
     (copy port-buffer)]
    [sweep
-    (when (& (cast uptr tf) flag)
+    (when (& (cast uptr _tf_) flag)
       (define n : iptr (- (cast iptr (port-last _))
                           (cast iptr (port-buffer _))))
       (trace port-buffer)
@@ -776,7 +795,7 @@
     (case-counts
      [keep-counts
       (let* ([c_rtd : ptr (cond
-                            [(== tf _) _copy_]
+                            [(== _tf_ _) _copy_]
                             [else rtd])]
              [counts : ptr (record-type-counts c_rtd)])
         (cond
@@ -995,23 +1014,26 @@
           (body)]))))
 
   (define (generate-type-dispatch l spec)
-    (code-block
-     "ITYPE t = TYPEBITS(p);"
-     (let loop ([l l] [else? #f])
-       (cond
-         [(null? l)
-          (code "else"
-                (code-block
-                 (format "S_error_abort(\"~a: illegal type\");" (lookup 'mode spec))))]
-         [else
-          (code
-           (format "~aif (t == type_~a)" (if else? "else " "") (dehyphen (caar l)))
-           (let ([c (cdar l)])
-             (if (block-seq? c)
-                 c
-                 (code-block (generate-type-code c (cons (list 'basetype (caar l))
-                                                         spec)))))
-           (loop (cdr l) #t))]))))
+    (let ([multi? (and (pair? l) (pair? (cdr l)))])
+      (code-block
+       (and multi? "ITYPE t = TYPEBITS(p);")
+       (let loop ([l l] [else? #f])
+         (cond
+           [(null? l)
+            (and multi?
+                 (code "else"
+                       (code-block
+                        (format "S_error_abort(\"~a: illegal type\");" (lookup 'mode spec)))))]
+           [else
+            (code
+             (and multi?
+                  (format "~aif (t == type_~a)" (if else? "else " "") (dehyphen (caar l))))
+             (let ([c (cdar l)])
+               (if (block-seq? c)
+                   c
+                   (code-block (generate-type-code c (cons (list 'basetype (caar l))
+                                                           spec)))))
+             (loop (cdr l) #t))])))))
 
   (define (generate-object-dispatch l spec)
     (code-block
@@ -1097,8 +1119,16 @@
                  (generate-type-code keep spec)
                  (generate-type-code no-keep spec))
              (generate-type-code (cdr l) spec))]
+           [`(case-flag ,flag
+              [on . ,on]
+              [off . ,off])
+            (let ([body (if (lookup flag spec #f)
+                            on
+                            off)])
+              (generate-type-code (append body (cdr l)) spec))]
            [`(trace-early-rtd ,field)
             (code (case (and (not (lookup 'only-dirty? spec #f))
+                             (not (lookup 'rtd-relocated? spec #f))
                              (lookup 'mode spec))
                     [(copy sweep)
                      (code
@@ -1302,10 +1332,17 @@
                              (generate-type-code rhss spec)))
                       (generate-type-code rhss spec))]
                  [`([,test . ,rhss] . ,clauses)
-                  (code (format "~aif (~a)" (if else? "else " "") (expression test spec))
-                        (code-block
-                         (generate-type-code rhss spec))
-                        (loop clauses #t))]))
+                  (let ([tst (expression test spec)]
+                        [rhs (generate-type-code rhss spec)])
+                    (cond
+                      [(equal? tst "1")
+                       (if else?
+                           (code-block "else" rhs)
+                           rhs)]
+                      [else
+                       (code (format "~aif (~a)" (if else? "else " "") tst)
+                             (code-block rhs)
+                             (loop clauses #t))]))]))
              (generate-type-code (cdr l) spec))]
            [`(let* ,binds . ,body)
             (code
@@ -1381,6 +1418,8 @@
         [`_copy_ (case (lookup 'mode spec)
                    [(copy) "new_p"]
                    [else "p"])]
+        [`_tf_
+         (lookup 'tf spec "TYPEFIELD(p)")]
         [`(just ,id) (symbol->string id)]
         [`(case-backreferences
            [keep-backreferences ,keep]
@@ -1394,6 +1433,13 @@
                          (expression keep spec #t)
                          (expression no-keep spec #t)))
              (expression no-keep spec protect?))]
+        [`(case-flag ,flag
+           [on ,on]
+           [off ,off])
+         (let ([e (if (lookup flag spec #f)
+                      on
+                      off)])
+           (expression e spec protect? multiline?))]
         [`(cond . ,clauses)
          (let loop ([clauses clauses] [protect? protect?])
            (match clauses
@@ -1425,6 +1471,9 @@
            [(get-offset-value op)
             => (lambda (v)
                  (protect (field-ref-expression (expression a spec) v op)))]
+           [(eq-hashtable-ref trace-macros op #f)
+            => (lambda (m)
+                 (expression (car (apply-macro m (list a))) spec protect? multiline?))]
            [else
             (protect (format "~a(~a)" op (expression a spec #t)))])]
         [`(,op ,a ,b)
@@ -1692,7 +1741,7 @@
                                   (loop (cdr l))))]
          [else (cons (car l) (loop (cdr l)))]))))
 
-  (define (gen ofn count?)
+  (define (gen ofn count? measure?)
     (parameterize ([current-output-port (open-output-file ofn 'replace)])
       (print-code (generate "copy"
                             `((mode copy)
@@ -1702,15 +1751,31 @@
                             `((mode sweep)
                               (backreferences ,count?)
                               (counts ,count?))))
-      (print-code (generate "sweep_record"
-                            `((mode sweep)
-                              (known-types (record))
-                              (backreferences ,count?)
-                              (counts ,count?))))
+      (letrec ([sweep1
+                (case-lambda
+                 [(type) (sweep1 type (format "sweep_~a" type) '())]
+                 [(type name) (sweep1 type name '())]
+                 [(type name extra-specs)
+                  (print-code (generate name
+                                        (append
+                                         extra-specs
+                                         `((mode sweep)
+                                           (known-types (,type))
+                                           (backreferences ,count?)
+                                           (counts ,count?)))))])])
+        (sweep1 'record "sweep_record" '((rtd-relocated? #t)))
+        (sweep1 'symbol)
+        (sweep1 'thread)
+        (sweep1 'port)
+        (sweep1 'closure "sweep_continuation" '((code-relocated? #t)
+                                                (assume-continuation? #t)))
+        (sweep1 'code "sweep_code_object"))
       (print-code (generate "size_object"
                             `((mode size))))
       (print-code (generate "object_directly_refers_to_self"
-                            `((mode self-test))))))
+                            `((mode self-test))))
+      (when measure?
+        (print-code (generate "measure" `((mode measure)))))))
   
-  (set! mkgc-ocd.inc (lambda (ofn) (gen ofn #f)))
-  (set! mkgc-oce.inc (lambda (ofn) (gen ofn #t))))
+  (set! mkgc-ocd.inc (lambda (ofn) (gen ofn #f #f)))
+  (set! mkgc-oce.inc (lambda (ofn) (gen ofn #t #t))))

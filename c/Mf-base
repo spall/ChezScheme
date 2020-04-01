@@ -68,7 +68,7 @@ ${kernelobj}: system.h types.h version.h externs.h globals.h segment.h thread.h 
 ${kernelobj}: ${Include}/equates.h ${Include}/scheme.h
 ${mainobj}: ${Include}/scheme.h
 ${kernelobj}: ${zlibHeaderDep} ${LZ4HeaderDep}
-gc-ocd.o gc-oce.o: gc.c ${Include}/measure.inc
+gc-ocd.o gc-oce.o: gc.c
 gc-ocd.o: ${Include}/gc-ocd.inc
 gc-oce.o: ${Include}/gc-oce.inc
 
