@@ -1057,6 +1057,7 @@
   (error? (compute-size-increments (list 0) '()))
   (begin
     (define pair-size (compute-size (cons 1 2)))
+    (define ephemeron-size (compute-size (ephemeron-cons 1 2)))
     #t)
   (equal? (list pair-size pair-size)
           (compute-size-increments (list (cons 1 2) (cons 3 4))))
@@ -1070,25 +1071,25 @@
     (equal? (compute-size-increments ls)
             (reverse (compute-size-increments (reverse ls)))))
   ;; Ephemeron(s) found before key:
-  (equal? (list pair-size (* 2 pair-size))
+  (equal? (list ephemeron-size (* 2 pair-size))
           (compute-size-increments (let* ([p (cons 0 0)]
                                           [e (ephemeron-cons p (cons 0 0))])
                                      (list e p))))
-  (equal? (list pair-size (* 3 pair-size))
+  (equal? (list ephemeron-size (* 3 pair-size))
           (let* ([v (cons 1 2)]
                  [e (ephemeron-cons v (cons 3 4))])
             (compute-size-increments (list e (cons v #f)))))
-  (equal? (list (* 4 pair-size) (* 4 pair-size))
+  (equal? (list (* 2 (+ ephemeron-size pair-size)) (* 4 pair-size))
           (let* ([v (cons 1 2)]
                  [e* (list (ephemeron-cons v (cons 3 4))
                            (ephemeron-cons v (cons 5 6)))])
             (compute-size-increments (list e* (cons v #f)))))
   ;; Key found before ephemeron(s):
-  (equal? (list (* 2 pair-size) (* 2 pair-size))
+  (equal? (list (* 2 pair-size) (+ ephemeron-size pair-size))
           (let* ([v (cons 1 2)]
                  [e (ephemeron-cons v (cons 3 4))])
             (compute-size-increments (list (cons v #f) e))))
-  (equal? (list (* 2 pair-size) (* 6 pair-size))
+  (equal? (list (* 2 pair-size) (+ (* 4 pair-size) (* 2 ephemeron-size)))
           (let* ([v (cons 1 2)]
                  [e* (list (ephemeron-cons v (cons 3 4))
                            (ephemeron-cons v (cons 5 6)))])

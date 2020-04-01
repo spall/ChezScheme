@@ -123,6 +123,7 @@ static void add_ephemeron_to_pending_measure(ptr pe) {
 
 static void add_trigger_ephemerons_to_pending_measure(ptr pe) {
   ptr last_pe = pe, next_pe = EPHEMERONNEXT(pe);
+
   while (next_pe != NULL) {
     last_pe = next_pe;
     next_pe = EPHEMERONNEXT(next_pe);
@@ -148,7 +149,7 @@ static void check_ephemeron_measure(ptr pe) {
       return;
     }
   }
-  
+
   p = Scdr(pe);
   if (!IMMEDIATE(p))
     push_measure(p);
@@ -169,6 +170,13 @@ static void check_pending_measure_ephemerons() {
 #include "measure.inc"
 
 void gc_measure_one(ptr p) {
+  seginfo *si = SegInfo(ptr_get_segment(p));
+
+  if (si->trigger_ephemerons) {
+    add_trigger_ephemerons_to_pending_measure(si->trigger_ephemerons);
+    si->trigger_ephemerons = NULL;
+  }
+  
   measure(p);
 
   while (1) {

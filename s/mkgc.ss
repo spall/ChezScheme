@@ -103,11 +103,14 @@
          (cond
            [(== (continuation-stack-length _) scaled-shot-1-shot-flag)]
            [else
-            (when (OLDSPACE (continuation-stack _))
-              (set! (continuation-stack _)
-                    (copy_stack (continuation-stack _)
-                                (& (continuation-stack-length _))
-                                (continuation-stack-clength _))))
+            (case-mode
+             [sweep
+              (when (OLDSPACE (continuation-stack _))
+                (set! (continuation-stack _)
+                      (copy_stack (continuation-stack _)
+                                  (& (continuation-stack-length _))
+                                  (continuation-stack-clength _))))]
+             [else])
             (trace continuation-link)
             (trace-return continuation-return-address (continuation-return-address _))
             (case-mode
@@ -446,7 +449,7 @@
     ;; don't promote general one-shots, but promote opportunistic one-shots
     (cond
       [(== (continuation-stack-length _) opportunistic-1-shot-flag)
-       (set! (continuation-stack-length _) (continuation-stack-clength _))
+       (set! (continuation-stack-length _copy_) (continuation-stack-clength _))
        ;; ma`<y need to recur at end to promote link:
        (set! conts_to_promote (S_cons_in space_new 0 new_p conts_to_promote))]
       [else
