@@ -114,6 +114,10 @@ typedef int IFASLCODE;      /* fasl type codes */
 #define addr_get_segment(p) ((uptr)(p) >> segment_offset_bits)
 #define ptr_get_segment(p) (((uptr)(p) + typemod - 1) >> segment_offset_bits)
 
+#define segment_bitmap_index(p) ((((uptr)p + (typemod-1)) & (bytes_per_segment - 1)) >> log2_ptr_bytes)
+#define segment_bitmap_byte(p)  (segment_bitmap_index(p) >> 3)
+#define segment_bitmap_bit(p)   (segment_bitmap_index(p) & 0x7)
+
 #define SPACE(p) SegmentSpace(ptr_get_segment(p))
 #define GENERATION(p) SegmentGeneration(ptr_get_segment(p))
 
@@ -256,10 +260,6 @@ typedef struct _bucket_pointer_list {
 #define UNFIX(x) Sfixnum_value(x)
 
 #define TYPEP(x,mask,type) (((iptr)(x) & (mask)) == (type))
-
-#define segment_bitmap_index(si, p) (((uptr)UNTYPE_ANY(p) - (uptr)build_ptr(si->number, 0)) >> log2_ptr_bytes)
-#define segment_bitmap_byte(si, p)  (segment_bitmap_index(si, p) >> 3)
-#define segment_bitmap_bit(si, p)   (segment_bitmap_index(si, p) & 0x7)
 
 /* reloc fields */
 #define RELOC_EXTENDED_FORMAT(x) ((x)&reloc_extended_format)

@@ -19,23 +19,26 @@
 #define ENABLE_BACKREFERENCE
 #include "gc.c"
 
-static uptr measure(ptr p, int depth, IGEN generation); /* in measure.inc */
+static void measure(ptr p); /* in measure.inc */
 
 static void init_measure_mask(seginfo *si);
 static void clear_measured_masks();
-static uptr push_measure(ptr p, int depth, IGEN generation, seginfo *si);
+static void push_measure(ptr p);
 static void add_ephemeron_to_pending_measure(ptr pe);
 static void add_trigger_ephemerons_to_pending_measure(ptr pe);
-static uptr check_ephemeron_measure(ptr pe, IGEN generation);
-static uptr check_pending_measure_ephemerons(IGEN generation);
+static void check_ephemeron_measure(ptr pe);
+static void check_pending_measure_ephemerons();
 
+static uptr measure_total; /* updated by `measure` */
+
+static IGEN measure_generation;
 static ptr *measure_stack_start, *measure_stack, *measure_stack_limit;
 static seginfo *measured_mask_chain, *nonkey_mask_chain;
 static ptr pending_measure_ephemerons;
 
 #define measure_unreached(si, p) \
   (!si->measured_mask \
-   || !(si->measured_mask[segment_bitmap_byte(si, p)] & (1 << segment_bitmap_bit(si, p))))
+   || !(si->measured_mask[segment_bitmap_byte(p)] & (1 << segment_bitmap_bit(p))))
 
 #define measured_mask_bytes (bytes_per_segment >> (log2_ptr_bytes+3))
 
@@ -58,6 +61,7 @@ static void clear_measured_masks()
   while (measured_mask_chain) {
     octet *mask = measured_mask_chain->measured_mask;
     measured_mask_chain->measured_mask = NULL;
+    measured_mask_chain->trigger_ephemerons = NULL;
     measured_mask_chain = *(seginfo **)(mask + measured_mask_bytes);
   }
   while (nonkey_mask_chain) {
@@ -68,40 +72,48 @@ static void clear_measured_masks()
 }
 
 #define measure_mask_set(mm, si, p) \
-  mm[segment_bitmap_byte(si, p)] |= (1 << segment_bitmap_bit(si, p))
+  mm[segment_bitmap_byte(p)] |= (1 << segment_bitmap_bit(p))
 #define measure_mask_unset(mm, si, p) \
-  mm[segment_bitmap_byte(si, p)] -= (1 << segment_bitmap_bit(si, p))
+  mm[segment_bitmap_byte(p)] -= (1 << segment_bitmap_bit(p))
 
-static uptr push_measure(ptr p, int depth, IGEN generation, seginfo *si)
+static void push_measure(ptr p)
 {
-  if (!si->measured_mask)
-    init_measure_mask(si);
-  measure_mask_set(si->measured_mask, si, p);
+  seginfo *si = MaybeSegInfo(ptr_get_segment(p));
+
+  if (!si)
+    return;
+
+  if (si->generation > measure_generation)
+    return;
+  else {
+    uptr byte = segment_bitmap_byte(p);
+    uptr bit = 1 << segment_bitmap_bit(p);
+
+    if (!si->measured_mask)
+      init_measure_mask(si);
+    else if (si->measured_mask[byte] & bit)
+      return;
+
+    si->measured_mask[byte] |= bit;
+  }
 
   if (si->trigger_ephemerons) {
     add_trigger_ephemerons_to_pending_measure(si->trigger_ephemerons);
     si->trigger_ephemerons = NULL;
   }
 
-  if (depth < 10)
-    return measure(p, depth, generation);
-  else {
-    if (measure_stack == measure_stack_limit) {
-      uptr sz = ptr_bytes * (measure_stack_limit - measure_stack_start);
-      uptr new_sz = 2*sz;
-      ptr new_measure_stack;
-      printf("grow %ld\n", new_sz);
-      find_room(space_data, 0, typemod, ptr_align(new_sz), new_measure_stack);
-      memcpy(new_measure_stack, measure_stack_start, sz);
-      measure_stack_start = (ptr *)new_measure_stack;
-      measure_stack_limit = (ptr *)((uptr)new_measure_stack + new_sz);
-      measure_stack = (ptr *)((uptr)new_measure_stack + sz);
-    }
-
-    *(measure_stack++) = p;
-
-    return 0;
+  if (measure_stack == measure_stack_limit) {
+    uptr sz = ptr_bytes * (measure_stack_limit - measure_stack_start);
+    uptr new_sz = 2*sz;
+    ptr new_measure_stack;
+    find_room(space_data, 0, typemod, ptr_align(new_sz), new_measure_stack);
+    memcpy(new_measure_stack, measure_stack_start, sz);
+    measure_stack_start = (ptr *)new_measure_stack;
+    measure_stack_limit = (ptr *)((uptr)new_measure_stack + new_sz);
+    measure_stack = (ptr *)((uptr)new_measure_stack + sz);
   }
+  
+  *(measure_stack++) = p;
 }
 
 static void add_ephemeron_to_pending_measure(ptr pe) {
@@ -110,73 +122,63 @@ static void add_ephemeron_to_pending_measure(ptr pe) {
 }
 
 static void add_trigger_ephemerons_to_pending_measure(ptr pe) {
-  ptr last_pe = pe, next_pe = EPHEMERONTRIGGERNEXT(pe);
+  ptr last_pe = pe, next_pe = EPHEMERONNEXT(pe);
   while (next_pe != NULL) {
     last_pe = next_pe;
-    next_pe = EPHEMERONTRIGGERNEXT(next_pe);
+    next_pe = EPHEMERONNEXT(next_pe);
   }
-  EPHEMERONTRIGGERNEXT(last_pe) = pending_ephemerons;
-  pending_ephemerons = pe;
+  EPHEMERONNEXT(last_pe) = pending_measure_ephemerons;
+  pending_measure_ephemerons = pe;
 }
 
-static uptr check_ephemeron_measure(ptr pe, IGEN generation) {
+static void check_ephemeron_measure(ptr pe) {
   ptr p;
   seginfo *si;
 
   p = Scar(pe);
-  if (!IMMEDIATE(p) && (si = MaybeSegInfo(ptr_get_segment(p))) != NULL && (si->generation < generation)) {
+  if (!IMMEDIATE(p) && (si = MaybeSegInfo(ptr_get_segment(p))) != NULL && (si->generation < measure_generation)) {
     if (measure_unreached(si, p)
         || (si->nonkey_mask
-            && (si->nonkey_mask[segment_bitmap_byte(si, p)] & (1 << segment_bitmap_bit(si, p))))) {
+            && (si->nonkey_mask[segment_bitmap_byte(p)] & (1 << segment_bitmap_bit(p))))) {
       /* Not reached, so far; install as trigger */
-      EPHEMERONTRIGGERNEXT(pe) = si->trigger_ephemerons;
+      EPHEMERONNEXT(pe) = si->trigger_ephemerons;
       si->trigger_ephemerons = pe;
       if (!si->measured_mask)
         init_measure_mask(si); /* so triggers are cleared at end */
-      return 0;
+      return;
     }
   }
-
+  
   p = Scdr(pe);
-  if (!IMMEDIATE(p) && (si = MaybeSegInfo(ptr_get_segment(p))) != NULL && (si->generation < generation)
-      && measure_unreached(si, p))
-    return push_measure(p, 0, generation, si);
-
-  return 0;
+  if (!IMMEDIATE(p))
+    push_measure(p);
 }
 
-static uptr check_pending_measure_ephemerons(IGEN generation) {
+static void check_pending_measure_ephemerons() {
   ptr pe, next_pe;
-  uptr total = 0;
 
   pe = pending_measure_ephemerons;
   pending_measure_ephemerons = NULL;
   while (pe != NULL) {
     next_pe = EPHEMERONNEXT(pe);
-    total += check_ephemeron_measure(pe, generation);
+    check_ephemeron_measure(pe);
     pe = next_pe;
   }
-
-  return total;
 }
 
 #include "measure.inc"
 
-uptr gc_measure_one(ptr p, IGEN generation) {
-  uptr total;
-  
-  total = measure(p, 0, generation);
+void gc_measure_one(ptr p) {
+  measure(p);
 
   while (1) {
     while (measure_stack > measure_stack_start)
-      total += measure(*(--measure_stack), 0, generation);
+      measure(*(--measure_stack));
 
     if (!pending_measure_ephemerons)
       break;
-    total += check_pending_measure_ephemerons(generation);
+    check_pending_measure_ephemerons();
   }
-
-  return total;
 }
 
 ptr S_count_size_increments(ptr ls, IGEN generation) {
@@ -185,6 +187,8 @@ ptr S_count_size_increments(ptr ls, IGEN generation) {
 
   tc_mutex_acquire();
 
+  measure_generation = generation;
+  
   find_room(space_data, 0, typemod, init_stack_len, measure_stack_start);
   measure_stack = (ptr *)measure_stack_start;
   measure_stack_limit = (ptr *)((uptr)measure_stack_start + init_stack_len);
@@ -206,16 +210,16 @@ ptr S_count_size_increments(ptr ls, IGEN generation) {
 
   for (l = ls; l != Snil; l = Scdr(l)) {
     ptr p = Scar(l);
-    uptr total;
+
+    measure_total = 0;
 
     if (!IMMEDIATE(p)) {
       seginfo *si = si = SegInfo(ptr_get_segment(p));
       measure_mask_unset(si->nonkey_mask, si, p);
-      total = gc_measure_one(p, generation);
-    } else
-      total = 0;
+      gc_measure_one(p);
+    }
 
-    p = Scons(FIX(total), Snil);
+    p = Scons(FIX(measure_total), Snil);
     if (totals_prev)
       Scdr(totals_prev) = p;
     else
