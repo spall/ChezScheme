@@ -1367,7 +1367,7 @@
    [ptr data 0]))
 
 (define-primitive-structure-disps thread type-typed-object
-  ([ptr type] [uptr tc]))
+  ([iptr type] [uptr tc]))
 
 (define-constant virtual-register-count 16)
 

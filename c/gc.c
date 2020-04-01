@@ -32,15 +32,14 @@ static ptr dosort PROTO((ptr ls, uptr n));
 static ptr domerge PROTO((ptr l1, ptr l2));
 static IBOOL search_locked PROTO((ptr p));
 static ptr copy PROTO((ptr pp, seginfo *si));
-static void sweep_ptrs PROTO((ptr *p, iptr n));
-static void sweep PROTO((ptr tc, ptr p, IBOOL sweep_pure));
+static void sweep PROTO((ptr tc, ptr p));
 static void sweep_in_old PROTO((ptr tc, ptr p));
-static int scan_ptrs_for_self PROTO((ptr *pp, iptr len, ptr p));
+static IBOOL object_directly_refers_to_self PROTO((ptr p));
 static ptr copy_stack PROTO((ptr old, iptr *length, iptr clength));
 static void resweep_weak_pairs PROTO((IGEN g));
 static void forward_or_bwp PROTO((ptr *pp, ptr p));
 static void sweep_generation PROTO((ptr tc, IGEN g));
-static iptr size_object PROTO((ptr p));
+static uptr size_object PROTO((ptr p));
 static iptr sweep_typed_object PROTO((ptr tc, ptr p));
 static void sweep_symbol PROTO((ptr p));
 static void sweep_port PROTO((ptr p));
@@ -48,7 +47,6 @@ static void sweep_thread PROTO((ptr p));
 static void sweep_continuation PROTO((ptr p));
 static void sweep_stack PROTO((uptr base, uptr size, uptr ret));
 static void sweep_record PROTO((ptr x));
-static int scan_record_for_self PROTO((ptr x));
 static IGEN sweep_dirty_record PROTO((ptr x, IGEN tg, IGEN youngest));
 static IGEN sweep_dirty_port PROTO((ptr x, IGEN tg, IGEN youngest));
 static IGEN sweep_dirty_symbol PROTO((ptr x, IGEN tg, IGEN youngest));
@@ -299,503 +297,17 @@ FORCEINLINE void check_triggers(seginfo *si) {
   }
 }
 
-static ptr copy(pp, si) ptr pp; seginfo *si; {
-    ptr p, tf; ITYPE t; IGEN tg;
+#define memcpy_aligned memcpy
 
-    if (locked(pp)) return pp;
-
-    tg = target_generation;
-
-    change = 1;
-
-    check_triggers(si);
-
-    if ((t = TYPEBITS(pp)) == type_typed_object) {
-      tf = TYPEFIELD(pp);
-      if (TYPEP(tf, mask_record, type_record)) {
-          ptr rtd; iptr n; ISPC s;
-
-        /* relocate to make sure we aren't using an oldspace descriptor
-           that has been overwritten by a forwarding marker, but don't loop
-           on tag-reflexive base descriptor */
-          if ((rtd = tf) != pp) relocate(&rtd)
-
-          n = size_record_inst(UNFIX(RECORDDESCSIZE(rtd)));
-
-#ifdef ENABLE_OBJECT_COUNTS
-          { ptr counts; IGEN g;
-            counts = RECORDDESCCOUNTS(rtd);
-            if (counts == Sfalse) {
-              IGEN grtd = rtd == pp ? tg : GENERATION(rtd);
-              S_G.countof[grtd][countof_rtd_counts] += 1;
-             /* allocate counts struct in same generation as rtd.  initialize timestamp & counts */
-              find_room(space_data, grtd, type_typed_object, size_rtd_counts, counts);
-              RTDCOUNTSTYPE(counts) = type_rtd_counts;
-              RTDCOUNTSTIMESTAMP(counts) = S_G.gctimestamp[0];
-              for (g = 0; g <= static_generation; g += 1) RTDCOUNTSIT(counts, g) = 0;
-              RECORDDESCCOUNTS(rtd) = counts;
-              S_G.rtds_with_counts[grtd] = S_cons_in((grtd == 0 ? space_new : space_impure), grtd, rtd, S_G.rtds_with_counts[grtd]);
-              S_G.countof[grtd][countof_pair] += 1;
-            } else {
-              relocate(&counts)
-              RECORDDESCCOUNTS(rtd) = counts;
-              if (RTDCOUNTSTIMESTAMP(counts) != S_G.gctimestamp[0]) S_fixup_counts(counts);
-            }
-            RTDCOUNTSIT(counts, tg) += 1;
-          }
-#endif /* ENABLE_OBJECT_COUNTS */
-
-        /* if the rtd is the only pointer and is immutable, put the record
-           into space data.  if the record contains only pointers, put it
-           into space_pure or space_impure.  otherwise put it into
-           space_pure_typed_object or space_impure_record.  we could put all
-           records into space_{pure,impure}_record or even into
-           space_impure_record, but by picking the target space more
-           carefully we may reduce fragmentation and sweeping cost */
-          s = RECORDDESCPM(rtd) == FIX(1) && RECORDDESCMPM(rtd) == FIX(0) ?
-                  space_data :
-                  ((RECORDDESCPM(rtd) == FIX(-1)) && !BACKREFERENCES_ENABLED) ?
-                      RECORDDESCMPM(rtd) == FIX(0) ?
-                          space_pure :
-                          space_impure :
-                      RECORDDESCMPM(rtd) == FIX(0) ?
-                          space_pure_typed_object :
-                          space_impure_record;
-
-          find_room(s, tg, type_typed_object, n, p);
-          copy_ptrs(type_typed_object, p, pp, n);
-
-        /* overwrite type field with forwarded descriptor */
-          RECORDINSTTYPE(p) = rtd == pp ? p : rtd;
-
-        /* pad if necessary */
-          if (s == space_pure || s == space_impure) {
-              iptr m = unaligned_size_record_inst(UNFIX(RECORDDESCSIZE(rtd)));
-              if (m != n)
-                  *((ptr *)((uptr)UNTYPE(p,type_typed_object) + m)) = FIX(0);
-          }
-      } else if (TYPEP(tf, mask_vector, type_vector)) {
-          iptr len, n;
-          ISPC s;
-          len = Svector_length(pp);
-          n = size_vector(len);
-#ifdef ENABLE_OBJECT_COUNTS
-          S_G.countof[tg][countof_vector] += 1;
-          S_G.bytesof[tg][countof_vector] += n;
-#endif /* ENABLE_OBJECT_COUNTS */
-        /* assumes vector lengths look like fixnums; if not, vectors will need their own space */
-          s = (((uptr)tf & vector_immutable_flag)
-               ? (BACKREFERENCES_ENABLED ? space_pure_typed_object : space_pure)
-               : (BACKREFERENCES_ENABLED ? space_impure_typed_object : space_impure));
-          find_room(s, tg, type_typed_object, n, p);
-          copy_ptrs(type_typed_object, p, pp, n);
-        /* pad if necessary */
-          if ((len & 1) == 0) INITVECTIT(p, len) = FIX(0);
-      } else if (TYPEP(tf, mask_stencil_vector, type_stencil_vector)) {
-          iptr len, n;
-          ISPC s;
-          len = Sstencil_vector_length(pp);
-          n = size_stencil_vector(len);
-#ifdef ENABLE_OBJECT_COUNTS
-          S_G.countof[tg][countof_stencil_vector] += 1;
-          S_G.bytesof[tg][countof_stencil_vector] += n;
-#endif /* ENABLE_OBJECT_COUNTS */
-        /* assumes stencil types look like immediate; if not, stencil vectors will need their own space */
-          s = (BACKREFERENCES_ENABLED ? space_impure_typed_object : space_impure);
-          find_room(s, tg, type_typed_object, n, p);
-          copy_ptrs(type_typed_object, p, pp, n);
-        /* pad if necessary */
-          if ((len & 1) == 0) INITSTENVECTIT(p, len) = FIX(0);
-      } else if (TYPEP(tf, mask_string, type_string)) {
-          iptr n;
-          n = size_string(Sstring_length(pp));
-#ifdef ENABLE_OBJECT_COUNTS
-          S_G.countof[tg][countof_string] += 1;
-          S_G.bytesof[tg][countof_string] += n;
-#endif /* ENABLE_OBJECT_COUNTS */
-          find_room(space_data, tg, type_typed_object, n, p);
-          copy_ptrs(type_typed_object, p, pp, n);
-      } else if (TYPEP(tf, mask_fxvector, type_fxvector)) {
-          iptr n;
-          n = size_fxvector(Sfxvector_length(pp));
-#ifdef ENABLE_OBJECT_COUNTS
-          S_G.countof[tg][countof_fxvector] += 1;
-          S_G.bytesof[tg][countof_fxvector] += n;
-#endif /* ENABLE_OBJECT_COUNTS */
-          find_room(space_data, tg, type_typed_object, n, p);
-          copy_ptrs(type_typed_object, p, pp, n);
-      } else if (TYPEP(tf, mask_bytevector, type_bytevector)) {
-          iptr n;
-          n = size_bytevector(Sbytevector_length(pp));
-#ifdef ENABLE_OBJECT_COUNTS
-          S_G.countof[tg][countof_bytevector] += 1;
-          S_G.bytesof[tg][countof_bytevector] += n;
-#endif /* ENABLE_OBJECT_COUNTS */
-          find_room(space_data, tg, type_typed_object, n, p);
-          copy_ptrs(type_typed_object, p, pp, n);
-      } else if ((iptr)tf == type_tlc) {
-          ptr keyval, next;
-
-#ifdef ENABLE_OBJECT_COUNTS
-          S_G.countof[tg][countof_tlc] += 1;
-#endif /* ENABLE_OBJECT_COUNTS */
-          find_room((BACKREFERENCES_ENABLED ? space_impure_typed_object : space_impure), tg, type_typed_object, size_tlc, p);
-          TLCTYPE(p) = type_tlc;
-          INITTLCKEYVAL(p) = keyval = TLCKEYVAL(pp);
-          INITTLCHT(p) = TLCHT(pp);
-          INITTLCNEXT(p) = next = TLCNEXT(pp);
-
-        /* if next isn't false and keyval is old, add tlc to a list of tlcs
-         * to process later.  determining if keyval is old is a (conservative)
-         * approximation to determining if key is old.  we can't easily
-         * determine if key is old, since keyval might or might not have been
-         * swept already.  NB: assuming keyvals are always pairs. */
-          if (next != Sfalse && SPACE(keyval) & space_old)
-            tlcs_to_rehash = S_cons_in(space_new, 0, p, tlcs_to_rehash);
-      } else if (TYPEP(tf, mask_box, type_box)) {
-          ISPC s;
-#ifdef ENABLE_OBJECT_COUNTS
-          S_G.countof[tg][countof_box] += 1;
-#endif /* ENABLE_OBJECT_COUNTS */
-          s = (((uptr)tf == type_immutable_box)
-               ? (BACKREFERENCES_ENABLED ? space_pure_typed_object : space_pure)
-               : (BACKREFERENCES_ENABLED ? space_impure_typed_object : space_impure));
-          find_room(s, tg, type_typed_object, size_box, p);
-          BOXTYPE(p) = (iptr)tf;
-          INITBOXREF(p) = Sunbox(pp);
-      } else if ((iptr)tf == type_ratnum) {
-        /* not recursive: place in space_data and relocate fields immediately */
-#ifdef ENABLE_OBJECT_COUNTS
-          S_G.countof[tg][countof_ratnum] += 1;
-#endif /* ENABLE_OBJECT_COUNTS */
-          find_room(space_data, tg,
-                      type_typed_object, size_ratnum, p);
-          RATTYPE(p) = type_ratnum;
-          RATNUM(p) = RATNUM(pp);
-          RATDEN(p) = RATDEN(pp);
-          relocate(&RATNUM(p))
-          relocate(&RATDEN(p))
-      } else if ((iptr)tf == type_exactnum) {
-        /* not recursive: place in space_data and relocate fields immediately */
-#ifdef ENABLE_OBJECT_COUNTS
-          S_G.countof[tg][countof_exactnum] += 1;
-#endif /* ENABLE_OBJECT_COUNTS */
-          find_room(space_data, tg,
-                      type_typed_object, size_exactnum, p);
-          EXACTNUM_TYPE(p) = type_exactnum;
-          EXACTNUM_REAL_PART(p) = EXACTNUM_REAL_PART(pp);
-          EXACTNUM_IMAG_PART(p) = EXACTNUM_IMAG_PART(pp);
-          relocate(&EXACTNUM_REAL_PART(p))
-          relocate(&EXACTNUM_IMAG_PART(p))
-      } else if ((iptr)tf == type_inexactnum) {
-#ifdef ENABLE_OBJECT_COUNTS
-          S_G.countof[tg][countof_inexactnum] += 1;
-#endif /* ENABLE_OBJECT_COUNTS */
-          find_room(space_data, tg,
-                      type_typed_object, size_inexactnum, p);
-          INEXACTNUM_TYPE(p) = type_inexactnum;
-# ifdef PRESERVE_FLONUM_EQ
-          {
-            ptr pt;
-            pt = TYPE(&INEXACTNUM_REAL_PART(pp), type_flonum);
-            if (flonum_is_forwarded_p(pt, si))
-              INEXACTNUM_REAL_PART(p) = FLODAT(FLONUM_FWDADDRESS(pt));
-            else
-              INEXACTNUM_REAL_PART(p) = INEXACTNUM_REAL_PART(pp);
-            pt = TYPE(&INEXACTNUM_IMAG_PART(pp), type_flonum);
-            if (flonum_is_forwarded_p(pt, si))
-              INEXACTNUM_IMAG_PART(p) = FLODAT(FLONUM_FWDADDRESS(pt));
-            else
-              INEXACTNUM_IMAG_PART(p) = INEXACTNUM_IMAG_PART(pp);
-          }
-# else
-          INEXACTNUM_REAL_PART(p) = INEXACTNUM_REAL_PART(pp);
-          INEXACTNUM_IMAG_PART(p) = INEXACTNUM_IMAG_PART(pp);
-# endif
-      } else if (TYPEP(tf, mask_bignum, type_bignum)) {
-          iptr n;
-          n = size_bignum(BIGLEN(pp));
-#ifdef ENABLE_OBJECT_COUNTS
-          S_G.countof[tg][countof_bignum] += 1;
-          S_G.bytesof[tg][countof_bignum] += n;
-#endif /* ENABLE_OBJECT_COUNTS */
-          find_room(space_data, tg, type_typed_object, n, p);
-          copy_ptrs(type_typed_object, p, pp, n);
-      } else if (TYPEP(tf, mask_port, type_port)) {
-#ifdef ENABLE_OBJECT_COUNTS
-          S_G.countof[tg][countof_port] += 1;
-#endif /* ENABLE_OBJECT_COUNTS */
-          find_room(space_port, tg,
-                      type_typed_object, size_port, p);
-          PORTTYPE(p) = PORTTYPE(pp);
-          PORTHANDLER(p) = PORTHANDLER(pp);
-          PORTNAME(p) = PORTNAME(pp);
-          PORTINFO(p) = PORTINFO(pp);
-          PORTOCNT(p) = PORTOCNT(pp);
-          PORTICNT(p) = PORTICNT(pp);
-          PORTOBUF(p) = PORTOBUF(pp);
-          PORTOLAST(p) = PORTOLAST(pp);
-          PORTIBUF(p) = PORTIBUF(pp);
-          PORTILAST(p) = PORTILAST(pp);
-      } else if (TYPEP(tf, mask_code, type_code)) {
-          iptr n;
-          n = size_code(CODELEN(pp));
-#ifdef ENABLE_OBJECT_COUNTS
-          S_G.countof[tg][countof_code] += 1;
-          S_G.bytesof[tg][countof_code] += n;
-#endif /* ENABLE_OBJECT_COUNTS */
-          find_room(space_code, tg, type_typed_object, n, p);
-          copy_ptrs(type_typed_object, p, pp, n);
-      } else if ((iptr)tf == type_thread) {
-#ifdef ENABLE_OBJECT_COUNTS
-          S_G.countof[tg][countof_thread] += 1;
-#endif /* ENABLE_OBJECT_COUNTS */
-          find_room(space_pure_typed_object, tg,
-                      type_typed_object, size_thread, p);
-          TYPEFIELD(p) = (ptr)type_thread;
-          THREADTC(p) = THREADTC(pp); /* static */
-      } else if ((iptr)tf == type_rtd_counts) {
-#ifdef ENABLE_OBJECT_COUNTS
-          S_G.countof[tg][countof_rtd_counts] += 1;
-#endif /* ENABLE_OBJECT_COUNTS */
-          find_room(space_data, tg, type_typed_object, size_rtd_counts, p);
-          copy_ptrs(type_typed_object, p, pp, size_rtd_counts);
-      } else if (TYPEP(tf, mask_phantom, type_phantom)) {
-          find_room(space_data, tg, type_typed_object, size_phantom, p);
-          PHANTOMTYPE(p) = PHANTOMTYPE(pp);
-          PHANTOMLEN(p) = PHANTOMLEN(pp);
-          S_G.phantom_sizes[tg] += PHANTOMLEN(p);
-      } else {
-          S_error_abort("copy(gc): illegal type");
-          return (ptr)0 /* not reached */;
-      }
-    } else if (t == type_pair) {
-      if (si->space == (space_ephemeron | space_old)) {
-#ifdef ENABLE_OBJECT_COUNTS
-        S_G.countof[tg][countof_ephemeron] += 1;
-#endif /* ENABLE_OBJECT_COUNTS */
-        find_room(space_ephemeron, tg, type_pair, size_ephemeron, p);
-        INITCAR(p) = Scar(pp);
-        INITCDR(p) = Scdr(pp);
-      } else {
-        ptr qq = Scdr(pp); ptr q; seginfo *qsi;
-        if (qq != pp && TYPEBITS(qq) == type_pair && (qsi = MaybeSegInfo(ptr_get_segment(qq))) != NULL && qsi->space == si->space && FWDMARKER(qq) != forward_marker && !locked(qq)) {
-          check_triggers(qsi);
-          if (si->space == (space_weakpair | space_old)) {
-#ifdef ENABLE_OBJECT_COUNTS
-            S_G.countof[tg][countof_weakpair] += 2;
-#endif /* ENABLE_OBJECT_COUNTS */
-            find_room(space_weakpair, tg, type_pair, 2 * size_pair, p);
-          } else {
-#ifdef ENABLE_OBJECT_COUNTS
-            S_G.countof[tg][countof_pair] += 2;
-#endif /* ENABLE_OBJECT_COUNTS */
-            find_room(space_impure, tg, type_pair, 2 * size_pair, p);
-          }
-          q = (ptr)((uptr)p + size_pair);
-          INITCAR(p) = Scar(pp);
-          INITCDR(p) = q;
-          INITCAR(q) = Scar(qq);
-          INITCDR(q) = Scdr(qq);
-          FWDMARKER(qq) = forward_marker;
-          FWDADDRESS(qq) = q;
-          ADD_BACKREFERENCE_FROM(q, p)
-        } else {
-          if (si->space == (space_weakpair | space_old)) {
-#ifdef ENABLE_OBJECT_COUNTS
-            S_G.countof[tg][countof_weakpair] += 1;
-#endif /* ENABLE_OBJECT_COUNTS */
-            find_room(space_weakpair, tg, type_pair, size_pair, p);
-          } else {
-#ifdef ENABLE_OBJECT_COUNTS
-            S_G.countof[tg][countof_pair] += 1;
-#endif /* ENABLE_OBJECT_COUNTS */
-            find_room(space_impure, tg, type_pair, size_pair, p);
-          }
-          INITCAR(p) = Scar(pp);
-          INITCDR(p) = qq;
-        }
-      }
-    } else if (t == type_closure) {
-        ptr code;
-
-      /* relocate before accessing code type field, which otherwise might
-         be a forwarding marker */
-        code = CLOSCODE(pp);
-        relocate(&code)
-        if (CODETYPE(code) & (code_flag_continuation << code_flags_offset)) {
-#ifdef ENABLE_OBJECT_COUNTS
-            S_G.countof[tg][countof_continuation] += 1;
-#endif /* ENABLE_OBJECT_COUNTS */
-            find_room(space_continuation, tg,
-                        type_closure, size_continuation, p);
-            SETCLOSCODE(p,code);
-          /* don't promote general one-shots, but promote opportunistic one-shots */
-            if (CONTLENGTH(pp) == opportunistic_1_shot_flag) {
-              CONTLENGTH(p) = CONTCLENGTH(pp);
-              /* may need to recur at end to promote link: */
-              conts_to_promote = S_cons_in(space_new, 0, p, conts_to_promote);
-            } else
-              CONTLENGTH(p) = CONTLENGTH(pp);
-            CONTCLENGTH(p) = CONTCLENGTH(pp);
-            CONTWINDERS(p) = CONTWINDERS(pp);
-            CONTATTACHMENTS(p) = CONTATTACHMENTS(pp);
-            if (CONTLENGTH(p) != scaled_shot_1_shot_flag) {
-                CONTLINK(p) = CONTLINK(pp);
-                CONTRET(p) = CONTRET(pp);
-                CONTSTACK(p) = CONTSTACK(pp);
-            }
-        } else {
-            iptr len, n;
-            len = CLOSLEN(pp);
-            n = size_closure(len);
-#ifdef ENABLE_OBJECT_COUNTS
-            S_G.countof[tg][countof_closure] += 1;
-            S_G.bytesof[tg][countof_closure] += n;
-#endif /* ENABLE_OBJECT_COUNTS */
-            if (BACKREFERENCES_ENABLED) {
-              find_room(space_closure, tg, type_closure, n, p);
-            } else if (CODETYPE(code) & (code_flag_mutable_closure << code_flags_offset)) {
-              /* Using `space_impure` is ok because the code slot of a mutable
-                 closure is never mutated, so the code is never newer than the
-                 closure. If it were, then because the code pointer looks like
-                 a fixnum, an old-generation sweep wouldn't update it properly. */
-              find_room(space_impure, tg, type_closure, n, p);
-            } else {
-              find_room(space_pure, tg, type_closure, n, p);
-            }
-            copy_ptrs(type_closure, p, pp, n);
-            SETCLOSCODE(p,code);
-         /* pad if necessary */
-            if ((len & 1) == 0) CLOSIT(p, len) = FIX(0);
-        }
-    } else if (t == type_symbol) {
-#ifdef ENABLE_OBJECT_COUNTS
-        S_G.countof[tg][countof_symbol] += 1;
-#endif /* ENABLE_OBJECT_COUNTS */
-        find_room(space_symbol, tg, type_symbol, size_symbol, p);
-        INITSYMVAL(p) = SYMVAL(pp);
-        INITSYMPVAL(p) = SYMPVAL(pp);
-        INITSYMPLIST(p) = SYMPLIST(pp);
-        INITSYMSPLIST(p) = SYMSPLIST(pp);
-        INITSYMNAME(p) = SYMNAME(pp);
-        INITSYMHASH(p) = SYMHASH(pp);
-    } else if (t == type_flonum) {
-#ifdef ENABLE_OBJECT_COUNTS
-        S_G.countof[tg][countof_flonum] += 1;
-#endif /* ENABLE_OBJECT_COUNTS */
-        find_room(space_data, tg, type_flonum, size_flonum, p);
-        FLODAT(p) = FLODAT(pp);
-# ifdef PRESERVE_FLONUM_EQ
-        flonum_set_forwarded(pp, si);
-        FLONUM_FWDADDRESS(pp) = p;
-# else
-      /* no room for forwarding address, so let 'em be duplicated */
-# endif
-        return p;
-    } else {
-      S_error_abort("copy(gc): illegal type");
-      return (ptr)0 /* not reached */;
-    }
-
-    FWDMARKER(pp) = forward_marker;
-    FWDADDRESS(pp) = p;
-
-    ADD_BACKREFERENCE(p)
-
-    return p;
-}
-
-static void sweep_ptrs(pp, n) ptr *pp; iptr n; {
-  ptr *end = pp + n;
-
-  while (pp != end) {
-    relocate(pp)
-    pp += 1;
-  }
-}
-
-static void sweep(ptr tc, ptr p, IBOOL sweep_pure) {
-  ptr tf; ITYPE t;
-
-  PUSH_BACKREFERENCE(p)
-
-  if ((t = TYPEBITS(p)) == type_pair) {
-    ISPC s = SPACE(p) & ~(space_locked | space_old);
-    if (s == space_ephemeron)
-      add_ephemeron_to_pending(p);
-    else {
-      if (s != space_weakpair) {
-        relocate(&INITCAR(p))
-      }
-      relocate(&INITCDR(p))
-    }
-  } else if (t == type_closure) {
-    ptr code;
-
-    code = CLOSCODE(p);
-    if (sweep_pure || (CODETYPE(code) & (code_flag_mutable_closure << code_flags_offset))) {
-      relocate(&code)
-      SETCLOSCODE(p,code);
-      if (CODETYPE(code) & (code_flag_continuation << code_flags_offset))
-        sweep_continuation(p);
-      else
-        sweep_ptrs(&CLOSIT(p, 0), CLOSLEN(p));
-    }
-  } else if (t == type_symbol) {
-    sweep_symbol(p);
-  } else if (t == type_flonum) {
-    /* nothing to sweep */;
- /* typed objects */
-  } else if (tf = TYPEFIELD(p), TYPEP(tf, mask_vector, type_vector)) {
-    sweep_ptrs(&INITVECTIT(p, 0), Svector_length(p));
-  } else if (tf = TYPEFIELD(p), TYPEP(tf, mask_stencil_vector, type_stencil_vector)) {
-    sweep_ptrs(&INITVECTIT(p, 0), Sstencil_vector_length(p));
-  } else if (TYPEP(tf, mask_string, type_string) || TYPEP(tf, mask_bytevector, type_bytevector) || TYPEP(tf, mask_fxvector, type_fxvector)) {
-    /* nothing to sweep */;
-  } else if (TYPEP(tf, mask_record, type_record)) {
-    relocate(&RECORDINSTTYPE(p));
-    if (sweep_pure || RECORDDESCMPM(RECORDINSTTYPE(p)) != FIX(0)) {
-      sweep_record(p);
-    }
-  } else if (TYPEP(tf, mask_box, type_box)) {
-    relocate(&INITBOXREF(p))
-  } else if ((iptr)tf == type_ratnum) {
-    if (sweep_pure) {
-      relocate(&RATNUM(p))
-      relocate(&RATDEN(p))
-    }
-  } else if ((iptr)tf == type_tlc) {
-    relocate(&INITTLCKEYVAL(p));
-    relocate(&INITTLCHT(p));
-    relocate(&INITTLCNEXT(p));
-  } else if ((iptr)tf == type_exactnum) {
-    if (sweep_pure) {
-      relocate(&EXACTNUM_REAL_PART(p))
-      relocate(&EXACTNUM_IMAG_PART(p))
-    }
-  } else if ((iptr)tf == type_inexactnum) {
-    /* nothing to sweep */;
-  } else if (TYPEP(tf, mask_bignum, type_bignum)) {
-    /* nothing to sweep */;
-  } else if (TYPEP(tf, mask_port, type_port)) {
-    sweep_port(p);
-  } else if (TYPEP(tf, mask_code, type_code)) {
-    if (sweep_pure) {
-      sweep_code_object(tc, p);
-    }
-  } else if ((iptr)tf == type_thread) {
-    sweep_thread(p);
-  } else if ((iptr)tf == type_rtd_counts) {
-    /* nothing to sweep */;
-  } else if ((iptr)tf == type_phantom) {
-    /* nothing to sweep */;
-  } else {
-    S_error_abort("sweep(gc): illegal type");
-  }
-
-  POP_BACKREFERENCE()
-}
+#if 0
+# include "gc-orig.inc"
+#else
+#ifndef ENABLE_OBJECT_COUNTS
+# include "gc-ocd.inc"
+#else
+# include "gc-oce.inc"
+#endif
+#endif
 
 /* sweep_in_old() is like sweep(), but the goal is to sweep the
    object's content without copying the object itself, so we're sweep
@@ -806,113 +318,16 @@ static void sweep(ptr tc, ptr p, IBOOL sweep_pure) {
    sweep_in_old() is allowed to copy the object, since the object
    is going to get copied anyway. */
 static void sweep_in_old(ptr tc, ptr p) {
-  ptr tf; ITYPE t;
-
   /* Detect all the cases when we need to give up on in-place
      sweeping: */
-  if ((t = TYPEBITS(p)) == type_pair) {
-    ISPC s = SPACE(p) & ~(space_locked | space_old);
-    if (s == space_ephemeron) {
-      /* Weak reference can be ignored, so we do nothing */
-      return;
-    } else if (s != space_weakpair) {
-      if (p == Scar(p)) {
-        relocate(&p)
-        return;
-      }
-    }
-    if (p == Scdr(p)) {
-      relocate(&p)
-      return;
-    }
-  } else if (t == type_closure) {
-    /* A closure can refer back to itself */
-    ptr code = CLOSCODE(p);
-    if (!(CODETYPE(code) & (code_flag_continuation << code_flags_offset))) {
-      if (scan_ptrs_for_self(&CLOSIT(p, 0), CLOSLEN(p), p)) {
-        relocate(&p)
-        return;
-      }
-    }
-  } else if (t == type_symbol) {
-    /* a symbol can refer back to itself as its own value */
-    if (p == SYMVAL(p)) {
-      relocate(&p)
-      return;
-    }
-  } else if (t == type_flonum) {
-    /* nothing to sweep */
-    return;
- /* typed objects */
-  } else if (tf = TYPEFIELD(p), TYPEP(tf, mask_vector, type_vector)) {
-    if (scan_ptrs_for_self(&INITVECTIT(p, 0), Svector_length(p), p)) {
-      relocate(&p)
-      return;
-    }
-  } else if (tf = TYPEFIELD(p), TYPEP(tf, mask_stencil_vector, type_stencil_vector)) {
-    if (scan_ptrs_for_self(&INITSTENVECTIT(p, 0), Sstencil_vector_length(p), p)) {
-      relocate(&p)
-      return;
-    }
-  } else if (TYPEP(tf, mask_string, type_string) || TYPEP(tf, mask_bytevector, type_bytevector) || TYPEP(tf, mask_fxvector, type_fxvector)) {
-    /* nothing to sweep */
-    return;
-  } else if (TYPEP(tf, mask_record, type_record)) {
-    relocate(&RECORDINSTTYPE(p));
-    if (scan_record_for_self(p)) {
-      relocate(&p)
-      return;
-    }
-  } else if (TYPEP(tf, mask_box, type_box)) {
-    if (Sunbox(p) == p) {
-      relocate(&p)
-      return;
-    }
-  } else if ((iptr)tf == type_ratnum) {
-    /* can't refer back to itself */
-  } else if ((iptr)tf == type_exactnum) {
-    /* can't refer back to itself */
-  } else if ((iptr)tf == type_inexactnum) {
-    /* nothing to sweep */
-    return;
-  } else if (TYPEP(tf, mask_bignum, type_bignum)) {
-    /* nothing to sweep */
-    return;
-  } else if (TYPEP(tf, mask_port, type_port)) {
-    /* a symbol can refer back to itself as info */
-    if (p == PORTINFO(p)) {
-      relocate(&p)
-      return;
-    }
-  } else if (TYPEP(tf, mask_code, type_code)) {
-    /* We don't expect code to be accessible to a layer that registers
-       an ordered finalizer, but just in case, assume that code
-       includes a self-reference */
+  if (object_directly_refers_to_self(p)) {
     relocate(&p)
     return;
-  } else if ((iptr)tf == type_thread) {
-    /* threads are allocated with plain malloc(), so ordered
-       finalization cannot work on them */
-    S_error_abort("sweep_in_old(gc): cannot check thread");
-  } else if ((iptr)tf == type_rtd_counts) {
-    /* nothing to sweep */
-    return;
-  } else {
-    S_error_abort("sweep_in_old(gc): illegal type");
   }
 
   /* We've determined that `p` won't refer immediately back to itself,
      so it's ok to use sweep(). */
-  sweep(tc, p, 1);
-}
-
-static int scan_ptrs_for_self(ptr *pp, iptr len, ptr p) {
-  while (len--) {
-    if (*pp == p)
-      return 1;
-    pp += 1;
-  }
-  return 0;
+  sweep(tc, p);
 }
 
 static ptr copy_stack(old, length, clength) ptr old; iptr *length, clength; {
@@ -1117,7 +532,7 @@ void GCENTRY(ptr tc, IGEN mcg, IGEN tg) {
       i = Svector_length(v);
       x = *(vp = &INITVECTIT(v, 0));
       do {
-        sweep(tc, x, 1);
+        sweep(tc, x);
         ADD_BACKREFERENCE(x)
       } while (--i != 0 && (x = *++vp) != MAXPTR);
     }
@@ -1733,7 +1148,7 @@ static void sweep_generation(tc, g) ptr tc; IGEN g; {
     /* space used only as needed for backreferences: */
     sweep_space(space_closure, {
         p = TYPE((ptr)pp, type_closure);
-        sweep(tc, p, 1);
+        sweep(tc, p);
         pp = (ptr *)((uptr)pp + size_object(p));
     })
 
@@ -1744,66 +1159,6 @@ static void sweep_generation(tc, g) ptr tc; IGEN g; {
     if (!change)
       check_pending_ephemerons();
   } while (change);
-}
-
-static iptr size_object(p) ptr p; {
-    ITYPE t; ptr tf;
-
-    if ((t = TYPEBITS(p)) == type_pair) {
-        seginfo *si;
-        if ((si = MaybeSegInfo(ptr_get_segment(p))) != NULL && (si->space & ~(space_locked | space_old)) == space_ephemeron)
-            return size_ephemeron;
-        else
-            return size_pair;
-    } else if (t == type_closure) {
-        ptr code = CLOSCODE(p);
-        if (CODETYPE(code) & (code_flag_continuation << code_flags_offset))
-            return size_continuation;
-        else
-            return size_closure(CLOSLEN(p));
-    } else if (t == type_symbol) {
-        return size_symbol;
-    } else if (t == type_flonum) {
-        return size_flonum;
-  /* typed objects */
-    } else if (tf = TYPEFIELD(p), TYPEP(tf, mask_vector, type_vector)) {
-        return size_vector(Svector_length(p));
-    } else if (tf = TYPEFIELD(p), TYPEP(tf, mask_stencil_vector, type_stencil_vector)) {
-        return size_vector(Sstencil_vector_length(p));
-    } else if (TYPEP(tf, mask_string, type_string)) {
-        return size_string(Sstring_length(p));
-    } else if (TYPEP(tf, mask_bytevector, type_bytevector)) {
-        return size_bytevector(Sbytevector_length(p));
-    } else if (TYPEP(tf, mask_record, type_record)) {
-        return size_record_inst(UNFIX(RECORDDESCSIZE(tf)));
-    } else if (TYPEP(tf, mask_fxvector, type_fxvector)) {
-        return size_fxvector(Sfxvector_length(p));
-    } else if (TYPEP(tf, mask_box, type_box)) {
-        return size_box;
-    } else if ((iptr)tf == type_tlc) {
-        return size_tlc;
-    } else if ((iptr)tf == type_ratnum) {
-        return size_ratnum;
-    } else if ((iptr)tf == type_exactnum) {
-        return size_exactnum;
-    } else if ((iptr)tf == type_inexactnum) {
-        return size_inexactnum;
-    } else if (TYPEP(tf, mask_bignum, type_bignum)) {
-        return size_bignum(BIGLEN(p));
-    } else if (TYPEP(tf, mask_port, type_port)) {
-        return size_port;
-    } else if (TYPEP(tf, mask_code, type_code)) {
-        return size_code(CODELEN(p));
-    } else if ((iptr)tf == type_thread) {
-        return size_thread;
-    } else if ((iptr)tf == type_rtd_counts) {
-        return size_rtd_counts;
-    } else if ((iptr)tf == type_phantom) {
-        return size_phantom;
-    } else {
-        S_error_abort("size_object(gc): illegal type");
-        return 0 /* not reached */;
-    }
 }
 
 static iptr sweep_typed_object(tc, p) ptr tc; ptr p; {
@@ -1818,7 +1173,7 @@ static iptr sweep_typed_object(tc, p) ptr tc; ptr p; {
   } else {
     /* We get here only if backreference mode pushed othertyped objects into
        a typed space */
-    sweep(tc, p, 1);
+    sweep(tc, p);
     return size_object(p);
   }
 }
@@ -1994,66 +1349,6 @@ static void sweep_stack(base, fp, ret) uptr base, fp, ret; {
       }
     }
   }
-}
-
-#define sweep_or_check_record(x, sweep_or_check)                 \
-    ptr *pp; ptr num; ptr rtd;                 \
-                                                        \
-    /* record-type descriptor was forwarded already */  \
-    rtd = RECORDINSTTYPE(x);                            \
-    num = RECORDDESCPM(rtd);                            \
-    pp = &RECORDINSTIT(x,0);                                            \
-                                                                        \
-    /* process cells for which bit in pm is set; quit when pm == 0. */  \
-    if (Sfixnump(num)) {                                                \
-      /* ignore bit for already forwarded rtd */                        \
-        uptr mask = (uptr)UNFIX(num) >> 1;                                \
-        if (mask == (uptr)-1 >> 1) {                                    \
-          ptr *ppend = (ptr *)((uptr)pp + UNFIX(RECORDDESCSIZE(rtd))) - 1; \
-          while (pp < ppend) {                                          \
-            sweep_or_check(pp)                                          \
-            pp += 1;                                                    \
-          }                                                             \
-        } else {                                                        \
-          while (mask != 0) {                                           \
-            if (mask & 1) sweep_or_check(pp)                            \
-            mask >>= 1;                                                 \
-            pp += 1;                                                    \
-          }                                                             \
-        }                                                               \
-    } else {                                                            \
-      iptr index; bigit mask; INT bits;                                 \
-                                                                        \
-      /* bignum pointer mask may have been forwarded */                 \
-      relocate(&RECORDDESCPM(rtd))                                      \
-      num = RECORDDESCPM(rtd);                                          \
-      index = BIGLEN(num) - 1;                                          \
-      /* ignore bit for already forwarded rtd */                        \
-      mask = BIGIT(num,index) >> 1;                                     \
-      bits = bigit_bits - 1;                                            \
-      for (;;) {                                                        \
-        do {                                                            \
-          if (mask & 1) sweep_or_check(pp)                              \
-          mask >>= 1;                                                   \
-          pp += 1;                                                      \
-        } while (--bits > 0);                                           \
-        if (index-- == 0) break;                                        \
-        mask = BIGIT(num,index);                                        \
-        bits = bigit_bits;                                              \
-      }                                                                 \
-    }                                                                   \
-
-static void sweep_record(x) ptr x; {
-  PUSH_BACKREFERENCE(x)
-  sweep_or_check_record(x, relocate)
-  POP_BACKREFERENCE()
-}
-
-#define check_self(pp) if (*(pp) == x) return 1;
-
-static int scan_record_for_self(x) ptr x; {
-  sweep_or_check_record(x, check_self)
-  return 0;
 }
 
 static IGEN sweep_dirty_record(x, tg, youngest) ptr x; IGEN tg, youngest; {

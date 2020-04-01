@@ -1001,6 +1001,7 @@
 
         (nl)
         (comment "threads")
+        (defref THREADTYPE thread type)
         (defref THREADTC thread tc)
 
         (nl)
