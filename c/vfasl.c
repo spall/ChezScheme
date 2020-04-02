@@ -182,6 +182,8 @@ static void vfasl_register_singleton_reference(vfasl_info *vfi, ptr *pp, int whi
 static void vfasl_register_forward(vfasl_info *vfi, ptr pp, ptr p);
 static ptr vfasl_lookup_forward(vfasl_info *vfi, ptr p);
 
+static iptr vfasl_symbol_to_index(vfasl_info *vfi, ptr pp);
+
 static void fasl_init_entry_tables();
 static void vfasl_check_install_library_entry(vfasl_info *vfi, ptr name);
 
@@ -999,191 +1001,9 @@ static ptr vfasl_find_room(vfasl_info *vfi, int s, ITYPE t, iptr n) {
   Q1END = (ptr *)((uptr)Q1 + n);\
   while (Q1 != Q1END) *Q1++ = *Q2++;}
 
-static ptr copy(vfasl_info *vfi, ptr pp, seginfo *si) {
-    ptr p, tf; ITYPE t;
+//#include "vfasl-orig.inc"
 
-    if ((t = TYPEBITS(pp)) == type_typed_object) {
-      tf = TYPEFIELD(pp);
-      if (TYPEP(tf, mask_record, type_record)) {
-          ptr rtd; iptr n; int s;
-
-          rtd = tf;
-
-          if (is_rtd(tf, vfi)) {
-            if (pp != S_G.base_rtd) {
-              /* make sure rtd's type is registered first */
-              (void)vfasl_relocate_help(vfi, rtd);
-            }
-            /* need parent before child */
-            vfasl_relocate_parents(vfi, RECORDDESCPARENT(pp));
-
-            s = vspace_rtd;
-          } else {
-            /* See gc.c for original rationale, but the fine-grained
-               choices only matter when loading into the static
-               generation, so we make */
-            s = (RECORDDESCMPM(rtd) == FIX(0)
-                 ? vspace_pure_typed
-                 : vspace_impure_record);
-          }
-
-          n = size_record_inst(UNFIX(RECORDDESCSIZE(rtd)));
-
-          FIND_ROOM(vfi, s, type_typed_object, n, p);
-          copy_ptrs(type_typed_object, p, pp, n);
-
-          if (pp == S_G.base_rtd)
-            vfi->base_rtd = p;
-
-          /* pad if necessary */
-          {
-            iptr m = unaligned_size_record_inst(UNFIX(RECORDDESCSIZE(rtd)));
-            if (m != n)
-              *((ptr *)((uptr)UNTYPE(p,type_typed_object) + m)) = FIX(0);
-          }
-      } else if (TYPEP(tf, mask_vector, type_vector)) {
-          iptr len, n;
-          len = Svector_length(pp);
-          n = size_vector(len);
-          FIND_ROOM(vfi, vspace_impure, type_typed_object, n, p);
-          copy_ptrs(type_typed_object, p, pp, n);
-          /* pad if necessary */
-          if ((len & 1) == 0) INITVECTIT(p, len) = FIX(0);
-      } else if (TYPEP(tf, mask_stencil_vector, type_stencil_vector)) {
-          iptr len, n;
-          len = Sstencil_vector_length(pp);
-          n = size_stencil_vector(len);
-          FIND_ROOM(vfi, vspace_impure, type_typed_object, n, p);
-          copy_ptrs(type_typed_object, p, pp, n);
-          /* pad if necessary */
-          if ((len & 1) == 0) INITSTENVECTIT(p, len) = FIX(0);
-      } else if (TYPEP(tf, mask_string, type_string)) {
-          iptr n;
-          n = size_string(Sstring_length(pp));
-          FIND_ROOM(vfi, vspace_data, type_typed_object, n, p);
-          copy_ptrs(type_typed_object, p, pp, n);
-      } else if (TYPEP(tf, mask_fxvector, type_fxvector)) {
-          iptr n;
-          n = size_fxvector(Sfxvector_length(pp));
-          FIND_ROOM(vfi, vspace_data, type_typed_object, n, p);
-          copy_ptrs(type_typed_object, p, pp, n);
-      } else if (TYPEP(tf, mask_bytevector, type_bytevector)) {
-          iptr n;
-          n = size_bytevector(Sbytevector_length(pp));
-          FIND_ROOM(vfi, vspace_data, type_typed_object, n, p);
-          copy_ptrs(type_typed_object, p, pp, n);
-      } else if ((iptr)tf == type_tlc) {
-          vfasl_fail(vfi, "tlc");
-          return (ptr)0;
-      } else if (TYPEP(tf, mask_box, type_box)) {
-          FIND_ROOM(vfi, vspace_impure, type_typed_object, size_box, p);
-          BOXTYPE(p) = (iptr)tf;
-          INITBOXREF(p) = Sunbox(pp);
-      } else if ((iptr)tf == type_ratnum) {
-        /* note: vspace_impure is suboptimal for loading into static
-           generation, but these will be rare in boot code */
-          FIND_ROOM(vfi, vspace_impure, type_typed_object, size_ratnum, p);
-          RATTYPE(p) = type_ratnum;
-          RATNUM(p) = RATNUM(pp);
-          RATDEN(p) = RATDEN(pp);
-          /* pad */
-          ((void **)UNTYPE(p, type_typed_object))[3] = (ptr)0;
-      } else if ((iptr)tf == type_exactnum) {
-        /* note: vspace_impure is suboptimal for loading into static
-           generation, but these will be rare in boot code */
-          FIND_ROOM(vfi, vspace_impure, type_typed_object, size_exactnum, p);
-          EXACTNUM_TYPE(p) = type_exactnum;
-          EXACTNUM_REAL_PART(p) = EXACTNUM_REAL_PART(pp);
-          EXACTNUM_IMAG_PART(p) = EXACTNUM_IMAG_PART(pp);
-          /* pad */
-          ((void **)UNTYPE(p, type_typed_object))[3] = (ptr)0;
-      } else if ((iptr)tf == type_inexactnum) {
-          FIND_ROOM(vfi, vspace_data, type_typed_object, size_inexactnum, p);
-          INEXACTNUM_TYPE(p) = type_inexactnum;
-          INEXACTNUM_REAL_PART(p) = INEXACTNUM_REAL_PART(pp);
-          INEXACTNUM_IMAG_PART(p) = INEXACTNUM_IMAG_PART(pp);
-      } else if (TYPEP(tf, mask_bignum, type_bignum)) {
-          iptr n;
-          n = size_bignum(BIGLEN(pp));
-          FIND_ROOM(vfi, vspace_data, type_typed_object, n, p);
-          copy_ptrs(type_typed_object, p, pp, n);
-      } else if (TYPEP(tf, mask_port, type_port)) {
-          vfasl_fail(vfi, "port");
-          return (ptr)0;
-      } else if (TYPEP(tf, mask_code, type_code)) {
-          iptr n;
-          n = size_code(CODELEN(pp));
-          FIND_ROOM(vfi, vspace_code, type_typed_object, n, p);
-          copy_ptrs(type_typed_object, p, pp, n);
-          if (CODERELOC(pp) == (ptr)0)
-            vfasl_fail(vfi, "code without relocation");
-      } else if ((iptr)tf == type_rtd_counts) {
-        /* prune counts, since GC will recreate as needed */
-          return Sfalse;
-      } else if ((iptr)tf == type_thread) {
-          vfasl_fail(vfi, "thread");
-          return (ptr)0;
-      } else {
-          S_error_abort("vfasl: illegal type");
-          return (ptr)0 /* not reached */;
-      }
-    } else if (t == type_pair) {
-      if (si->space == space_ephemeron) {
-        vfasl_fail(vfi, "emphemeron");
-        return (ptr)0;
-      } else if (si->space == space_weakpair) {
-        vfasl_fail(vfi, "weakpair");
-        return (ptr)0;
-      } else {
-        FIND_ROOM(vfi, vspace_impure, type_pair, size_pair, p);
-      }
-      INITCAR(p) = Scar(pp);
-      INITCDR(p) = Scdr(pp);
-    } else if (t == type_closure) {
-        ptr code;
-        code = CLOSCODE(pp);
-        if (CODETYPE(code) & (code_flag_continuation << code_flags_offset)) {
-          vfasl_fail(vfi, "continuation");
-          return (ptr)0;
-        } else if (CODETYPE(code) & (code_flag_mutable_closure << code_flags_offset)) {
-          vfasl_fail(vfi, "mutable closure");
-          return (ptr)0;
-        } else {
-            iptr len, n;
-            len = CLOSLEN(pp);
-            n = size_closure(len);
-            FIND_ROOM(vfi, vspace_closure, type_closure, n, p);
-            copy_ptrs(type_closure, p, pp, n);
-            /* pad if necessary */
-            if ((len & 1) == 0) CLOSIT(p, len) = FIX(0);
-        }
-    } else if (t == type_symbol) {
-        iptr pos = vfi->sym_count++;
-        ptr name = SYMNAME(pp);
-        if (Sstringp(name))
-          vfasl_check_install_library_entry(vfi, name);
-        else if (!Spairp(name) || (Scar(name) == Sfalse))
-          vfasl_fail(vfi, "gensym without unique name");
-        FIND_ROOM(vfi, vspace_symbol, type_symbol, size_symbol, p);
-        INITSYMVAL(p) = FIX(pos);   /* stores symbol index for now; will get reset on load */
-        INITSYMPVAL(p) = Snil;      /* will get reset on load */
-        INITSYMPLIST(p) = Snil;
-        INITSYMSPLIST(p) = Snil;
-        INITSYMNAME(p) = name;
-        INITSYMHASH(p) = SYMHASH(pp);
-    } else if (t == type_flonum) {
-        FIND_ROOM(vfi, vspace_data, type_flonum, size_flonum, p);
-        FLODAT(p) = FLODAT(pp);
-        /* note: unlike GC, sharing flonums */
-    } else {
-      S_error_abort("copy(gc): illegal type");
-      return (ptr)0 /* not reached */;
-    }
-
-    vfasl_register_forward(vfi, pp, p);
-
-    return p;
-}
+#include "vfasl.inc"
 
 static ptr vfasl_relocate_help(vfasl_info *vfi, ptr pp) {
   ptr fpp;
@@ -1551,6 +1371,20 @@ static ptr find_pointer_from_offset(uptr p_off, ptr *vspaces, uptr *vspace_offse
     s++;
 
   return TYPE(ptr_add(vspaces[s], p_off - vspace_offsets[s]), t);
+}
+
+/*************************************************************/
+/* Symbol names                                              */
+
+static iptr vfasl_symbol_to_index(vfasl_info *vfi, ptr pp)
+{
+  uptr pos = vfi->sym_count++;
+  ptr name = SYMNAME(pp);
+  if (Sstringp(name))
+    vfasl_check_install_library_entry(vfi, name);
+  else if (!Spairp(name) || (Scar(name) == Sfalse))
+    vfasl_fail(vfi, "gensym without unique name");
+  return pos;
 }
 
 /*************************************************************/

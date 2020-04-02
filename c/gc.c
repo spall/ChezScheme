@@ -284,11 +284,6 @@ FORCEINLINE void check_triggers(seginfo *si) {
   }
 }
 
-/* For `memcpy_aligned, that the first two arguments are word-aligned
-   and it would be ok to round up the length to a word size. But
-   probably the compiler does a fine job with plain old `mempcy`. */
-#define memcpy_aligned memcpy
-
 #if 0
 # include "gc-orig.inc"
 # ifdef ENABLE_OBJECT_COUNTS
