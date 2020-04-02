@@ -178,16 +178,17 @@ uptr list_length(ptr ls) {
 #ifdef PRESERVE_FLONUM_EQ
 
 static void flonum_set_forwarded(ptr p, seginfo *si) {
-  uptr delta = (uptr)UNTYPE(p, type_flonum) - (uptr)build_ptr(si->number, 0);
-  delta >>= log2_ptr_bytes;
   if (!si->forwarded_flonums) {
     ptr ff;
-    uptr sz = (bytes_per_segment) >> (3 + log2_ptr_bytes);
-    find_room(space_data, 0, typemod, ptr_align(sz), ff);
-    memset(ff, 0, sz);
+    find_room(space_data, 0, typemod, ptr_align(segment_bitmap_bytes), ff);
+    memset(ff, 0, segment_bitmap_bytes);
     si->forwarded_flonums = ff;
   }
-  si->forwarded_flonums[delta >> 3] |= (1 << (delta & 0x7));
+  {
+    uptr byte = segment_bitmap_byte(p);
+    uptr bit = 1 << segment_bitmap_bit(p);
+    si->forwarded_flonums[byte] |= bit;
+  }
 }
 
 static int flonum_is_forwarded_p(ptr p, seginfo *si) {
@@ -248,38 +249,6 @@ static int flonum_is_forwarded_p(ptr p, seginfo *si) {
     *ppp = copy(pp, si);\
 }
 
-#define relocate_return_addr(pcp) {\
-    seginfo *SI;\
-    ptr XCP;\
-    XCP = *(pcp);\
-    if ((SI = SegInfo(ptr_get_segment(XCP)))->space & space_old) {      \
-        iptr CO;\
-        CO = ENTRYOFFSET(XCP) + ((uptr)XCP - (uptr)ENTRYOFFSETADDR(XCP));\
-        relocate_code(pcp,XCP,CO,SI)\
-    }\
-}
-
-/* in the call to copy below, assuming SPACE(PP) == SPACE(XCP) since
-   PP and XCP point to/into the same object */
-#define relocate_code(pcp,XCP,CO,SI) {\
-    ptr PP;\
-    PP = (ptr)((uptr)XCP - CO);\
-    if (FWDMARKER(PP) == forward_marker)\
-        PP = FWDADDRESS(PP);\
-    else\
-        PP = copy(PP, SI);\
-    *pcp = (ptr)((uptr)PP + CO);\
-}
-
-/* rkd 2015/06/05: tried to use sse instructions.  abandoned the code
-   because the collector ran slower */
-#define copy_ptrs(ty, p1, p2, n) {\
-  ptr *Q1, *Q2, *Q1END;\
-  Q1 = (ptr *)UNTYPE((p1),ty);\
-  Q2 = (ptr *)UNTYPE((p2),ty);\
-  Q1END = (ptr *)((uptr)Q1 + n);\
-  while (Q1 != Q1END) *Q1++ = *Q2++;}
-
 static IBOOL search_locked(ptr p) {
   uptr k; ptr v, *vp, x;
   v = sorted_locked_objects;
@@ -315,10 +284,16 @@ FORCEINLINE void check_triggers(seginfo *si) {
   }
 }
 
+/* For `memcpy_aligned, that the first two arguments are word-aligned
+   and it would be ok to round up the length to a word size. But
+   probably the compiler does a fine job with plain old `mempcy`. */
 #define memcpy_aligned memcpy
 
 #if 0
 # include "gc-orig.inc"
+# ifdef ENABLE_OBJECT_COUNTS
+#  include "measure.inc"
+# endif
 #else
 #ifndef ENABLE_OBJECT_COUNTS
 # include "gc-ocd.inc"
@@ -369,7 +344,7 @@ static ptr copy_stack(old, length, clength) ptr old; iptr *length, clength; {
   find_room(space_data, target_generation, typemod, n, new);
   n = ptr_align(clength);
  /* warning: stack may have been left non-double-aligned by split_and_resize */
-  copy_ptrs(typemod, new, old, n);
+  memcpy_aligned(new, old, n);
 
  /* also returning possibly updated value in *length */
   return new;
@@ -1196,95 +1171,6 @@ static iptr sweep_typed_object(tc, p) ptr tc; ptr p; {
   }
 }
 
-static IGEN sweep_dirty_record(x, tg, youngest) ptr x; IGEN tg, youngest; {
-    ptr *pp; ptr num; ptr rtd;
-    PUSH_BACKREFERENCE(x)
-
-   /* warning: assuming rtd is immutable */
-    rtd = RECORDINSTTYPE(x);
-
-   /* warning: assuming MPM field is immutable */
-    num = RECORDDESCMPM(rtd);
-    pp = &RECORDINSTIT(x,0);
-
-  /* sweep cells for which bit in mpm is set
-     include rtd in case it's mutable */
-    if (Sfixnump(num)) {
-       /* ignore bit for assumed immutable rtd */
-        uptr mask = (uptr)UNFIX(num) >> 1;
-        while (mask != 0) {
-            if (mask & 1) relocate_dirty(pp,tg,youngest)
-            mask >>= 1;
-            pp += 1;
-        }
-    } else {
-        iptr index; bigit mask; INT bits;
-
-        index = BIGLEN(num) - 1;
-       /* ignore bit for assumed immutable rtd */
-        mask = BIGIT(num,index) >> 1;
-        bits = bigit_bits - 1;
-        for (;;) {
-            do {
-                if (mask & 1) relocate_dirty(pp,tg,youngest)
-                mask >>= 1;
-                pp += 1;
-            } while (--bits > 0);
-            if (index-- == 0) break;
-            mask = BIGIT(num,index);
-            bits = bigit_bits;
-        }
-    }
-
-    POP_BACKREFERENCE()
-
-    return youngest;
-}
-
-static IGEN sweep_dirty_port(p, tg, youngest) ptr p; IGEN tg, youngest; {
-  PUSH_BACKREFERENCE(p)
-
-  relocate_dirty(&PORTHANDLER(p),tg,youngest)
-  relocate_dirty(&PORTINFO(p),tg,youngest)
-  relocate_dirty(&PORTNAME(p),tg,youngest)
-
-  if (PORTTYPE(p) & PORT_FLAG_OUTPUT) {
-    iptr n = (iptr)PORTOLAST(p) - (iptr)PORTOBUF(p);
-    relocate_dirty(&PORTOBUF(p),tg,youngest)
-    PORTOLAST(p) = (ptr)((iptr)PORTOBUF(p) + n);
-  }
-
-  if (PORTTYPE(p) & PORT_FLAG_INPUT) {
-    iptr n = (iptr)PORTILAST(p) - (iptr)PORTIBUF(p);
-    relocate_dirty(&PORTIBUF(p),tg,youngest)
-    PORTILAST(p) = (ptr)((iptr)PORTIBUF(p) + n);
-  }
-
-  POP_BACKREFERENCE()
-
-  return youngest;
-}
-
-static IGEN sweep_dirty_symbol(p, tg, youngest) ptr p; IGEN tg, youngest; {
-  ptr val, code;
-  PUSH_BACKREFERENCE(p)
-
-  val = SYMVAL(p);
-  relocate_dirty(&val,tg,youngest)
-  INITSYMVAL(p) = val;
-  code = Sprocedurep(val) ? CLOSCODE(val) : SYMCODE(p);
-  relocate_dirty(&code,tg,youngest)
-  INITSYMCODE(p,code);
-  relocate_dirty(&INITSYMPLIST(p),tg,youngest)
-  relocate_dirty(&INITSYMSPLIST(p),tg,youngest)
-  relocate_dirty(&INITSYMNAME(p),tg,youngest)
-  relocate_dirty(&INITSYMHASH(p),tg,youngest)
-
-  POP_BACKREFERENCE()
-
-  return youngest;
-}
-
 typedef struct _weakseginfo {
   seginfo *si;
   IGEN youngest[cards_per_segment];
@@ -1897,7 +1783,7 @@ static void clear_trigger_ephemerons() {
   (!si->measured_mask \
    || !(si->measured_mask[segment_bitmap_byte(p)] & (1 << segment_bitmap_bit(p))))
 
-#define measured_mask_bytes (bytes_per_segment >> (log2_ptr_bytes+3))
+#define measured_mask_bytes segment_bitmap_bytes
 
 static void init_measure_mask(seginfo *si) {
   find_room(space_data, 0, typemod, ptr_align(measured_mask_bytes+ptr_bytes), si->measured_mask);

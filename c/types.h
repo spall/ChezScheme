@@ -114,6 +114,7 @@ typedef int IFASLCODE;      /* fasl type codes */
 #define addr_get_segment(p) ((uptr)(p) >> segment_offset_bits)
 #define ptr_get_segment(p) (((uptr)(p) + typemod - 1) >> segment_offset_bits)
 
+#define segment_bitmap_bytes    (bytes_per_segment >> (log2_ptr_bytes+3))
 #define segment_bitmap_index(p) ((((uptr)p + (typemod-1)) & (bytes_per_segment - 1)) >> log2_ptr_bytes)
 #define segment_bitmap_byte(p)  (segment_bitmap_index(p) >> 3)
 #define segment_bitmap_bit(p)   (segment_bitmap_index(p) & 0x7)

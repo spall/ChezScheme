@@ -574,10 +574,12 @@
 (define-trace-macro (trace-record trd len)
   (case-mode
    [copy
-    (copy-bytes record-data len)]
+    (copy-bytes record-data (- len ptr_bytes))]
    [else
     ;; record-type descriptor was forwarded already
-    (let* ([num : ptr (RECORDDESCPM rtd)]
+    (let* ([num : ptr (case-flag as-dirty?
+                       [on (record-type-mpm rtd)]
+                       [off (record-type-pm rtd)])]
            [pp : ptr* (& (RECORDINSTIT _ 0))])
       ;; Process cells for which bit in pm is set, and quit when pm == 0
       (cond
@@ -585,7 +587,9 @@
          ;; Ignore bit for already forwarded rtd
          (let* ([mask : uptr (>> (cast uptr (UNFIX num)) 1)])
            (cond
-             [(== mask (>> (cast uptr -1) 1))
+             [(case-flag as-dirty?
+               [on 0]
+               [off (== mask (>> (cast uptr -1) 1))])
               (let* ([ppend : ptr* (- (cast ptr* (+ (cast uptr pp) len)) 1)])
                 (while
                  :? (< pp ppend)
@@ -599,9 +603,12 @@
                (set! mask >>= 1)
                (set! pp += 1))]))]
         [else
-         ;; Bignum pointer mask may have been forwarded
-         (trace (RECORDDESCPM rtd))
-         (set! num (RECORDDESCPM rtd))
+         (case-flag as-dirty?
+          [on]
+          [off
+           ;; Bignum pointer mask may need forwarding
+           (trace (RECORDDESCPM rtd))
+           (set! num (RECORDDESCPM rtd))])
          (let* ([index : iptr (- (BIGLEN num) 1)]
                 ;; Ignore bit for already forwarded rtd
                 [mask : bigit (>> (BIGIT num index) 1)]
@@ -1012,6 +1019,9 @@
                [(copy) "ptr"]
                [(size) "uptr"]
                [(self-test) "IBOOL"]
+               [(sweep) (if (lookup 'as-dirty? spec #f)
+                            "IGEN"
+                            "void")]
                [else "void"])
              name
              (case (lookup 'mode spec)
@@ -1022,6 +1032,10 @@
                [else ""])
              (case (lookup 'mode spec)
                [(copy) ", seginfo *si"]
+               [(sweep)
+                (if (lookup 'as-dirty? spec #f)
+                    ", IGEN tg, IGEN youngest"
+                    "")]
                [else ""]))
      (let ([body
             (lambda ()
@@ -1067,7 +1081,9 @@
                 "PUSH_BACKREFERENCE(p)")
            (body)
            (and (lookup 'maybe-backreferences? spec #f)
-                "POP_BACKREFERENCE()"))]
+                "POP_BACKREFERENCE()")
+           (and (lookup 'as-dirty? spec #f)
+                "return youngest;"))]
          [(measure)
           (body)]
          [(self-test)
@@ -1205,7 +1221,7 @@
                [(copy)
                 (code-block
                  (format "ptr tmp_p = ~a;" (field-expression field spec "p" #f))
-                 (relocate-statement "tmp_p")
+                 (relocate-statement "tmp_p" spec)
                  (format "~a = tmp_p;" (field-expression field spec "new_p" #f)))]
                [(self-test) #f]
                [(measure)
@@ -1559,7 +1575,7 @@
     (cond
       [(or (eq? mode 'sweep)
            (and early? (eq? mode 'copy)))
-       (relocate-statement (field-expression field spec "p" #t))]
+       (relocate-statement (field-expression field spec "p" #t) spec)]
       [(eq? mode 'copy)
        (copy-statement field spec)]
       [(eq? mode 'measure)
@@ -1568,8 +1584,10 @@
        (format "if (p == ~a) return 1;" (field-expression field spec "p" #f))]
       [else #f]))
 
-  (define (relocate-statement e)
-    (format "relocate(&~a);" e))
+  (define (relocate-statement e spec)
+    (if (lookup 'as-dirty? spec #f)
+        (format "relocate_dirty(&~a, tg, youngest);" e)
+        (format "relocate(&~a);" e)))
 
   (define (measure-statement e)
     (code
@@ -1814,9 +1832,13 @@
                                            (maybe-backreferences? ,count?)
                                            (counts? ,count?)))))])])
         (sweep1 'record "sweep_record" '((rtd-relocated? #t)))
+        (sweep1 'record "sweep_dirty_record" '((rtd-relocated? #t)
+                                               (as-dirty? #t)))
         (sweep1 'symbol)
+        (sweep1 'symbol "sweep_dirty_symbol" '((as-dirty? #t)))
         (sweep1 'thread)
         (sweep1 'port)
+        (sweep1 'port "sweep_dirty_port" '((as-dirty? #t)))
         (sweep1 'closure "sweep_continuation" '((code-relocated? #t)
                                                 (assume-continuation? #t)))
         (sweep1 'code "sweep_code_object"))
