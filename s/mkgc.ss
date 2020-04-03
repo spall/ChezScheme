@@ -265,6 +265,8 @@
       (define rtd : ptr (record-type _))
       (space
        (cond
+         [(and-counts (is_counting_root si _))
+          space-count-root]
          [(&& (== (record-type-pm rtd) (FIX 1))
               (== (record-type-mpm rtd) (FIX 0)))
           ;; No pointers except for type
@@ -763,7 +765,10 @@
            (set! (record-type-counts c_rtd) counts)
            (when (!= (rtd-counts-timestamp counts) (array-ref S_G.gctimestamp 0))
              (S_fixup_counts counts))])
-        (set! (rtd-counts-data counts tg) (+ (rtd-counts-data counts tg) 1)))]
+        (set! (rtd-counts-data counts tg) (+ (rtd-counts-data counts tg) 1))
+        ;; Copies size that we've already gathered, but needed for counting from roots:
+        (when (== p_spc space-count-root) (set! count_root_bytes += p_sz))
+        (count countof-record))]
      [off])]
    [else]))
 
@@ -1008,6 +1013,11 @@
    [on 1]
    [off e]))
 
+(define-trace-macro (and-counts e)
+  (case-flag counts?
+   [on e]
+   [off 0]))
+
 (define-trace-macro (or-vfasl e)
   (case-mode
    [vfasl-copy 1]
@@ -1241,7 +1251,15 @@
        (case (lookup 'mode config)
          [(copy)
           (code-block
-           "if (locked(si, p)) return p;"
+           (cond
+             [(lookup 'counts? config #f)
+              (code
+               "if (!(si->space & space_old) || locked(si, p)) {"
+               "  if (measure_all_enabled) push_measure(p);"
+               "  return p;"
+               "}")]
+             [else
+              "if (locked(si, p)) return p;"])
            "change = 1;"
            "check_triggers(si);"
            (code-block

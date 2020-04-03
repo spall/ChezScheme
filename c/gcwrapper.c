@@ -131,6 +131,8 @@ void S_gc_init() {
     S_G.countof_size[countof_ephemeron] = 0;
   INITVECTIT(S_G.countof_names, countof_stencil_vector) = S_intern((const unsigned char *)"stencil-vector");
     S_G.countof_size[countof_stencil_vector] = 0;
+  INITVECTIT(S_G.countof_names, countof_record) = S_intern((const unsigned char *)"record");
+    S_G.countof_size[countof_record] = 0;
   for (i = 0; i < countof_types; i += 1) {
     if (Svector_ref(S_G.countof_names, i) == FIX(0)) {
       fprintf(stderr, "uninitialized countof_name at index %d\n", i);
@@ -351,29 +353,31 @@ ptr S_object_counts(void) {
 
  /* add primary types w/nonozero counts to the alist */
   for (i = 0 ; i < countof_types; i += 1) {
-    ptr inner_alist = Snil;
-    for (g = 0; g <= static_generation; INCRGEN(g)) {
-      IGEN gcurrent = g;
-      uptr count = S_G.countof[g][i];
-      uptr bytes = S_G.bytesof[g][i];
+    if (i != countof_record) { /* covered by rtd-specific counts */
+      ptr inner_alist = Snil;
+      for (g = 0; g <= static_generation; INCRGEN(g)) {
+        IGEN gcurrent = g;
+        uptr count = S_G.countof[g][i];
+        uptr bytes = S_G.bytesof[g][i];
 
-      if (g == S_G.new_max_nonstatic_generation) {
-        while (g < S_G.max_nonstatic_generation) {
-          g += 1;
-          /* NB: S_G.max_nonstatic_generation + 1 <= static_generation, but coverity complains about overrun */
-          /* coverity[overrun-buffer-val] */
-          count += S_G.countof[g][i];
-          /* coverity[overrun-buffer-val] */
-          bytes += S_G.bytesof[g][i];
+        if (g == S_G.new_max_nonstatic_generation) {
+          while (g < S_G.max_nonstatic_generation) {
+            g += 1;
+            /* NB: S_G.max_nonstatic_generation + 1 <= static_generation, but coverity complains about overrun */
+            /* coverity[overrun-buffer-val] */
+            count += S_G.countof[g][i];
+            /* coverity[overrun-buffer-val] */
+            bytes += S_G.bytesof[g][i];
+          }
+        }
+
+        if (count != 0) {
+          if (bytes == 0) bytes = count * S_G.countof_size[i];
+          inner_alist = Scons(Scons((gcurrent == static_generation ? S_G.static_id : FIX(gcurrent)), Scons(Sunsigned(count), Sunsigned(bytes))), inner_alist);
         }
       }
-
-      if (count != 0) {
-        if (bytes == 0) bytes = count * S_G.countof_size[i];
-        inner_alist = Scons(Scons((gcurrent == static_generation ? S_G.static_id : FIX(gcurrent)), Scons(Sunsigned(count), Sunsigned(bytes))), inner_alist);
-      }
+      if (inner_alist != Snil) outer_alist = Scons(Scons(Svector_ref(S_G.countof_names, i), inner_alist), outer_alist);
     }
-    if (inner_alist != Snil) outer_alist = Scons(Scons(Svector_ref(S_G.countof_names, i), inner_alist), outer_alist);
   }
 
   tc_mutex_release()

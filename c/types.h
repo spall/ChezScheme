@@ -138,19 +138,15 @@ typedef struct _seginfo {
   struct _seginfo **dirty_prev;             /* pointer to the next pointer on the previous seginfo in the DirtySegments list */
   struct _seginfo *dirty_next;              /* pointer to the next seginfo on the DirtySegments list */
   ptr trigger_ephemerons;                   /* ephemerons to re-check if object in segment is copied out */
-  union {
-    ptr trigger_guardians;                  /* guardians to re-check if object in segment is copied out */
-    octet *nonkey_mask;                     /* objects to not treat as reachable, yet */
-  };
+  ptr trigger_guardians;                    /* guardians to re-check if object in segment is copied out */
   ptr locked_objects;                       /* list of objects (including duplicates) for locked in this segment */
-  octet *locked_mask;
   ptr unlocked_objects;                     /* list of objects (no duplicates) for formerly locked */
-  union {
+  octet *locked_mask;                       /* bitmap of locked objects, used only during GC */
 #ifdef PRESERVE_FLONUM_EQ
-    octet *forwarded_flonums;               /* bitmap of flonums whose payload is a forwarding pointer */
+  octet *forwarded_flonums;                 /* bitmap of flonums whose payload is a forwarding pointer */
 #endif
-    octet *measured_mask;                   /* bitmap of objects that have been measured */
-  };
+  octet *counting_mask;                     /* bitmap of counting roots during a GC */
+  octet *measured_mask;                     /* bitmap of objects that have been measured */
   octet dirty_bytes[cards_per_segment];     /* one dirty byte per card */
 } seginfo;
 

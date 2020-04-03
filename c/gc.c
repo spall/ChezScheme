@@ -63,10 +63,17 @@ static int check_dirty_ephemeron PROTO((ptr pe, int tg, int youngest));
 static void clear_trigger_ephemerons PROTO(());
 static void sanitize_locked_segment PROTO((seginfo *si));
 
+#ifdef ENABLE_OBJECT_COUNTS
+static uptr total_size_so_far();
+#endif
+
 #ifdef ENABLE_MEASURE
+static void init_measure(IGEN min_gen, IGEN max_gen);
+static void finish_measure();
 static void measure(ptr p);
+static IBOOL flush_measure_stack();
 static void init_measure_mask(seginfo *si);
-static void clear_measured_masks();
+static void init_counting_mask(seginfo *si);
 static void push_measure(ptr p);
 static void add_ephemeron_to_pending_measure(ptr pe);
 static void add_trigger_ephemerons_to_pending_measure(ptr pe);
@@ -88,11 +95,19 @@ static ptr tlcs_to_rehash;
 static ptr conts_to_promote;
 static ptr recheck_guardians_ls;
 
+#ifdef ENABLE_OBJECT_COUNTS
+static int measure_all_enabled;
+static uptr count_root_bytes;
+# define COUNTING_OR(e) 1
+#else
+# define COUNTING_OR(e) e
+#endif
+
 #ifdef ENABLE_MEASURE
 static uptr measure_total; /* updated by `measure` */
-static IGEN measure_generation;
+static IGEN min_measure_generation, max_measure_generation;
 static ptr *measure_stack_start, *measure_stack, *measure_stack_limit;
-static seginfo *measured_mask_chain, *nonkey_mask_chain;
+static ptr measured_seginfos;
 static ptr pending_measure_ephemerons;
 #endif
 
@@ -207,7 +222,7 @@ static int flonum_is_forwarded_p(ptr p, seginfo *si) {
 
 #define relocate_help(ppp, pp) {\
   seginfo *SI; \
-  if (!IMMEDIATE(pp) && (SI = MaybeSegInfo(ptr_get_segment(pp))) != NULL && SI->space & space_old)\
+  if (!IMMEDIATE(pp) && (SI = MaybeSegInfo(ptr_get_segment(pp))) != NULL && COUNTING_OR(SI->space & space_old)) \
     relocate_help_help(ppp, pp, SI)\
 }
 
@@ -219,6 +234,10 @@ static int flonum_is_forwarded_p(ptr p, seginfo *si) {
 }
 
 #define locked(si, p) (si->locked_mask && (si->locked_mask[segment_bitmap_byte(p)] & segment_bitmap_bit(p)))
+
+#ifdef ENABLE_OBJECT_COUNTS
+# define is_counting_root(si, p) (si->counting_mask && (si->counting_mask[segment_bitmap_byte(p)] & segment_bitmap_bit(p)))
+#endif
 
 FORCEINLINE void check_triggers(seginfo *si) {
   /* Registering ephemerons and guardians to recheck at the
@@ -330,11 +349,21 @@ static ptr copy_stack(old, length, clength) ptr old; iptr *length, clength; {
   } \
 }
 
-ptr GCENTRY(ptr tc, IGEN mcg, IGEN tg, ptr count_roots) {
+typedef struct count_root_t {
+  ptr p;
+  IBOOL weak;
+} count_root_t;
+
+ptr GCENTRY(ptr tc, IGEN mcg, IGEN tg, ptr count_roots_ls) {
     IGEN g; ISPC s;
     seginfo *oldspacesegments, *si, *nextsi;
     ptr ls, younger_locked_objects;
     bucket_pointer_list *buckets_to_rebuild;
+#ifdef ENABLE_OBJECT_COUNTS
+    ptr count_roots_counts = Snil;
+    iptr count_roots_len;
+    count_root_t *count_roots;
+#endif
 
    /* flush instruction cache: effectively clear_code_mod but safer */
     for (ls = S_threads; ls != Snil; ls = Scdr(ls)) {
@@ -418,6 +447,39 @@ ptr GCENTRY(ptr tc, IGEN mcg, IGEN tg, ptr count_roots) {
 
    SET_BACKREFERENCE(Sfalse) /* #f => root or locked */
 
+#ifdef ENABLE_OBJECT_COUNTS
+  /* set flag on count_roots objects so they get copied to space_count_root */
+     if (count_roots_ls != Sfalse) {
+       iptr i;
+
+       count_roots_len = list_length(count_roots_ls);
+       find_room(space_data, 0, typemod, ptr_align(count_roots_len*sizeof(count_root_t)), count_roots);
+
+       for (ls = count_roots_ls, i = 0; ls != Snil; ls = Scdr(ls), i++) {
+         ptr p = Scar(ls);
+         if (IMMEDIATE(p)) {
+           count_roots[i].p = p;
+           count_roots[i].weak = 0;
+         } else {
+           seginfo *ls_si = SegInfo(ptr_get_segment(ls));
+           seginfo *si = SegInfo(ptr_get_segment(p));
+
+           if (!si->counting_mask)
+             init_counting_mask(si);
+
+           si->counting_mask[segment_bitmap_byte(p)] |= segment_bitmap_bit(p);
+
+           count_roots[i].p = p;
+           count_roots[i].weak = (((ls_si->space & ~(space_old|space_locked)) == space_weakpair)
+                                  || ((ls_si->space & ~(space_old|space_locked)) == space_ephemeron));
+         }
+       }
+     } else {
+       count_roots_len = 0;
+       count_roots = NULL;
+     }
+#endif
+     
     /* pre-collection handling of locked objects. */
 
      /* set up locked-object masks */
@@ -429,6 +491,8 @@ ptr GCENTRY(ptr tc, IGEN mcg, IGEN tg, ptr count_roots) {
 
          ls = copy_list(si->locked_objects, tg);
          si->locked_objects = ls;
+         si->unlocked_objects = Snil;
+         
          while (ls != Snil) {
            ptr p = Scar(ls);
            uptr byte = segment_bitmap_byte(p);
@@ -442,13 +506,78 @@ ptr GCENTRY(ptr tc, IGEN mcg, IGEN tg, ptr count_roots) {
        }
       }
 
+#ifdef ENABLE_OBJECT_COUNTS
+  /* sweep count_roots in order and accumulate counts */
+     if (count_roots_len > 0) {
+       ptr prev = NULL; uptr prev_total = 0;
+       iptr i;
+
+# ifdef ENABLE_MEASURE
+       init_measure(tg+1, static_generation);
+# endif
+
+       for (i = 0; i < count_roots_len; i++) {
+         uptr total;
+         ptr p = count_roots[i].p;
+         if (IMMEDIATE(p)) {
+           /* nothing to do */
+         } else {
+           seginfo *si = SegInfo(ptr_get_segment(p));
+
+           si->counting_mask[segment_bitmap_byte(p)] -= segment_bitmap_bit(p);
+
+           if (!(si->space & space_old) || FORWARDEDP(p, si) || locked(si, p)
+               || !count_roots[i].weak) {
+             /* reached or older; sweep transitively */
+             relocate(&p)
+             sweep(tc, p);
+             ADD_BACKREFERENCE(p)
+             sweep_generation(tc, tg);
+# ifdef ENABLE_MEASURE
+             while (flush_measure_stack()) {
+               sweep_generation(tc, tg);
+             }
+# endif
+
+             /* now count this object's size, if we have deferred it before */
+             si = SegInfo(ptr_get_segment(p));
+             if (si->space == space_count_root)
+               count_root_bytes -= size_object(p);
+           }
+         }
+
+         total = total_size_so_far();
+         p = S_cons_in(space_new, 0, FIX(total-prev_total), Snil);
+         if (prev != NULL)
+           Scdr(prev) = p;
+         else
+           count_roots_counts = p;
+         prev = p;
+         prev_total = total;
+       }
+
+# ifdef ENABLE_MEASURE
+       finish_measure();
+# endif
+
+       /* clear `counting_mask`s */
+       for (i = 0; i < count_roots_len; i++) {
+         ptr p = count_roots[i].p;
+         if (!IMMEDIATE(p)) {
+           seginfo *si = SegInfo(ptr_get_segment(p));
+           si->counting_mask = NULL;
+         }
+       }
+     }
+#endif
+
    /* sweep younger locked objects */
      for (ls = younger_locked_objects; ls != Snil; ls = Scdr(ls)) {
        ptr x = Scar(ls);
        sweep(tc, x);
        ADD_BACKREFERENCE(x)
       }
-   
+
   /* sweep non-oldspace threads, since any thread may have an active stack */
     for (ls = S_threads; ls != Snil; ls = Scdr(ls)) {
       ptr thread;
@@ -938,10 +1067,14 @@ ptr GCENTRY(ptr tc, IGEN mcg, IGEN tg, ptr count_roots) {
     /* tell profile_release_counters to look for bwp'd counters at least through tg */
     if (S_G.prcgeneration < tg) S_G.prcgeneration = tg;
 
-    if (count_roots == Sfalse)
-      return Svoid;
-    else
+    if (count_roots_ls != Sfalse) {
+#ifdef ENABLE_OBJECT_COUNTS
+      return count_roots_counts;
+#else
       return Snil;
+#endif
+    } else
+      return Svoid;
 }
 
 #define sweep_space(s, body)\
@@ -1066,6 +1199,8 @@ static void sweep_generation(tc, g) ptr tc; IGEN g; {
         pp = (ptr *)((uptr)pp + size_object(p));
     })
 
+    /* don't sweep from space_count_root */
+
     /* Waiting until sweeping doesn't trigger a change reduces the
        chance that an ephemeron must be reigistered as a
        segment-specific trigger or gets triggered for recheck, but
@@ -1086,7 +1221,7 @@ static iptr sweep_typed_object(tc, p) ptr tc; ptr p; {
     return size_thread;
   } else {
     /* We get here only if backreference mode pushed other typed objects into
-       a typed space */
+       a typed space or if an object is a counting root */
     sweep(tc, p);
     return size_object(p);
   }
@@ -1255,7 +1390,9 @@ static void sweep_dirty(void) {
                       backp = (ptr)(((uptr)backp) - bytes_per_segment);
                     }
                   }
-                } else if ((s == space_impure) || (s == space_impure_typed_object) || (s == space_closure)) {
+                } else if ((s == space_impure)
+                           || (s == space_impure_typed_object)  || (s == space_count_root)
+                           || (s == space_closure)) {
                   while (pp < ppend && *pp != forward_marker) {
                     /* handle two pointers at a time */
                     relocate_dirty(pp,tg,youngest)
@@ -1696,44 +1833,71 @@ static void clear_trigger_ephemerons() {
   }
 }
 
+#ifdef ENABLE_OBJECT_COUNTS
+static uptr total_size_so_far() {
+  IGEN g;
+  int i;
+  uptr total = 0;
+
+  for (g = 0; g <= static_generation; g += 1) {
+    for (i = 0; i < countof_types; i += 1) {
+      uptr bytes;
+      bytes = S_G.bytesof[g][i];
+      if (bytes == 0) bytes = S_G.countof[g][i] * S_G.countof_size[i];
+      total += bytes;
+    }
+  }
+
+  return total - count_root_bytes;
+}
+#endif
+
 /* **************************************** */
 
 #ifdef ENABLE_MEASURE
 
+static void init_measure(IGEN min_gen, IGEN max_gen) {
+  uptr init_stack_len = 1024;
+
+  min_measure_generation = min_gen;
+  max_measure_generation = max_gen;
+  
+  find_room(space_data, 0, typemod, init_stack_len, measure_stack_start);
+  measure_stack = (ptr *)measure_stack_start;
+  measure_stack_limit = (ptr *)((uptr)measure_stack_start + init_stack_len);
+
+  measured_seginfos = Snil;
+
+  measure_all_enabled = 1;
+}
+
+static void finish_measure() {
+  ptr ls;
+
+  for (ls = measured_seginfos; ls != Snil; ls = Scdr(ls)) {
+    seginfo *si = (seginfo *)Scar(ls);
+    si->measured_mask = NULL;
+    si->trigger_ephemerons = NULL;
+  }
+
+  measure_all_enabled = 0;
+}
+
+static void init_counting_mask(seginfo *si) {
+  find_room(space_data, 0, typemod, ptr_align(segment_bitmap_bytes), si->counting_mask);
+  memset(si->counting_mask, 0, segment_bitmap_bytes);
+}
+
+static void init_measure_mask(seginfo *si) {
+  find_room(space_data, 0, typemod, ptr_align(segment_bitmap_bytes), si->measured_mask);
+  memset(si->measured_mask, 0, segment_bitmap_bytes);
+  
+  measured_seginfos = S_cons_in(space_new, 0, (ptr)si, measured_seginfos);
+}
+
 #define measure_unreached(si, p) \
   (!si->measured_mask \
    || !(si->measured_mask[segment_bitmap_byte(p)] & segment_bitmap_bit(p)))
-
-#define measured_mask_bytes segment_bitmap_bytes
-
-static void init_measure_mask(seginfo *si) {
-  find_room(space_data, 0, typemod, ptr_align(measured_mask_bytes+ptr_bytes), si->measured_mask);
-  memset(si->measured_mask, 0, measured_mask_bytes);
-  *(ptr *)(si->measured_mask + measured_mask_bytes) = measured_mask_chain;
-  measured_mask_chain = si;
-}
-
-static void init_nonkey_mask(seginfo *si) {
-  find_room(space_data, 0, typemod, ptr_align(measured_mask_bytes+ptr_bytes), si->nonkey_mask);
-  memset(si->nonkey_mask, 0, measured_mask_bytes);
-  *(ptr *)(si->nonkey_mask + measured_mask_bytes) = nonkey_mask_chain;
-  nonkey_mask_chain = si;
-}
-
-static void clear_measured_masks()
-{
-  while (measured_mask_chain) {
-    octet *mask = measured_mask_chain->measured_mask;
-    measured_mask_chain->measured_mask = NULL;
-    measured_mask_chain->trigger_ephemerons = NULL;
-    measured_mask_chain = *(seginfo **)(mask + measured_mask_bytes);
-  }
-  while (nonkey_mask_chain) {
-    octet *mask = nonkey_mask_chain->nonkey_mask;
-    nonkey_mask_chain->nonkey_mask = NULL;
-    nonkey_mask_chain = *(seginfo **)(mask + measured_mask_bytes);
-  }
-}
 
 #define measure_mask_set(mm, si, p) \
   mm[segment_bitmap_byte(p)] |= segment_bitmap_bit(p)
@@ -1747,9 +1911,18 @@ static void push_measure(ptr p)
   if (!si)
     return;
 
-  if (si->generation > measure_generation)
+  if (si->space & space_old) {
+    /* We must be in a GC--measure fusion, so switch back to GC */
+    relocate(&p)
     return;
-  else {
+  }
+
+  if (si->generation > max_measure_generation)
+    return;
+  else if (si->generation < min_measure_generation) {
+    /* this only happens in fusion mode, too; si must be a new segment */
+    return;
+  } else {
     uptr byte = segment_bitmap_byte(p);
     uptr bit = segment_bitmap_bit(p);
 
@@ -1801,17 +1974,19 @@ static void check_ephemeron_measure(ptr pe) {
   seginfo *si;
 
   p = Scar(pe);
-  if (!IMMEDIATE(p) && (si = MaybeSegInfo(ptr_get_segment(p))) != NULL && (si->generation < measure_generation)) {
-    if (measure_unreached(si, p)
-        || (si->nonkey_mask
-            && (si->nonkey_mask[segment_bitmap_byte(p)] & segment_bitmap_bit(p)))) {
-      /* Not reached, so far; install as trigger */
-      EPHEMERONNEXT(pe) = si->trigger_ephemerons;
-      si->trigger_ephemerons = pe;
-      if (!si->measured_mask)
-        init_measure_mask(si); /* so triggers are cleared at end */
-      return;
-    }
+  if (!IMMEDIATE(p) && (si = MaybeSegInfo(ptr_get_segment(p))) != NULL
+      && (si->generation <= max_measure_generation)
+      && (si->generation >= min_measure_generation)
+      && (!(si->space & space_old) || !FORWARDEDP(p, si))
+      && (measure_unreached(si, p)
+          || (si->counting_mask
+              && (si->counting_mask[segment_bitmap_byte(p)] & segment_bitmap_bit(p))))) {
+    /* Not reached, so far; install as trigger */
+    EPHEMERONNEXT(pe) = si->trigger_ephemerons;
+    si->trigger_ephemerons = pe;
+    if (!si->measured_mask)
+      init_measure_mask(si); /* so triggers are cleared at end */
+    return;
   }
 
   p = Scdr(pe);
@@ -1841,6 +2016,14 @@ void gc_measure_one(ptr p) {
   
   measure(p);
 
+  (void)flush_measure_stack();
+}
+
+IBOOL flush_measure_stack() {
+  if ((measure_stack <= measure_stack_start)
+      && !pending_measure_ephemerons)
+    return 0;
+  
   while (1) {
     while (measure_stack > measure_stack_start)
       measure(*(--measure_stack));
@@ -1849,19 +2032,16 @@ void gc_measure_one(ptr p) {
       break;
     check_pending_measure_ephemerons();
   }
+
+  return 1;
 }
 
 ptr S_count_size_increments(ptr ls, IGEN generation) {
   ptr l, totals = Snil, totals_prev = NULL;
-  uptr init_stack_len = 1024;
 
   tc_mutex_acquire();
 
-  measure_generation = generation;
-  
-  find_room(space_data, 0, typemod, init_stack_len, measure_stack_start);
-  measure_stack = (ptr *)measure_stack_start;
-  measure_stack_limit = (ptr *)((uptr)measure_stack_start + init_stack_len);
+  init_measure(0, generation);
 
   for (l = ls; l != Snil; l = Scdr(l)) {
     ptr p = Scar(l);
@@ -1872,9 +2052,9 @@ ptr S_count_size_increments(ptr ls, IGEN generation) {
         init_measure_mask(si);
       measure_mask_set(si->measured_mask, si, p);
 
-      if (!si->nonkey_mask)
-        init_nonkey_mask(si);
-      measure_mask_set(si->nonkey_mask, si, p);
+      if (!si->counting_mask)
+        init_counting_mask(si);
+      measure_mask_set(si->counting_mask, si, p);
     }
   }
 
@@ -1885,7 +2065,7 @@ ptr S_count_size_increments(ptr ls, IGEN generation) {
 
     if (!IMMEDIATE(p)) {
       seginfo *si = si = SegInfo(ptr_get_segment(p));
-      measure_mask_unset(si->nonkey_mask, si, p);
+      measure_mask_unset(si->counting_mask, si, p);
       gc_measure_one(p);
     }
 
@@ -1897,7 +2077,15 @@ ptr S_count_size_increments(ptr ls, IGEN generation) {
     totals_prev = p;
   }
 
-  clear_measured_masks();
+  for (l = ls; l != Snil; l = Scdr(l)) {
+    ptr p = Scar(l);
+    if (!IMMEDIATE(p)) {
+      seginfo *si = si = SegInfo(ptr_get_segment(p));
+      si->counting_mask = NULL;
+    }
+  }
+
+  finish_measure();
 
   tc_mutex_release();
 
