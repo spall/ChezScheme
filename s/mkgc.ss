@@ -66,7 +66,7 @@
 ;; Primitive actions/declarations, must be used as statements in roughly
 ;; this order (but there are exceptions to the order):
 ;;  - (space <space>) : target for copy; works as a constraint for other modes
-;;  - (vspace <space>) : target for vfasl
+;;  - (vspace <vspace>) : target for vfasl
 ;;  - (size <size> [<scale>]) : size for copy
 ;;  - (trace <field>) : relocate for sweep, copy for copy, recur otherwise
 ;;  - (trace-early <field>) : relocate for sweep or copy, recur otherwise
@@ -86,9 +86,10 @@
 ;; In the above declarations, nonterminals like <space> can be
 ;; an identifier or a Parenthe-C expression. The meaning of a plain
 ;; identifier depends on the nonterminal:
-;;  - <space> : should be a `space-...` from cmacro
-;;  - <size>  : should be a constant from cmacro
-;;  - <field> : accessor from cmacro, implicitly applied to `_` and `_copy_`
+;;  - <space>  : should be a `space-...` from cmacro
+;;  - <vspace> : should be a `vspace_...`
+;;  - <size>   : should be a constant from cmacro
+;;  - <field>  : accessor from cmacro, implicitly applied to `_` and `_copy_`
 
 ;; Parenthe-C is just what it sounds like: C code written in S-expression
 ;; form. Use `(<op> <arg> ...)` as usual, and the generated code transforms
@@ -117,20 +118,27 @@
 ;;      dispatch based on the space of _
 ;;
 ;; Expressions:
-;;  - <id> : a constant from cmacros or a literal with "-" rendered as "_"
-;;  - (<field-or-expr> <arg>) : function call, operation use, or accessor
+;;  - <id> : a constant from cmacros or a C name
+;;  - <literal> : a literal number or string
+;;  - (<field-or-expr> <arg>) : function call, operation use, or field access
+;;  - (<field-or-expr> <arg> <arg2>) : function call, operation use, or array
+;;      field access
 ;;  - (<id-or-expr> <arg> <arg> ...) : function call or operation use
 ;;  - (just <expr>) : same as <expr>, sometimes useful when <expr> is a symbol
 ;;  - (cond [<expr> <expr>] ... [else <expr>])
 ;;  - (case-flag <flag> [on <expr>] [off <expr>]) : static dispatch
 ;;  - (cast <type> <expr>)
 ;;  - (array-ref <expr> <expr>)
-
+;;
 ;; Built-in variables:
 ;;  - _                 : object being copied, swept, etc.
 ;;  - _copy_            : target in copy or vfasl mode, same as _ otherwise
 ;;  - _tf_              : type word
 ;;  - _backreferences?_ : dynamic flag indicating whether backreferences are on
+;;
+;; Stylistically, prefer constants and fields using the hyphenated
+;; names from cmacros instead of the corresponding C name. Use C names
+;; for derived functions, like `size_record_inst` or `FIX`.
 
 (define-trace-root
   (case-type
@@ -153,7 +161,7 @@
                        countof-weakpair)]
      [else
       (space space-impure)
-      (vspace vspace-impure) 
+      (vspace vspace_impure) 
       (try-double-pair trace pair-car
                        trace pair-cdr
                        countof-pair)])]
@@ -210,7 +218,7 @@
               space-impure]
              [else
               space-pure])]))
-       (vspace vspace-closure)
+       (vspace vspace_closure)
        (when-vfasl
         (when (& (code-type code) (<< code-flag-mutable-closure code-flags-offset))
           (vfasl-fail "mutable closure")))
@@ -219,12 +227,12 @@
        (copy-clos-code code)
        (trace-ptrs closure-data len)
        (pad (when (== (& len 1) 0)
-              (set! (CLOSIT _copy_ len) (FIX 0))))
+              (set! (closure-data _copy_ len) (FIX 0))))
        (count countof-closure)])]
    
    [symbol
     (space space-symbol)
-    (vspace vspace-symbol)
+    (vspace vspace_symbol)
     (size size-symbol)
     (trace/define symbol-value val :vfasl-as (FIX (vfasl_symbol_to_index vfi _)))
     (trace-symcode symbol-pvalue val)
@@ -236,7 +244,7 @@
    
    [flonum
     (space space-data)
-    (vspace vspace-data)
+    (vspace vspace_data)
     (size size-flonum)
     (copy-flonum flonum-data)
     (count countof-flonum)
@@ -287,9 +295,9 @@
             [else
              space-impure-record])]))
       (vspace (cond
-                [(is_rtd rtd vfi) vspace-rtd]
-                [(== (record-type-mpm rtd) (FIX 0)) vspace-pure-typed]
-                [else vspace-impure-record]))
+                [(is_rtd rtd vfi) vspace_rtd]
+                [(== (record-type-mpm rtd) (FIX 0)) vspace_pure_typed]
+                [else vspace_impure_record]))
       (vfasl-check-parent-rtd rtd)
       (define len : uptr (UNFIX (record-type-size rtd)))
       (size (size_record_inst len))
@@ -316,13 +324,13 @@
           (cond
            [_backreferences?_ space-impure-typed-object]
            [else space-impure])]))
-      (vspace vspace-impure)
+      (vspace vspace_impure)
       (define len : uptr (Svector_length _))
       (size (size_vector len))
       (copy-type vector-type)
       (trace-ptrs vector-data len)
       (pad (when (== (& len 1) 0)
-             (set! (INITVECTIT _copy_ len) (FIX 0))))
+             (set! (vector-data _copy_ len) (FIX 0))))
       (count countof-vector)]
 
      [stencil-vector
@@ -332,18 +340,18 @@
        (cond
         [_backreferences?_ space-impure-typed-object]
         [else space-impure]))
-      (vspace vspace-impure)
+      (vspace vspace_impure)
       (define len : uptr (Sstencil_vector_length _))
       (size (size_stencil_vector len))
       (copy-type stencil-vector-type)
       (trace-ptrs stencil-vector-data len)
       (pad (when (== (& len 1) 0)
-             (set! (INITSTENVECTIT _copy_ len) (FIX 0))))
+             (set! (stencil-vector-data _copy_ len) (FIX 0))))
       (count countof-stencil-vector)]
 
      [string
       (space space-data)
-      (vspace vspace-data)
+      (vspace vspace_data)
       (define sz : uptr (size_string (Sstring_length _)))
       (size (just sz))
       (copy-bytes string-type sz)
@@ -351,7 +359,7 @@
 
      [fxvector
       (space space-data)
-      (vspace vspace-data)
+      (vspace vspace_data)
       (define sz : uptr (size_fxvector (Sfxvector_length _)))
       (size (just sz))
       (copy-bytes fxvector-type sz)
@@ -359,7 +367,7 @@
 
      [bytevector
       (space space-data)
-      (vspace vspace-data)
+      (vspace vspace_data)
       (define sz : uptr (size_bytevector (Sbytevector_length _)))
       (size (just sz))
       (copy-bytes bytevector-type sz)
@@ -388,7 +396,7 @@
           (cond
             [_backreferences?_ space-impure-typed-object]
             [else space-impure])]))
-      (vspace vspace-impure)
+      (vspace vspace_impure)
       (size size-box)
       (copy-type box-type)
       (trace box-ref)
@@ -396,7 +404,7 @@
 
      [ratnum
       (space space-data)
-      (vspace vspace-impure) ; would be better if we had pure, but there are rare
+      (vspace vspace_impure) ; would be better if we had pure, but these are rare
       (size size-ratnum)
       (copy-type ratnum-type)
       (trace-now ratnum-numerator)
@@ -406,7 +414,7 @@
 
      [exactnum
       (space space-data)
-      (vspace vspace-impure) ; same as for ratnum
+      (vspace vspace_impure) ; same rationale as ratnum
       (size size-exactnum)
       (copy-type exactnum-type)
       (trace-now exactnum-real)
@@ -416,7 +424,7 @@
 
      [inexactnum
       (space space-data)
-      (vspace vspace-data)
+      (vspace vspace_data)
       (size size-inexactnum)
       (copy-type inexactnum-type)
       (copy-flonum* inexactnum-real)
@@ -425,7 +433,7 @@
 
      [bignum
       (space space-data)
-      (vspace vspace-data)
+      (vspace vspace_data)
       (define sz : uptr (size_bignum (BIGLEN _)))
       (size (just sz))
       (copy-bytes bignum-type sz)
@@ -447,7 +455,7 @@
 
      [code
       (space space-code)
-      (vspace vspace-code)
+      (vspace vspace_code)
       (define len : uptr (code-length _)) ; in bytes
       (size (size_code len))
       (copy-type code-type)
@@ -543,6 +551,14 @@
     (do-cdr pair-cdr)
     (count count-pair)]))
 
+(define-trace-macro (add-ephemeron-to-pending)
+  (case-mode
+   [sweep
+    (add_ephemeron_to_pending _)]
+   [measure
+    (add_ephemeron_to_pending_measure _)]
+   [else]))
+
 (define-trace-macro (trace-code-early code)
   (unless-code-relocated
    (case-mode
@@ -579,26 +595,6 @@
        (copy continuation-stack-length)])]
    [else
     (copy continuation-stack-length)]))
-
-(define-trace-macro (unless-code-relocated stmt)
-  (case-flag code-relocated?
-   [on]
-   [off stmt]))
-
-(define-trace-macro (or-assume-continuation e)
-  (case-flag assume-continuation?
-   [on 1]
-   [off e]))
-
-(define-trace-macro (or-vfasl e)
-  (case-mode
-   [vfasl-copy 1]
-   [else e]))
-
-(define-trace-macro (when-vfasl e)
-  (case-mode
-   [(vfasl-copy vfasl-sweep) e]
-   [else]))
 
 (define-trace-macro (trace/define ref val :vfasl-as vfasl-val)
   (case-mode
@@ -653,7 +649,7 @@
     (let* ([num : ptr (case-flag as-dirty?
                        [on (record-type-mpm rtd)]
                        [off (record-type-pm rtd)])]
-           [pp : ptr* (& (RECORDINSTIT _ 0))])
+           [pp : ptr* (& (record-data _ 0))])
       ;; Process cells for which bit in pm is set, and quit when pm == 0
       (cond
         [(Sfixnump num)
@@ -682,12 +678,12 @@
            (case-mode
             [(sweep self-test)
              ;; Bignum pointer mask may need forwarding
-             (trace (RECORDDESCPM rtd))
-             (set! num (RECORDDESCPM rtd))]
+             (trace (record-type-pm rtd))
+             (set! num (record-type-pm rtd))]
             [else])])
          (let* ([index : iptr (- (BIGLEN num) 1)]
                 ;; Ignore bit for already forwarded rtd
-                [mask : bigit (>> (BIGIT num index) 1)]
+                [mask : bigit (>> (bignum-data num index) 1)]
                 [bits : INT (- bigit_bits 1)])
            (while
             :? 1
@@ -701,8 +697,10 @@
              :? (> bits 0))
             (when (== index 0) (break))
             (set! index -= 1)
-            (set! mask (BIGIT num index))
+            (set! mask (bignum-data num index))
             (set! bits bigit_bits)))]))]))
+
+
 
 (define-trace-macro (vfasl-check-parent-rtd rtd)
   (case-mode
@@ -717,13 +715,13 @@
    [(vfasl-sweep)
     ;; Don't need to save fields of base-rtd
     (when (== _ (-> vfi base_rtd))
-      (let* ([pp : ptr* (& (RECORDINSTIT _ 0))]
+      (let* ([pp : ptr* (& (record-data _ 0))]
              [ppend : ptr* (- (cast ptr* (+ (cast uptr pp) (UNFIX (record-type-size rtd)))) 1)])
         (while
          :? (< pp ppend)
          (set! (* pp) Snil)
          (set! pp += 1))
-        (return (size_record_inst (UNFIX (RECORDDESCSIZE rtd))))))
+        (return (size_record_inst (UNFIX (record-type-size rtd))))))
     ;; Relocation of rtd fields was deferred
     (vfasl_relocate vfi (& (record-type _)))]
    [else]))
@@ -733,6 +731,42 @@
    [(vfasl-copy)
     (when (== _ S_G.base_rtd)
       (set! (-> vfi base_rtd) _copy_))]
+   [else]))
+
+(define-trace-macro (count-record rtd)
+  (case-mode
+   [copy
+    (case-flag counts?
+     [on
+      (let* ([c_rtd : ptr (cond
+                            [(== _tf_ _) _copy_]
+                            [else rtd])]
+             [counts : ptr (record-type-counts c_rtd)])
+        (cond
+          [(== counts Sfalse)
+           (let* ([grtd : IGEN (GENERATION c_rtd)])
+             (set! (array-ref (array-ref S_G.countof grtd) countof_rtd_counts) += 1)
+             ;; Allocate counts struct in same generation as rtd. Initialize timestamp & counts.
+             (find_room space_data grtd type_typed_object size_rtd_counts counts)
+             (set! (rtd-counts-type counts) type_rtd_counts)
+             (set! (rtd-counts-timestamp counts) (array-ref S_G.gctimestamp 0))
+             (let* ([g : IGEN 0])
+               (while
+                :? (<= g static_generation)
+                (set! (rtd-counts-data counts g) 0)
+                (set! g += 1)))
+             (set! (record-type-counts c_rtd) counts)
+             (set! (array-ref S_G.rtds_with_counts grtd)
+                   (S_cons_in (cond [(== grtd 0) space_new] [else space_impure]) grtd c_rtd
+                              (array-ref S_G.rtds_with_counts grtd)))
+             (set! (array-ref (array-ref S_G.countof grtd) countof_pair) += 1))]
+          [else
+           (trace-early (just counts))
+           (set! (record-type-counts c_rtd) counts)
+           (when (!= (rtd-counts-timestamp counts) (array-ref S_G.gctimestamp 0))
+             (S_fixup_counts counts))])
+        (set! (rtd-counts-data counts tg) (+ (rtd-counts-data counts tg) 1)))]
+     [off])]
    [else]))
 
 (define-trace-macro (trace-buffer flag port-buffer port-last)
@@ -765,10 +799,10 @@
               (set! (tc-scheme-stack tc) (copy_stack old_stack
                                                      (& (tc-scheme-stack-size tc))
                                                      (+ clength (sizeof ptr))))
-              (set! (SFP tc) (cast ptr (+ (cast uptr (tc-scheme-stack tc)) clength)))
-              (set! (ESP tc) (cast ptr (- (+ (cast uptr (tc-scheme-stack tc))
-                                             (tc-scheme-stack-size tc))
-                                          stack_slop))))))]
+              (set! (tc-sfp tc) (cast ptr (+ (cast uptr (tc-scheme-stack tc)) clength)))
+              (set! (tc-esp tc) (cast ptr (- (+ (cast uptr (tc-scheme-stack tc))
+                                                (tc-scheme-stack-size tc))
+                                             stack_slop))))))]
        [else])
       (set! (tc-stack-cache tc) Snil)
       (trace (tc-cchain tc))
@@ -811,7 +845,7 @@
       (let* ([i : INT 0])
         (while
          :? (< i virtual_register_count)
-         (trace (VIRTREG tc i))
+         (trace (tc-virtual-registers tc i))
          (set! i += 1))))]))
 
 (define-trace-macro (trace-stack base-expr fp-expr ret-expr)
@@ -847,7 +881,7 @@
              :? (!= index 0)
              (set! index -= 1)
              (let* ([bits : INT bigit_bits]
-                    [mask : bigit (BIGIT num index)])
+                    [mask : bigit (bignum-data num index)])
                (while
                 :? (> bits 0)
                 (set! bits -= 1)
@@ -890,17 +924,17 @@
    [(copy vfasl-copy)
     (copy-bytes code-data len)]
    [else
-    (define t : ptr (CODERELOC _))
+    (define t : ptr (code-reloc _))
     (case-mode
      [(sweep vfasl-sweep)
-      (define m : iptr (RELOCSIZE t))
-      (define oldco : ptr (RELOCCODE t))]
+      (define m : iptr (reloc-table-size t))
+      (define oldco : ptr (reloc-table-code t))]
      [else
       (define m : iptr (cond
-                         [t (RELOCSIZE t)]
+                         [t (reloc-table-size t)]
                          [else 0]))
       (define oldco : ptr (cond
-                            [t (RELOCCODE t)]
+                            [t (reloc-table-code t)]
                             [else 0]))])
     (case-mode
      [vfasl-sweep
@@ -913,15 +947,15 @@
     (define n : iptr 0)
     (while
      :? (< n m)
-     (let* ([entry : uptr (RELOCIT t n)]
+     (let* ([entry : uptr (reloc-table-data t n)]
             [item_off : uptr 0]
             [code_off : uptr 0])
        (set! n (+ n 1))
        (cond
          [(RELOC_EXTENDED_FORMAT entry)
-          (set! item_off (RELOCIT t n))
+          (set! item_off (reloc-table-data t n))
           (set! n (+ n 1))
-          (set! code_off (RELOCIT t n))
+          (set! code_off (reloc-table-data t n))
           (set! n (+ n 1))]
          [else
           (set! item_off (RELOC_ITEM_OFFSET entry))
@@ -945,39 +979,51 @@
       (cond
         [(&& (== target_generation static_generation)
              (&& (! S_G.retain_static_relocation)
-                 (== 0 (& (CODETYPE _) (<< code_flag_template code_flags_offset)))))
-         (set! (CODERELOC _) (cast ptr 0))]
+                 (== 0 (& (code-type _) (<< code_flag_template code_flags_offset)))))
+         (set! (code-reloc _) (cast ptr 0))]
         [else
          ;; Don't copy non-oldspace relocation tables, since we may be
          ;; sweeping a locked code object that is older than target_generation.
          ;; Doing so would be a waste of work anyway.
          (when (OLDSPACE t)
            (let* ([oldt : ptr t])
-             (set! n (size_reloc_table (RELOCSIZE oldt)))
+             (set! n (size_reloc_table (reloc-table-size oldt)))
              (count countof-relocation-table (just n) 1 sweep)
              (find_room space_data target_generation typemod n t)
              (memcpy_aligned t oldt n)))
-         (set! (RELOCCODE t) _)
-         (set! (CODERELOC _) t)])
-      (S_record_code_mod tc_in (cast uptr (& (CODEIT _ 0))) (cast uptr (CODELEN _)))]
+         (set! (reloc-table-code t) _)
+         (set! (code-reloc _) t)])
+      (S_record_code_mod tc_in (cast uptr (& (code-data _ 0))) (cast uptr (code-length _)))]
      [vfasl-sweep
       ;; no vfasl_register_pointer, since relink_code can handle it
-      (set! (RELOCCODE t) (cast ptr (ptr_diff _ (-> vfi base_addr))))
-      (set! (CODERELOC _) (cast ptr (ptr_diff t (-> vfi base_addr))))]
+      (set! (reloc-table-code t) (cast ptr (ptr_diff _ (-> vfi base_addr))))
+      (set! (code-reloc _) (cast ptr (ptr_diff t (-> vfi base_addr))))]
      [else])]))
+
+(define-trace-macro (unless-code-relocated stmt)
+  (case-flag code-relocated?
+   [on]
+   [off stmt]))
+
+(define-trace-macro (or-assume-continuation e)
+  (case-flag assume-continuation?
+   [on 1]
+   [off e]))
+
+(define-trace-macro (or-vfasl e)
+  (case-mode
+   [vfasl-copy 1]
+   [else e]))
+
+(define-trace-macro (when-vfasl e)
+  (case-mode
+   [(vfasl-copy vfasl-sweep) e]
+   [else]))
 
 (define-trace-macro (abs-for-vfasl e)
   (case-mode
    [vfasl-sweep reloc_abs]
    [else e]))
-
-(define-trace-macro (add-ephemeron-to-pending)
-  (case-mode
-   [sweep
-    (add_ephemeron_to_pending _)]
-   [measure
-    (add_ephemeron_to_pending_measure _)]
-   [else]))
 
 (define-trace-macro (pad e)
   (case-mode
@@ -989,42 +1035,6 @@
    [(vfasl-copy)
     (set! (array-ref (cast void** (UNTYPE _copy_ type_typed_object)) 3)
           (cast ptr 0))]
-   [else]))
-
-(define-trace-macro (count-record rtd)
-  (case-mode
-   [copy
-    (case-flag counts?
-     [on
-      (let* ([c_rtd : ptr (cond
-                            [(== _tf_ _) _copy_]
-                            [else rtd])]
-             [counts : ptr (record-type-counts c_rtd)])
-        (cond
-          [(== counts Sfalse)
-           (let* ([grtd : IGEN (GENERATION c_rtd)])
-             (set! (array-ref (array-ref S_G.countof grtd) countof_rtd_counts) += 1)
-             ;; Allocate counts struct in same generation as rtd. Initialize timestamp & counts.
-             (find_room space_data grtd type_typed_object size_rtd_counts counts)
-             (set! (rtd-counts-type counts) type_rtd_counts)
-             (set! (rtd-counts-timestamp counts) (array-ref S_G.gctimestamp 0))
-             (let* ([g : IGEN 0])
-               (while
-                :? (<= g static_generation)
-                (set! (RTDCOUNTSIT counts g) 0)
-                (set! g += 1)))
-             (set! (record-type-counts c_rtd) counts)
-             (set! (array-ref S_G.rtds_with_counts grtd)
-                   (S_cons_in (cond [(== grtd 0) space_new] [else space_impure]) grtd c_rtd
-                              (array-ref S_G.rtds_with_counts grtd)))
-             (set! (array-ref (array-ref S_G.countof grtd) countof_pair) += 1))]
-          [else
-           (trace-early (just counts))
-           (set! (record-type-counts c_rtd) counts)
-           (when (!= (rtd-counts-timestamp counts) (array-ref S_G.gctimestamp 0))
-             (S_fixup_counts counts))])
-        (set! (RTDCOUNTSIT counts tg) (+ (RTDCOUNTSIT counts tg) 1)))]
-     [off])]
    [else]))
 
 (define-trace-macro (vfasl-fail what)
@@ -1135,12 +1145,32 @@
 
   (define preserve-flonum-eq? #t)
   
-  ;; A spec is an association list with these possible keys:
+  ;; A config is an association list. Mostly, it determines the
+  ;; generation mode, but it is also used to some degree as an
+  ;; environment-like map to communicate information from one
+  ;; statement to later statements.
+  ;;
+  ;; Some keys:
   ;;   - 'mode [required]
   ;;   - 'maybe-backreferences?
-  ;;   - 'known-space [prunes generated cases]
-  ;;   - 'known-types [prunes generated cases]
+  ;;   - 'known-space [to prune generated cases]
+  ;;   - 'known-types [to prune generated cases]
 
+  (define lookup
+    (case-lambda
+     [(key config default)
+      (let ([a (assq key config)])
+        (if a
+            (cadr a)
+            default))]
+     [(key config)
+      (let ([a (assq key config)])
+        (if a
+            (cadr a)
+            (error 'lookup "not found: ~s" key)))]))
+
+  ;; A sqeuence wraps a list of string and other sequences with
+  ;; formatting information
   (define-record-type seq
     (fields l))
   (define-record-type block-seq
@@ -1148,78 +1178,67 @@
   (define-record-type indent-seq
     (fields pre mid post))
 
-  (define lookup
-    (case-lambda
-     [(key spec default)
-      (let ([a (assq key spec)])
-        (if a
-            (cadr a)
-            default))]
-     [(key spec)
-      (let ([a (assq key spec)])
-        (if a
-            (cadr a)
-            (error 'lookup "not found: ~s" key)))]))
-
+  ;; More convenient constructors for sequences:
   (define (code . l) (make-seq l))
   (define (code-block . l) (make-block-seq l))
   (define (code-indent pre mid post) (make-indent-seq pre mid post))
 
-  (define (generate name spec)
-    (define base-types (prune trace-base-types spec))
-    (define object-types (prune trace-object-types spec))
-    (define mode (lookup 'mode spec))
+  ;; Main C-generation entry point:
+  (define (generate name config)
+    (define base-types (prune trace-base-types config))
+    (define object-types (prune trace-object-types config))
+    (define mode (lookup 'mode config))
     (code
      (format "static ~a ~a(~aptr p~a)"
-             (case (lookup 'mode spec)
+             (case (lookup 'mode config)
                [(copy vfasl-copy) "ptr"]
                [(size vfasl-sweep) "uptr"]
                [(self-test) "IBOOL"]
-               [(sweep) (if (lookup 'as-dirty? spec #f)
+               [(sweep) (if (lookup 'as-dirty? config #f)
                             "IGEN"
                             "void")]
                [else "void"])
              name
-             (case (lookup 'mode spec)
+             (case (lookup 'mode config)
                [(sweep)
-                (if (type-included? 'code spec)
+                (if (type-included? 'code config)
                     "ptr tc_in, "
                     "")]
                [(vfasl-copy vfasl-sweep)
                 "vfasl_info *vfi, "]
                [else ""])
-             (case (lookup 'mode spec)
+             (case (lookup 'mode config)
                [(copy vfasl-copy) ", seginfo *si"]
                [(sweep)
-                (if (lookup 'as-dirty? spec #f)
+                (if (lookup 'as-dirty? config #f)
                     ", IGEN tg, IGEN youngest"
                     "")]
                [else ""]))
      (let ([body
             (lambda ()
-              (let ([spec (cons (list 'used (make-eq-hashtable)) spec)])
+              (let ([config (cons (list 'used (make-eq-hashtable)) config)])
                 (cond
                   [(null? base-types)
                    (cond
                      [(null? object-types)
                       (error 'generate "no relevant types")]
                      [(null? (cdr object-types))
-                      (code-block (generate-type-code (cdar object-types)
-                                                      (cons `(type ,(caar object-types)) spec)))]
+                      (code-block (statements (cdar object-types)
+                                              (cons `(type ,(caar object-types)) config)))]
                      [else
-                      (generate-object-dispatch object-types (cons '(basetype typed-object) spec))])]
+                      (generate-typed-object-dispatch object-types (cons '(basetype typed-object) config))])]
                   [else
                    (cond
                      [(null? object-types)
-                      (generate-type-dispatch base-types spec)]
+                      (generate-type-dispatch base-types config)]
                      [else
                       (generate-type-dispatch 
                        (cons (cons 'typed-object
-                                   (generate-object-dispatch object-types (cons '(basetype typed-object)
-                                                                                spec)))
+                                   (generate-typed-object-dispatch object-types (cons '(basetype typed-object)
+                                                                                      config)))
                              base-types)
-                       spec)])])))])
-       (case (lookup 'mode spec)
+                       config)])])))])
+       (case (lookup 'mode config)
          [(copy)
           (code-block
            "if (locked(p)) return p;"
@@ -1231,17 +1250,17 @@
             (body)
             "FWDMARKER(p) = forward_marker;"
             "FWDADDRESS(p) = new_p;"
-            (and (lookup 'maybe-backreferences? spec #f)
+            (and (lookup 'maybe-backreferences? config #f)
                  "ADD_BACKREFERENCE(p)")
             "return new_p;"))]
          [(sweep)
           (code-block
-           (and (lookup 'maybe-backreferences? spec #f)
+           (and (lookup 'maybe-backreferences? config #f)
                 "PUSH_BACKREFERENCE(p)")
            (body)
-           (and (lookup 'maybe-backreferences? spec #f)
+           (and (lookup 'maybe-backreferences? config #f)
                 "POP_BACKREFERENCE()")
-           (and (lookup 'as-dirty? spec #f)
+           (and (lookup 'as-dirty? config #f)
                 "return youngest;"))]
          [(measure)
           (body)]
@@ -1263,7 +1282,7 @@
          [else
           (body)]))))
 
-  (define (generate-type-dispatch l spec)
+  (define (generate-type-dispatch l config)
     (let ([multi? (and (pair? l) (pair? (cdr l)))])
       (code-block
        (and multi? "ITYPE t = TYPEBITS(p);")
@@ -1273,19 +1292,19 @@
             (and multi?
                  (code "else"
                        (code-block
-                        (format "S_error_abort(\"~a: illegal type\");" (lookup 'mode spec)))))]
+                        (format "S_error_abort(\"~a: illegal type\");" (lookup 'mode config)))))]
            [else
             (code
              (and multi?
-                  (format "~aif (t == type_~a)" (if else? "else " "") (dehyphen (caar l))))
+                  (format "~aif (t == ~a)" (if else? "else " "") (as-c 'type (caar l))))
              (let ([c (cdar l)])
                (if (block-seq? c)
                    c
-                   (code-block (generate-type-code c (cons (list 'basetype (caar l))
-                                                           spec)))))
+                   (code-block (statements c (cons (list 'basetype (caar l))
+                                                           config)))))
              (loop (cdr l) #t))])))))
 
-  (define (generate-object-dispatch l spec)
+  (define (generate-typed-object-dispatch l config)
     (code-block
      "ptr tf = TYPEFIELD(p);"
      (let loop ([l l] [else? #f])
@@ -1293,37 +1312,38 @@
          [(null? l)
           (code "else"
                 (code-block
-                 (format "S_error_abort(\"~a: illegal typed object type\");" (lookup 'mode spec))))]
+                 (format "S_error_abort(\"~a: illegal typed object type\");" (lookup 'mode config))))]
          [else
           (let* ([ty (caar l)]
                  [mask (lookup-constant (string->symbol (format "mask-~a" ty)))]
                  [type-constant? (eqv? mask (constant byte-constant-mask))])
             (code (format "~aif (~a)" (if else? "else " "")
                           (if type-constant?
-                              (format "(iptr)tf == type_~a" (dehyphen ty))
-                              (format "TYPEP(tf, mask_~a, type_~a)" (dehyphen ty) (dehyphen ty))))
-                  (code-block (generate-type-code (cdar l) (cons* (list 'tf "tf")
-                                                                  (list 'type ty)
-                                                                  (if type-constant?
-                                                                      (cons `(type-constant ,(format "type_~a" (dehyphen ty)))
-                                                                            spec)
-                                                                      spec))))
+                              (format "(iptr)tf == ~a" (as-c 'type ty))
+                              (format "TYPEP(tf, ~a, ~a)" (as-c 'mask ty) (as-c 'type ty))))
+                  (code-block (statements (cdar l) (cons* (list 'tf "tf")
+                                                          (list 'type ty)
+                                                          (if type-constant?
+                                                              (cons `(type-constant ,(as-c 'type ty))
+                                                                    config)
+                                                              config))))
                   (loop (cdr l) #t)))]))))
 
-  (define (generate-type-code l spec)
+  ;; list of S-expressions -> code sequence
+  (define (statements l config)
     (cond
       [(null? l) (code)]
       [else
        (let ([a (car l)])
          (match a
            [`(case-mode . ,all-clauses)
-            (let ([body (find-matching-mode (lookup 'mode spec) all-clauses)])
-              (generate-type-code (append body (cdr l)) spec))]
+            (let ([body (find-matching-mode (lookup 'mode config) all-clauses)])
+              (statements (append body (cdr l)) config))]
            [`(case-space . ,all-clauses)
             (code
              (code-block
               (format "ISPC p_at_spc = ~a;"
-                      (case (lookup 'mode spec)
+                      (case (lookup 'mode config)
                         [(copy vfasl-copy) "si->space"]
                         [else "SPACE(p) & ~(space_locked | space_old)"]))
               (let loop ([all-clauses all-clauses] [else? #f])
@@ -1331,177 +1351,177 @@
                   [`([else . ,body])
                    (code
                     "else"
-                    (code-block (generate-type-code body spec)))]
+                    (code-block (statements body config)))]
                   [`([,spc . ,body] . ,rest)
                    (code
                     (format "~aif (p_at_spc == ~a)"
                             (if else? "else " "")
-                            (case (lookup 'mode spec)
-                              [(copy) (format "(~a | space_old)" (dehyphen spc))]
-                              [else (dehyphen spc)]))
-                    (code-block (generate-type-code body spec))
+                            (case (lookup 'mode config)
+                              [(copy) (format "(~a | space_old)" (as-c spc))]
+                              [else (as-c spc)]))
+                    (code-block (statements body config))
                     (loop rest #t))])))
-             (generate-type-code (cdr l) spec))]
+             (statements (cdr l) config))]
            [`(case-flag ,flag
-              [on . ,on]
-              [off . ,off])
-            (let ([body (if (lookup flag spec #f)
+                        [on . ,on]
+                        [off . ,off])
+            (let ([body (if (lookup flag config #f)
                             on
                             off)])
-              (generate-type-code (append body (cdr l)) spec))]
+              (statements (append body (cdr l)) config))]
            [`(trace-early-rtd ,field)
-            (code (case (and (not (lookup 'only-dirty? spec #f))
-                             (not (lookup 'rtd-relocated? spec #f))
-                             (lookup 'mode spec))
+            (code (case (and (not (lookup 'only-dirty? config #f))
+                             (not (lookup 'rtd-relocated? config #f))
+                             (lookup 'mode config))
                     [(copy sweep)
                      (code
                       "/* Relocate to make sure we aren't using an oldspace descriptor"
                       "   that has been overwritten by a forwarding marker, but don't loop"
                       "   on tag-reflexive base descriptor */"
                       (format "if (p != ~a)"
-                              (lookup 'tf spec (format "TYPEFIELD(p)")))
+                              (lookup 'tf config (format "TYPEFIELD(p)")))
                       (code-block
-                       (generate-type-code `((trace-early ,field)) spec)))]
+                       (statements `((trace-early ,field)) config)))]
                     [(measure)
-                     (generate-type-code `((trace-early ,field)) spec)]
+                     (statements `((trace-early ,field)) config)]
                     [else #f])
-                  (generate-type-code (cdr l) (cons `(copy-extra-rtd ,field) spec)))]
+                  (statements (cdr l) (cons `(copy-extra-rtd ,field) config)))]
            [`(trace ,field)
-            (code (trace-statement field spec #f)
-                  (generate-type-code (cdr l) spec))]
+            (code (trace-statement field config #f)
+                  (statements (cdr l) config))]
            [`(trace-early ,field)
-            (code (trace-statement field spec #t)
-                  (generate-type-code (cdr l) (if (symbol? field)
-                                                  (cons `(copy-extra ,field) spec)
-                                                  spec)))]
+            (code (trace-statement field config #t)
+                  (statements (cdr l) (if (symbol? field)
+                                          (cons `(copy-extra ,field) config)
+                                          config)))]
            [`(trace-now ,field)
             (code
-             (case (lookup 'mode spec)
+             (case (lookup 'mode config)
                [(copy)
                 (code-block
-                 (format "ptr tmp_p = ~a;" (field-expression field spec "p" #f))
-                 (relocate-statement "tmp_p" spec)
-                 (format "~a = tmp_p;" (field-expression field spec "new_p" #f)))]
+                 (format "ptr tmp_p = ~a;" (field-expression field config "p" #f))
+                 (relocate-statement "tmp_p" config)
+                 (format "~a = tmp_p;" (field-expression field config "new_p" #f)))]
                [(self-test) #f]
                [(measure vfasl-copy vfasl-sweep)
-                (generate-type-code (list `(trace ,field)) spec)]
+                (statements (list `(trace ,field)) config)]
                [else
-                (trace-statement field spec #f)])
-             (generate-type-code (cdr l) spec))]
+                (trace-statement field config #f)])
+             (statements (cdr l) config))]
            [`(copy ,field)
-            (code (copy-statement field spec)
-                  (generate-type-code (cdr l) spec))]
+            (code (copy-statement field config)
+                  (statements (cdr l) config))]
            [`(copy-flonum ,field)
             (cond
               [(and preserve-flonum-eq?
-                    (eq? 'copy (lookup 'mode spec)))
-               (code (copy-statement field spec)
+                    (eq? 'copy (lookup 'mode config)))
+               (code (copy-statement field config)
                      "flonum_set_forwarded(p, si);"
                      "FLONUM_FWDADDRESS(p) = new_p;"
-                     (generate-type-code (cdr l) spec))]
+                     (statements (cdr l) config))]
               [else
-               (generate-type-code (cons `(copy ,field) (cdr l)) spec)])]
+               (statements (cons `(copy ,field) (cdr l)) config)])]
            [`(copy-flonum* ,field)
             (cond
               [preserve-flonum-eq?
-               (case (lookup 'mode spec)
+               (case (lookup 'mode config)
                  [(copy)
                   (code (code-block
-                         (format "ptr tmp_p = TYPE(&~a, type_flonum);" (field-expression field spec "p" #t))
+                         (format "ptr tmp_p = TYPE(&~a, type_flonum);" (field-expression field config "p" #t))
                          "if (flonum_is_forwarded_p(tmp_p, si))"
                          (format "  ~a = FLODAT(FLONUM_FWDADDRESS(tmp_p));"
-                                 (field-expression field spec "new_p" #f))
+                                 (field-expression field config "new_p" #f))
                          "else"
                          (format "  ~a = ~a;"
-                                 (field-expression field spec "new_p" #f)
-                                 (field-expression field spec "p" #f)))
-                        (generate-type-code (cdr l) spec))]
+                                 (field-expression field config "new_p" #f)
+                                 (field-expression field config "p" #f)))
+                        (statements (cdr l) config))]
                  [(vfasl-copy)
-                  (generate-type-code (cons `(copy ,field) (cdr l)) spec)]
-                 [else (generate-type-code (cdr l) spec)])]
+                  (statements (cons `(copy ,field) (cdr l)) config)]
+                 [else (statements (cdr l) config)])]
               [else
-               (generate-type-code (cons `(copy ,field) (cdr l)) spec)])]
+               (statements (cons `(copy ,field) (cdr l)) config)])]
            [`(copy-bytes ,offset ,len)
-            (code (case (lookup 'mode spec)
+            (code (case (lookup 'mode config)
                     [(copy vfasl-copy)
                      (format "memcpy_aligned(&~a, &~a, ~a);"
-                             (field-expression offset spec "new_p" #t)
-                             (field-expression offset spec "p" #t)
-                             (expression len spec))]
+                             (field-expression offset config "new_p" #t)
+                             (field-expression offset config "p" #t)
+                             (expression len config))]
                     [else #f])
-                  (generate-type-code (cdr l) spec))]
+                  (statements (cdr l) config))]
            [`(copy-type ,field)
-            (case (lookup 'mode spec)
+            (case (lookup 'mode config)
               [(copy vfasl-copy)
                (code
                 (format "~a = ~a;"
-                        (field-expression field spec "new_p" #f)
-                        (or (lookup 'type-constant spec #f)
+                        (field-expression field config "new_p" #f)
+                        (or (lookup 'type-constant config #f)
                             "(uptr)tf"))
-                (generate-type-code (cdr l) spec))]
+                (statements (cdr l) config))]
               [else
-               (generate-type-code (cons `(copy ,field) (cdr l)) spec)])]
+               (statements (cons `(copy ,field) (cdr l)) config)])]
            [`(trace-ptrs ,offset ,len)
-            (case (lookup 'mode spec)
+            (case (lookup 'mode config)
               [(copy vfasl-copy)
-               (generate-type-code (cons `(copy-bytes ,offset (* ptr_bytes ,len))
-                                         (cdr l))
-                                   spec)]
+               (statements (cons `(copy-bytes ,offset (* ptr_bytes ,len))
+                                 (cdr l))
+                           config)]
               [(sweep measure vfasl-sweep)
                (code
                 (loop-over-pointers
-                 (field-expression offset spec "p" #t)
+                 (field-expression offset config "p" #t)
                  len
-                 (trace-statement `(array-ref p_p idx) spec #f)
-                 spec))]
+                 (trace-statement `(array-ref p_p idx) config #f)
+                 config))]
               [(self-test)
                (code
-                (loop-over-pointers (field-expression offset spec "p" #t)
+                (loop-over-pointers (field-expression offset config "p" #t)
                                     len
                                     (code "if (p_p[idx] == p) return 1;")
-                                    spec)
-                (generate-type-code (cdr l) spec))]
-              [else (generate-type-code (cdr l) spec)])]
+                                    config)
+                (statements (cdr l) config))]
+              [else (statements (cdr l) config)])]
            [`(count ,counter)
-            (code (count-statement counter #f 1 'copy spec)
-                  (generate-type-code (cdr l) spec))]
+            (code (count-statement counter #f 1 'copy config)
+                  (statements (cdr l) config))]
            [`(count ,counter ,size)
-            (generate-type-code (cons `(count ,counter ,size 1 copy) (cdr l)) spec)]
+            (statements (cons `(count ,counter ,size 1 copy) (cdr l)) config)]
            [`(count ,counter ,size ,scale)
-            (generate-type-code (cons `(count ,counter ,size ,scale copy) (cdr l)) spec)]
+            (statements (cons `(count ,counter ,size ,scale copy) (cdr l)) config)]
            [`(count ,counter ,size ,scale ,mode)
             (code (count-statement counter size scale mode
                                    (cons `(constant-size? ,(symbol? size))
-                                         spec))
-                  (generate-type-code (cdr l) spec))]
+                                         config))
+                  (statements (cdr l) config))]
            [`(space ,s)
-            (case (lookup 'mode spec)
+            (case (lookup 'mode config)
               [(copy)
                (code (code-indent "ISPC p_spc = "
-                                  (expression s spec #f #t)
+                                  (expression s config #f #t)
                                   ";")
-                     (generate-type-code (cdr l) (cons '(space-ready? #t) spec)))]
-              [else (generate-type-code (cdr l) spec)])]
+                     (statements (cdr l) (cons '(space-ready? #t) config)))]
+              [else (statements (cdr l) config)])]
            [`(vspace ,s)
-            (case (lookup 'mode spec)
+            (case (lookup 'mode config)
               [(vfasl-copy)
                (cond
                  [(not s) (code)]
                  [else
                   (code (code-indent "int p_vspc = "
-                                     (expression s spec #f #t)
+                                     (expression s config #f #t)
                                      ";")
-                        (generate-type-code (cdr l) (cons '(vspace-ready? #t) spec)))])]
+                        (statements (cdr l) (cons '(vspace-ready? #t) config)))])]
               [(vfasl-sweep)
                (cond
                  [(not s) (code)]
-                 [else (generate-type-code (cdr l) spec)])]
-              [else (generate-type-code (cdr l) spec)])]
+                 [else (statements (cdr l) config)])]
+              [else (statements (cdr l) config)])]
            [`(size ,sz)
-            (generate-type-code (cons `(size ,sz ,1) (cdr l)) spec)]
+            (statements (cons `(size ,sz ,1) (cdr l)) config)]
            [`(size ,sz ,scale)
-            (let* ([mode (lookup 'mode spec)]
-                   [mode (if (lookup 'return-size? spec #f)
+            (let* ([mode (lookup 'mode config)]
+                   [mode (if (lookup 'return-size? config #f)
                              (case mode
                                [(sweep) 'sweep+size]
                                [else mode])
@@ -1509,7 +1529,7 @@
               (code-block
                (case mode
                  [(copy sweep+size size measure vfasl-copy vfasl-sweep)
-                  (format "uptr p_sz = ~a;" (let ([s (size-expression sz spec)])
+                  (format "uptr p_sz = ~a;" (let ([s (size-expression sz config)])
                                               (if (= scale 1)
                                                   s
                                                   (format "~a * (~a)" scale s))))]
@@ -1517,65 +1537,65 @@
                (case mode
                  [(copy vfasl-copy)
                   (case mode
-                    [(copy) (unless (lookup 'space-ready? spec #f)
+                    [(copy) (unless (lookup 'space-ready? config #f)
                               (error 'generate "size before space"))]
-                    [(vfasl-copy) (unless (lookup 'vspace-ready? spec #f)
+                    [(vfasl-copy) (unless (lookup 'vspace-ready? config #f)
                                     (error 'generate "size before vspace for ~a/~a"
-                                           (lookup 'basetype spec)
-                                           (lookup 'type spec #f)))])
-                  (code (format "~a, type_~a, p_sz, new_p);"
+                                           (lookup 'basetype config)
+                                           (lookup 'type config #f)))])
+                  (code (format "~a, ~a, p_sz, new_p);"
                                 (case mode
                                   [(copy) "find_room(p_spc, tg"]
                                   [(vfasl-copy) "FIND_ROOM(vfi, p_vspc"])
-                                (dehyphen (lookup 'basetype spec)))
-                        (generate-type-code (let ([extra (lookup 'copy-extra spec #f)])
-                                              (if extra
-                                                  (cons `(copy ,extra) (cdr l))
-                                                  (let* ([mode (lookup 'mode spec)]
-                                                         [extra (and (memq mode '(copy vfasl-copy))
-                                                                     (lookup 'copy-extra-rtd spec #f))])
-                                                    (if extra
-                                                        (cons `(set! (,extra _copy_)
-                                                                     ,(case mode
-                                                                        [(copy)
-                                                                         `(cond
-                                                                            [(== tf _) _copy_]
-                                                                            [else rtd])]
-                                                                        [else 'rtd]))
-                                                              (cdr l))
-                                                        (cdr l)))))
-                                            (cons '(copy-ready? #t)
-                                                  (if (symbol? sz)
-                                                      (cons '(constant-size? #t)
-                                                            spec)
-                                                      spec))))]
+                                (as-c 'type (lookup 'basetype config)))
+                        (statements (let ([extra (lookup 'copy-extra config #f)])
+                                      (if extra
+                                          (cons `(copy ,extra) (cdr l))
+                                          (let* ([mode (lookup 'mode config)]
+                                                 [extra (and (memq mode '(copy vfasl-copy))
+                                                             (lookup 'copy-extra-rtd config #f))])
+                                            (if extra
+                                                (cons `(set! (,extra _copy_)
+                                                             ,(case mode
+                                                                [(copy)
+                                                                 `(cond
+                                                                    [(== tf _) _copy_]
+                                                                    [else rtd])]
+                                                                [else 'rtd]))
+                                                      (cdr l))
+                                                (cdr l)))))
+                                    (cons '(copy-ready? #t)
+                                          (if (symbol? sz)
+                                              (cons '(constant-size? #t)
+                                                    config)
+                                              config))))]
                  [(size)
                   (code "return p_sz;")]
                  [(vfasl-sweep)
                   (code "result_sz = p_sz;"
-                        (generate-type-code (cdr l) spec))]
+                        (statements (cdr l) config))]
                  [(measure)
                   (code "measure_total += p_sz;"
-                        (generate-type-code (cdr l) spec))]
-                 [else (generate-type-code (cdr l) spec)])))]
+                        (statements (cdr l) config))]
+                 [else (statements (cdr l) config)])))]
            [`(skip-forwarding)
-            (case (lookup 'mode spec)
+            (case (lookup 'mode config)
               [(copy)
                (unless (null? (cdr l))
                  (error 'skip-forwarding "not at end"))
                (code "return new_p;")]
               [else
-               (generate-type-code (cdr l) spec)])]
+               (statements (cdr l) config)])]
            [`(define ,id : ,type ,rhs)
-            (let* ([used (lookup 'used spec)]
+            (let* ([used (lookup 'used config)]
                    [prev-used? (hashtable-ref used id #f)])
               (hashtable-set! used id #f)
-              (let* ([rest (generate-type-code (cdr l) spec)]
-                     [used? (hashtable-ref (lookup 'used spec) id #f)])
+              (let* ([rest (statements (cdr l) config)]
+                     [used? (hashtable-ref (lookup 'used config) id #f)])
                 (hashtable-set! used id prev-used?)
                 (if used?
                     (code-block (code-indent (format "~a ~a = " type id)
-                                             (expression rhs spec #f #t)
+                                             (expression rhs config #f #t)
                                              ";")
                                 rest)
                     rest)))]
@@ -1585,18 +1605,22 @@
                (match clauses
                  [`() (code)]
                  [`([else . ,rhss])
-                  (if else?
-                      (code "else"
-                            (code-block
-                             (generate-type-code rhss spec)))
-                      (generate-type-code rhss spec))]
+                  (cond
+                    [(null? rhss)
+                     (code)]
+                    [else
+                     (if else?
+                         (code "else"
+                               (code-block
+                                (statements rhss config)))
+                         (statements rhss config))])]
                  [`([,test . ,rhss] . ,clauses)
-                  (let ([tst (expression test spec)])
+                  (let ([tst (expression test config)])
                     (cond
                       [(equal? tst "0")
                        (loop clauses else?)]
                       [else
-                       (let ([rhs (generate-type-code rhss spec)])
+                       (let ([rhs (statements rhss config)])
                          (cond
                            [(equal? tst "1")
                             (if else?
@@ -1606,24 +1630,24 @@
                             (code (format "~aif (~a)" (if else? "else " "") tst)
                                   (code-block rhs)
                                   (loop clauses #t))]))]))]))
-             (generate-type-code (cdr l) spec))]
+             (statements (cdr l) config))]
            [`(let* ,binds . ,body)
             (code
              (code-block
               (let loop ([binds binds])
                 (match binds
-                  [`() (generate-type-code body spec)]
+                  [`() (statements body config)]
                   [`([,id : ,type ,rhs] . ,binds)
                    (code (code-indent (format "~a ~a = " type id)
-                                      (expression rhs spec #f #t)
+                                      (expression rhs config #f #t)
                                       ";")
                          (loop binds))])))
-             (generate-type-code (cdr l) spec))]
+             (statements (cdr l) config))]
            [`(while :? ,tst . ,body)
-            (code (format "while (~a)" (expression tst spec))
+            (code (format "while (~a)" (expression tst config))
                   (code-block
-                   (generate-type-code body spec))
-                  (generate-type-code (cdr l) spec))]
+                   (statements body config))
+                  (statements (cdr l) config))]
            [`(do-while . ,body+test)
             (let-values ([(body tst)
                           (let loop ([body+test body+test] [rev-body '()])
@@ -1633,139 +1657,142 @@
                                (loop rest (cons e rev-body))]))])
               (code "do"
                     (code-block
-                     (generate-type-code body spec))
-                    (format "while (~a);"  (expression tst spec))
-                    (generate-type-code (cdr l) spec)))]
+                     (statements body config))
+                    (format "while (~a);"  (expression tst config))
+                    (statements (cdr l) config)))]
            [`(when ,tst . ,body)
-            (let ([s (expression tst spec)])
-              (code (cond
-                      [(equal? s "1")
-                       (generate-type-code body spec)]
-                      [(equal? s "0")
-                       #f]
-                      [else
-                       (code (format "if (~a)" s)
-                             (code-block
-                              (generate-type-code body spec)))])
-                    (generate-type-code (cdr l) spec)))]
+            (statements (cons `(cond [,tst . ,body][else]) (cdr l))
+                        config)]
            [`(set! ,lhs ,rhs)
             (code (code-indent (format "~a = "
-                                       (expression lhs spec))
-                               (expression rhs spec #f #t)
+                                       (expression lhs config))
+                               (expression rhs config #f #t)
                                ";")
-                  (generate-type-code (cdr l) spec))]
+                  (statements (cdr l) config))]
            [`(set! ,lhs ,op ,rhs)
             (unless (memq op '(+= -= <<= >>=))
               (error 'set! "not an update op ~s" op))
             (code (format "~a ~a ~a;"
-                          (expression lhs spec)
+                          (expression lhs config)
                           op
-                          (expression rhs spec))
-                  (generate-type-code (cdr l) spec))]
+                          (expression rhs config))
+                  (statements (cdr l) config))]
            [`(break)
             (code "break;")]
            [`(,id . ,args)
             (let ([m (eq-hashtable-ref trace-macros id #f)])
               (if m
-                  (generate-type-code (append (apply-macro m args)
-                                              (cdr l))
-                                      spec)
-                  (code (format "~a;" (expression a spec #f #t))
-                        (generate-type-code (cdr l) spec))))]
+                  (statements (append (apply-macro m args)
+                                      (cdr l))
+                              config)
+                  (code (format "~a;" (expression a config #f #t))
+                        (statements (cdr l) config))))]
            [else
-            (code (format "~a;" (expression a spec #f #t))
-                  (generate-type-code (cdr l) spec))]))]))
+            (code (format "~a;" (expression a config #f #t))
+                  (statements (cdr l) config))]))]))
 
+  ;; S-expresison -> string
   (define expression
     (case-lambda
-     [(a spec) (expression a spec #f #f)]
-     [(a spec protect?) (expression a spec protect? #f)]
-     [(a spec protect? multiline?)
+     [(a config) (expression a config #f #f)]
+     [(a config protect?) (expression a config protect? #f)]
+     [(a config protect? multiline?)
       (define (protect s)
         (if protect? (format "(~a)" s) s))
       (match a
         [`_ "p"]
-        [`_copy_ (case (lookup 'mode spec)
+        [`_copy_ (case (lookup 'mode config)
                    [(copy vfasl-copy) "new_p"]
                    [else "p"])]
         [`_tf_
-         (lookup 'tf spec "TYPEFIELD(p)")]
+         (lookup 'tf config "TYPEFIELD(p)")]
         [`_backreferences?_
-         (if (lookup 'maybe-backreferences? spec #f)
+         (if (lookup 'maybe-backreferences? config #f)
              "BACKREFERENCES_ENABLED"
              "0")]
         [`(just ,id)
-         (hashtable-set! (lookup 'used spec) id #t)
+         (hashtable-set! (lookup 'used config) id #t)
          (symbol->string id)]
         [`(case-flag ,flag
            [on ,on]
            [off ,off])
-         (let ([e (if (lookup flag spec #f)
+         (let ([e (if (lookup flag config #f)
                       on
                       off)])
-           (expression e spec protect? multiline?))]
+           (expression e config protect? multiline?))]
         [`(case-mode . ,all-clauses)
-         (match (find-matching-mode (lookup 'mode spec) all-clauses)
+         (match (find-matching-mode (lookup 'mode config) all-clauses)
            [`(,e)
-            (expression e spec protect? multiline?)]
+            (expression e config protect? multiline?)]
            [`,any
             (error 'case-mode "bad form ~s" a)])]
         [`(cond . ,clauses)
          (let loop ([clauses clauses] [protect? protect?])
            (match clauses
-             [`([else ,rhs]) (expression rhs spec protect? multiline?)]
+             [`([else ,rhs]) (expression rhs config protect? multiline?)]
              [`([,test ,rhs] . ,clauses)
-              (let ([tst (expression test spec #t #t)])
+              (let ([tst (expression test config #t #t)])
                 (cond
                   [(equal? tst "0")
                    (loop clauses protect?)]
                   [(equal? tst "1")
-                   (expression rhs spec protect? multiline?)]
+                   (expression rhs config protect? multiline?)]
                   [else
                    (if multiline?
                        (format "(~a\n ? ~a\n : ~a)"
                                tst
-                               (indent-newlines (expression rhs spec #t #t) 3)
+                               (indent-newlines (expression rhs config #t #t) 3)
                                (indent-newlines (loop clauses #t) 3))
                        (format "(~a ? ~a : ~a)"
                                tst
-                               (expression rhs spec #t #f)
+                               (expression rhs config #t #f)
                                (loop clauses #t)))]))]))]
         [`(cast ,type ,e)
-         (protect (format "(~a)~a" type (expression e spec #t)))]
+         (protect (format "(~a)~a" type (expression e config #t)))]
         [`(array-ref ,array ,index)
          (protect (format "~a[~a]"
-                          (expression array spec #t)
-                          (expression index spec)))]
+                          (expression array config #t)
+                          (expression index config)))]
         [`(set! ,lhs ,rhs) ; a `set!` used as an expression
          (format "(~a = ~a)"
-                 (expression lhs spec #t)
-                 (expression rhs spec #t))]
+                 (expression lhs config #t)
+                 (expression rhs config #t))]
         [`(,op ,a)
          (cond
            [(memq op '(& - !))
-            (protect (format "~a~a" op (expression a spec #t)))]
+            (protect (format "~a~a" op (expression a config #t)))]
            [(get-offset-value op)
             => (lambda (v)
-                 (protect (field-ref-expression (expression a spec) v op)))]
+                 (protect (field-ref-expression (expression a config) v op #f config)))]
            [(eq-hashtable-ref trace-macros op #f)
             => (lambda (m)
-                 (expression (car (apply-macro m (list a))) spec protect? multiline?))]
+                 (expression (car (apply-macro m (list a))) config protect? multiline?))]
            [else
-            (protect (format "~a(~a)" op (expression a spec #t)))])]
+            (protect (format "~a(~a)" op (expression a config #t)))])]
         [`(,op ,a ,b)
-         (if (memq op '(& && \|\| == != + - * < > <= >= << >> ->))
-             (protect (format "~a ~a ~a" (expression a spec #t) op (expression b spec #t)))
-             (protect (format "~a(~a, ~a)" op (expression a spec) (expression b spec))))]
+         (cond
+           [(memq op '(& && \|\| == != + - * < > <= >= << >> ->))
+            (protect (format "~a ~a ~a" (expression a config #t) op (expression b config #t)))]
+           [(get-offset-value op)
+            => (lambda (v)
+                 (protect (field-ref-expression (expression a config) v op b config)))]
+           [else
+            (protect (format "~a(~a, ~a)" op (expression a config) (expression b config)))])]
         [`(,rator . ,rands)
+         (unless (symbol? rator)
+           (error 'expression "expected a symbol for funciton name: ~s" rator))
          (format "~a(~a)"
                  rator
-                 (comma-ize (map (lambda (r) (expression r spec)) rands)))]
+                 (comma-ize (map (lambda (r) (expression r config)) rands)))]
         [else
          (cond
            [(symbol? a)
-            (hashtable-set! (lookup 'used spec) a #t)
-            (dehyphen a)]
+            (cond
+              [(getprop a '*c-name* #f)
+               => (lambda (c-name) c-name)]
+              [else
+               (hashtable-set! (lookup 'used config) a #t)
+               (symbol->string a)])]
            [else
             (format "~s" a)])])]))
 
@@ -1783,36 +1810,36 @@
         [`()
          (error 'case-mode "no matching case for ~s in ~s" mode all-clauses)])))
 
-  (define (loop-over-pointers ptr-e len body spec)
+  (define (loop-over-pointers ptr-e len body config)
     (code-block
-     (format "uptr idx, p_len = ~a;" (expression len spec))
+     (format "uptr idx, p_len = ~a;" (expression len config))
      (format "ptr *p_p = &~a;" ptr-e)
      "for (idx = 0; idx < p_len; idx++)"
      (code-block body)))
 
-  (define (trace-statement field spec early?)
-    (define mode (lookup 'mode spec))
+  (define (trace-statement field config early?)
+    (define mode (lookup 'mode config))
     (cond
       [(or (eq? mode 'sweep)
            (eq? mode 'vfasl-sweep)
            (and early? (eq? mode 'copy)))
-       (relocate-statement (field-expression field spec "p" #t) spec)]
+       (relocate-statement (field-expression field config "p" #t) config)]
       [(or (eq? mode 'copy)
            (eq? mode 'vfasl-copy))
-       (copy-statement field spec)]
+       (copy-statement field config)]
       [(eq? mode 'measure)
-       (measure-statement (field-expression field spec "p" #f))]
+       (measure-statement (field-expression field config "p" #f))]
       [(eq? mode 'self-test)
-       (format "if (p == ~a) return 1;" (field-expression field spec "p" #f))]
+       (format "if (p == ~a) return 1;" (field-expression field config "p" #f))]
       [else #f]))
 
-  (define (relocate-statement e spec)
-    (define mode (lookup 'mode spec))
+  (define (relocate-statement e config)
+    (define mode (lookup 'mode config))
     (case mode
       [(vfasl-sweep)
        (format "vfasl_relocate(vfi, &~a);" e)]
       [else
-       (if (lookup 'as-dirty? spec #f)
+       (if (lookup 'as-dirty? config #f)
            (format "relocate_dirty(&~a, tg, youngest);" e)
            (format "relocate(&~a);" e))]))
 
@@ -1824,40 +1851,40 @@
      "    push_measure(r_p);"
      "}"))
 
-  (define (copy-statement field spec)
-    (define mode (lookup 'mode spec))
+  (define (copy-statement field config)
+    (define mode (lookup 'mode config))
     (case mode
       [(copy vfasl-copy)
        (cond
          [(symbol? field)
-          (unless (lookup 'copy-ready? spec #f)
+          (unless (lookup 'copy-ready? config #f)
             (error 'copy "need size before: ~s" field))
           (format "~a = ~a;"
-                  (field-expression field spec "new_p" #f)
-                  (field-expression field spec "p" #f))]
+                  (field-expression field config "new_p" #f)
+                  (field-expression field config "p" #f))]
          [else
           (when (eq? mode 'copy)
             (error 'copy "pointless copy to self for ~s" field))
           #f])]
       [else #f]))
 
-  (define (count-statement counter size scale mode spec)
+  (define (count-statement counter size scale mode config)
     (cond
-      [(eq? mode (lookup 'mode spec))
+      [(eq? mode (lookup 'mode config))
        (cond
-         [(lookup 'counts? spec #f)
+         [(lookup 'counts? config #f)
           (let ([tg (if (eq? mode 'copy)
                         "tg"
                         "target_generation")])
             (code
-             (format "S_G.countof[~a][~a] += ~a;" tg (dehyphen counter) scale)
-             (if (lookup 'constant-size? spec #f)
+             (format "S_G.countof[~a][~a] += ~a;" tg (as-c counter) scale)
+             (if (lookup 'constant-size? config #f)
                  #f
                  (format "S_G.bytesof[~a][~a] += ~a;"
                          tg
-                         (dehyphen counter)
+                         (as-c counter)
                          (let ([s (if size
-                                      (expression size spec)
+                                      (expression size config)
                                       "p_sz")])
                            (if (eqv? scale 1)
                                s
@@ -1865,38 +1892,56 @@
          [else #f])]
       [else #f]))
 
-  (define (field-expression field spec arg protect?)
+  (define (field-expression field config arg protect?)
     (if (symbol? field)
         (cond
           [(get-offset-value field)
            => (lambda (v)
-                (field-ref-expression arg v field))]
+                (field-ref-expression arg v field 0 config))]
           [else
            (error 'field "identifier is not a field accessor: ~s" field)])
-        (expression field spec protect?)))
+        (expression field config protect?)))
 
-  (define (size-expression sz spec)
+  (define (size-expression sz config)
     (if (symbol? sz)
         (cond
           [(get-size-value sz)
-           => (lambda (v) (dehyphen sz))]
+           => (lambda (v) (as-c sz))]
           [else
            (error 'size "identifier is not a size: ~s" sz)])
-        (expression sz spec)))
+        (expression sz config)))
 
-  (define (field-ref-expression obj v acc-name)
+  (define (field-ref-expression obj v acc-name index config)
     (let ([c-ref (getprop acc-name '*c-ref* #f)])
-      (if c-ref
-          (if (pair? c-ref)
-              (format "~a(~a,0)" (car c-ref) obj)
-              (format "~a(~a)" c-ref obj))
-          (format "FIELDREF(~a, ~a /* ~a */)" obj v acc-name))))
-  
+      (unless c-ref
+        (error 'field-ref "could not find accessor for ~s" acc-name))
+      (cond
+        [(pair? c-ref)
+         (unless index
+           (error 'field-ref "missing index for array field ~s" acc-name))
+         (format "~a(~a, ~a)" (car c-ref) obj (expression index config))]
+        [else
+         (when (and index (not (eq? index 0)))
+           (error 'field-ref "index not allowed for non-array field ~s" acc-name))
+         (format "~a(~a)" c-ref obj)])))
+
+  ;; Slightly hacky way to check whether `op` is an accessor
   (define (get-offset-value op)
     (getprop (string->symbol (format "~a-disp" op)) '*constant* #f))
 
+  ;; Check whether `op` is a size (probably)
   (define (get-size-value op)
     (getprop op '*constant* #f))
+
+  ;; Convert to C constant name
+  (define as-c
+    (case-lambda
+     [(sym)
+      (or (getprop sym '*c-name* #f)
+          (error 'as-type "failed for ~s" sym))]
+     [(prefix base)
+      (or (getprop (string->symbol (format "~a-~a" prefix base)) '*c-name* #f)
+          (error 'as-type "failed for ~s ~s" prefix base))]))
 
   (define (comma-ize l)
     (apply string-append
@@ -1906,14 +1951,6 @@
                  (if (null? (cdr l))
                      (list (car l))
                      (list* (car l) ", " (loop (cdr l))))))))
-
-  (define (dehyphen s)
-    (list->string
-     (map (lambda (c)
-            (if (eqv? c #\-)
-                #\_
-                c))
-          (string->list (symbol->string s)))))
 
   (define (apply-macro m l)
     (define args (car m))
@@ -1932,53 +1969,53 @@
            (cons (loop (car m)) (loop (cdr m)))]
           [else m]))))
 
-  (define (type-included? type spec)
-    (let ([types (lookup 'known-types spec #f)])
+  (define (type-included? type config)
+    (let ([types (lookup 'known-types config #f)])
       (if (not types)
           #t
           (memq type types))))
 
-  (define (prune types spec)
+  (define (prune types config)
     (let loop ([types types])
       (if (null? types)
           '()
-          (let ([s (prune-one (car types) spec)])
+          (let ([s (prune-one (car types) config)])
             (if s
                 (cons s (loop (cdr types)))
                 (loop (cdr types)))))))
 
-  (define (prune-one type spec)
-    (define known-types (lookup 'known-types spec #f))
+  (define (prune-one type config)
+    (define known-types (lookup 'known-types config #f))
     (cond
       [(or (not known-types)
            (memq (car type) known-types))
-       (let ([known-space (lookup 'known-space spec #f)])
+       (let ([known-space (lookup 'known-space config #f)])
          (cond
            [(or (not known-space)
-                (body-has-space? (cdr type) known-space spec))
+                (body-has-space? (cdr type) known-space config))
             type]
            [else #f]))]
       [else #f]))
 
-  (define (body-has-space? body space spec)
+  (define (body-has-space? body space config)
     (cond
       [(null? body) (error 'base-has-space? "no `space` specification in body")]
       [else
        (let ([a (car body)])
          (cond
            [(and (pair? a) (eq? (car a) 'space))
-            (body-has-tail? (cdr a) space spec)]
+            (body-has-tail? (cdr a) space config)]
            [(and (pair? a) (memq (car a) '(case-space cond)))
             (unless (null? (cdr body)) (error 'body-has-space? "there's more?"))
             (let loop ([clauses (cdr a)])
               (if (null? clauses)
                   #f
-                  (or (body-has-space? (cdar clauses) space spec)
+                  (or (body-has-space? (cdar clauses) space config)
                       (loop (cdr clauses)))))]
            [else
-            (body-has-space? (cdr body) space spec)]))]))
+            (body-has-space? (cdr body) space config)]))]))
 
-  (define (body-has-tail? body key spec)
+  (define (body-has-tail? body key config)
     (cond
       [(null? body) #f]
       [else
@@ -1986,10 +2023,10 @@
          (match a
            [`(cond . ,clauses)
             (ormap (lambda (clause)
-                     (body-has-tail? (cdr clause) key spec))
+                     (body-has-tail? (cdr clause) key config))
                    clauses)]
            [else
-            (body-has-tail? (cdr body) key spec)]))]))
+            (body-has-tail? (cdr body) key config)]))]))
 
   (define print-code
     (case-lambda
@@ -2058,10 +2095,10 @@
                  (case-lambda
                   [(type) (sweep1 type (format "sweep_~a" type) '())]
                   [(type name) (sweep1 type name '())]
-                  [(type name extra-specs)
+                  [(type name extra-configs)
                    (print-code (generate name
                                          (append
-                                          extra-specs
+                                          extra-configs
                                           `((mode sweep)
                                             (known-types (,type))
                                             (maybe-backreferences? ,count?)

@@ -743,8 +743,10 @@
             (cond
               [(getprop x '*constant* #f) =>
                (lambda (k)
-                 (let ([type (getprop x '*constant-ctype* #f)])
-                   (def (sanitize x)
+                 (let ([type (getprop x '*constant-ctype* #f)]
+                       [c-name (sanitize x)])
+                   (putprop x '*c-name* c-name)
+                   (def c-name
                      (if (or (fixnum? k) (bignum? k))
                          (if (< k 0)
                              (if (or (not type) (eq? type 'int))
