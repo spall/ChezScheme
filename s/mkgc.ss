@@ -160,8 +160,7 @@
 
    [closure
     (define code : ptr (CLOSCODE _))
-    (unless-code-relocated
-     (trace-early (just code)))
+    (trace-code-early code)
     (cond
       [(or-assume-continuation
         (& (code-type code) (<< code-flag-continuation code-flags-offset)))
@@ -544,6 +543,15 @@
     (do-cdr pair-cdr)
     (count count-pair)]))
 
+(define-trace-macro (trace-code-early code)
+  (unless-code-relocated
+   (case-mode
+    [(vfasl-sweep)
+     ;; Special relocation handling for code in a closure:
+     (set! code (vfasl_relocate_code vfi code))]
+    [else
+     (trace-early (just code))])))
+
 (define-trace-macro (copy-clos-code code)
   (case-mode
    [(copy vfasl-copy)
@@ -551,6 +559,11 @@
    [(sweep)
     (unless-code-relocated
      (SETCLOSCODE _copy_ code))]
+   [(vfasl-sweep)
+    ;; Make the code pointer relative to the base address.
+    ;; It's turned back absolute when loading from vfasl
+    (define rel_code : ptr (cast ptr (ptr_diff code (-> vfi base_addr))))
+    (SETCLOSCODE p rel_code)]
    [else]))
 
 (define-trace-macro (copy-stack-length continuation-stack-length continuation-stack-clength)
@@ -584,7 +597,7 @@
 
 (define-trace-macro (when-vfasl e)
   (case-mode
-   [(vfasl-copy vfasl-trace) e]
+   [(vfasl-copy vfasl-sweep) e]
    [else]))
 
 (define-trace-macro (trace/define ref val :vfasl-as vfasl-val)
@@ -666,9 +679,12 @@
          (case-flag as-dirty?
           [on]
           [off
-           ;; Bignum pointer mask may need forwarding
-           (trace (RECORDDESCPM rtd))
-           (set! num (RECORDDESCPM rtd))])
+           (case-mode
+            [(sweep self-test)
+             ;; Bignum pointer mask may need forwarding
+             (trace (RECORDDESCPM rtd))
+             (set! num (RECORDDESCPM rtd))]
+            [else])])
          (let* ([index : iptr (- (BIGLEN num) 1)]
                 ;; Ignore bit for already forwarded rtd
                 [mask : bigit (>> (BIGIT num index) 1)]
@@ -693,10 +709,23 @@
    [(vfasl-copy)
     (when (is_rtd rtd vfi)
       (when (!= _ S_G.base_rtd)
-        ;; Make sure rtd's type is registered first
+        ;; Make sure rtd's type is registered firs, but
+        ;; discard the relocated pointer (leaving to sweep)
         (cast void (vfasl_relocate_help vfi rtd)))
       ;; Need parent before child
       (vfasl_relocate_parents vfi (record-type-parent _)))]
+   [(vfasl-sweep)
+    ;; Don't need to save fields of base-rtd
+    (when (== _ (-> vfi base_rtd))
+      (let* ([pp : ptr* (& (RECORDINSTIT _ 0))]
+             [ppend : ptr* (- (cast ptr* (+ (cast uptr pp) (UNFIX (record-type-size rtd)))) 1)])
+        (while
+         :? (< pp ppend)
+         (set! (* pp) Snil)
+         (set! pp += 1))
+        (return (size_record_inst (UNFIX (RECORDDESCSIZE rtd))))))
+    ;; Relocation of rtd fields was deferred
+    (vfasl_relocate vfi (& (record-type _)))]
    [else]))
 
 (define-trace-macro (vfasl-set-base-rtd)
@@ -863,7 +892,7 @@
    [else
     (define t : ptr (CODERELOC _))
     (case-mode
-     [sweep
+     [(sweep vfasl-sweep)
       (define m : iptr (RELOCSIZE t))
       (define oldco : ptr (RELOCCODE t))]
      [else
@@ -873,6 +902,13 @@
       (define oldco : ptr (cond
                             [t (RELOCCODE t)]
                             [else 0]))])
+    (case-mode
+     [vfasl-sweep
+      (let* ([r_sz : uptr (size_reloc_table m)]
+             [new_t : ptr (vfasl_find_room vfi vspace_reloc typemod r_sz)])
+        (memcpy_aligned new_t t r_sz)
+        (set! t new_t))]
+     [else])
     (define a : iptr 0)
     (define n : iptr 0)
     (while
@@ -892,10 +928,16 @@
           (set! code_off (RELOC_CODE_OFFSET entry))])
        (set! a (+ a code_off))
        (let* ([obj : ptr (S_get_code_obj (RELOC_TYPE entry) oldco a item_off)])
-         (trace (just obj))
+         (case-mode
+          [vfasl-sweep
+           (set! obj (vfasl_encode_relocation vfi obj))]
+          [else
+           (trace (just obj))])
          (case-mode
           [sweep
            (S_set_code_obj "gc" (RELOC_TYPE entry) _ a obj item_off)]
+          [vfasl-sweep
+           (S_set_code_obj "vfasl" (abs-for-vfasl (RELOC_TYPE entry)) _ a obj item_off)]
           [else]))))
 
     (case-mode
@@ -918,7 +960,16 @@
          (set! (RELOCCODE t) _)
          (set! (CODERELOC _) t)])
       (S_record_code_mod tc_in (cast uptr (& (CODEIT _ 0))) (cast uptr (CODELEN _)))]
+     [vfasl-sweep
+      ;; no vfasl_register_pointer, since relink_code can handle it
+      (set! (RELOCCODE t) (cast ptr (ptr_diff _ (-> vfi base_addr))))
+      (set! (CODERELOC _) (cast ptr (ptr_diff t (-> vfi base_addr))))]
      [else])]))
+
+(define-trace-macro (abs-for-vfasl e)
+  (case-mode
+   [vfasl-sweep reloc_abs]
+   [else e]))
 
 (define-trace-macro (add-ephemeron-to-pending)
   (case-mode
@@ -982,16 +1033,16 @@
     (vfasl_fail vfi what)
     (case-mode
      [vfasl-copy (return (cast ptr 0))]
-     [else])
+     [vfasl-sweep (return 0)])
     (vspace #f)]
    [else]))
 
 (define-trace-macro (vfasl-as-false what)
   (case-mode
-   [(vfasl-copy vfasl-sweep)
+   [(vfasl-copy)
     (return Sfalse)
     (vspace #f)]
-   [(vfasl-copy vfasl-sweep)
+   [(vfasl-sweep)
     (vfasl-fail what)
     (vspace #f)]
    [else]))
@@ -1122,7 +1173,7 @@
      (format "static ~a ~a(~aptr p~a)"
              (case (lookup 'mode spec)
                [(copy vfasl-copy) "ptr"]
-               [(size) "uptr"]
+               [(size vfasl-sweep) "uptr"]
                [(self-test) "IBOOL"]
                [(sweep) (if (lookup 'as-dirty? spec #f)
                             "IGEN"
@@ -1134,7 +1185,7 @@
                 (if (type-included? 'code spec)
                     "ptr tc_in, "
                     "")]
-               [(vfasl-copy)
+               [(vfasl-copy vfasl-sweep)
                 "vfasl_info *vfi, "]
                [else ""])
              (case (lookup 'mode spec)
@@ -1204,6 +1255,11 @@
            (body)
            "vfasl_register_forward(vfi, p, new_p);"
            "return new_p;")]
+         [(vfasl-sweep)
+          (code-block
+           "uptr result_sz;"
+           (body)
+           "return result_sz;")]
          [else
           (body)]))))
 
@@ -1391,7 +1447,7 @@
                (generate-type-code (cons `(copy-bytes ,offset (* ptr_bytes ,len))
                                          (cdr l))
                                    spec)]
-              [(sweep measure)
+              [(sweep measure vfasl-sweep)
                (code
                 (loop-over-pointers
                  (field-expression offset spec "p" #t)
@@ -1445,13 +1501,14 @@
             (generate-type-code (cons `(size ,sz ,1) (cdr l)) spec)]
            [`(size ,sz ,scale)
             (let* ([mode (lookup 'mode spec)]
-                   [mode (if (and (eq? mode 'sweep)
-                                  (lookup 'return-size? spec #f))
-                             'sweep+size
+                   [mode (if (lookup 'return-size? spec #f)
+                             (case mode
+                               [(sweep) 'sweep+size]
+                               [else mode])
                              mode)])
               (code-block
                (case mode
-                 [(copy sweep+size size measure vfasl-copy)
+                 [(copy sweep+size size measure vfasl-copy vfasl-sweep)
                   (format "uptr p_sz = ~a;" (let ([s (size-expression sz spec)])
                                               (if (= scale 1)
                                                   s
@@ -1494,6 +1551,9 @@
                                                       spec))))]
                  [(size)
                   (code "return p_sz;")]
+                 [(vfasl-sweep)
+                  (code "result_sz = p_sz;"
+                        (generate-type-code (cdr l) spec))]
                  [(measure)
                   (code "measure_total += p_sz;"
                         (generate-type-code (cdr l) spec))]
@@ -1734,6 +1794,7 @@
     (define mode (lookup 'mode spec))
     (cond
       [(or (eq? mode 'sweep)
+           (eq? mode 'vfasl-sweep)
            (and early? (eq? mode 'copy)))
        (relocate-statement (field-expression field spec "p" #t) spec)]
       [(or (eq? mode 'copy)
@@ -1746,9 +1807,14 @@
       [else #f]))
 
   (define (relocate-statement e spec)
-    (if (lookup 'as-dirty? spec #f)
-        (format "relocate_dirty(&~a, tg, youngest);" e)
-        (format "relocate(&~a);" e)))
+    (define mode (lookup 'mode spec))
+    (case mode
+      [(vfasl-sweep)
+       (format "vfasl_relocate(vfi, &~a);" e)]
+      [else
+       (if (lookup 'as-dirty? spec #f)
+           (format "relocate_dirty(&~a, tg, youngest);" e)
+           (format "relocate(&~a);" e))]))
 
   (define (measure-statement e)
     (code
@@ -2023,7 +2089,10 @@
      (x [#t (raise x)])
      (parameterize ([current-output-port (open-output-file ofn 'replace)])
        (print-code (generate "copy"
-                             `((mode vfasl-copy)))))))
+                             `((mode vfasl-copy))))
+       (print-code (generate "sweep"
+                             `((mode vfasl-sweep)
+                               (return-size? #t)))))))
 
   ;; Render via mkequates to record a mapping from selectors to C
   ;; macros:

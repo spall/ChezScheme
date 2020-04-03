@@ -164,17 +164,16 @@ static uptr symbol_pos_to_offset(uptr sym_pos) {
 static ptr vfasl_copy_all(vfasl_info *vfi, ptr v);
 
 static ptr copy(vfasl_info *vfi, ptr pp, seginfo *si);
-static void sweep_ptrs(vfasl_info *vfi, ptr *pp, iptr n);
-static uptr sweep_code_object(vfasl_info *vfi, ptr co);
-static uptr sweep_record(vfasl_info *vfi, ptr co);
 static uptr sweep(vfasl_info *vfi, ptr p);
 static int is_rtd(ptr tf, vfasl_info *vfi);
 
+static ptr vfasl_encode_relocation(vfasl_info *vfi, ptr obj);
 static void relink_code(ptr co, ptr sym_base, ptr *vspaces, uptr *vspace_offsets, IBOOL to_static);
 static ptr find_pointer_from_offset(uptr p_off, ptr *vspaces, uptr *vspace_offsets);
 
 static void vfasl_relocate(vfasl_info *vfi, ptr *ppp);
 static ptr vfasl_relocate_help(vfasl_info *vfi, ptr pp);
+static ptr vfasl_relocate_code(vfasl_info *vfi, ptr code);
 static ptr vfasl_find_room(vfasl_info *vfi, int s, ITYPE t, iptr n);
 static void vfasl_register_rtd_reference(vfasl_info *vfi, ptr pp);
 static void vfasl_register_symbol_reference(vfasl_info *vfi, ptr *pp, ptr p);
@@ -1001,7 +1000,7 @@ static ptr vfasl_find_room(vfasl_info *vfi, int s, ITYPE t, iptr n) {
   Q1END = (ptr *)((uptr)Q1 + n);\
   while (Q1 != Q1END) *Q1++ = *Q2++;}
 
-//#include "vfasl-orig.inc"
+// #include "vfasl-orig.inc"
 
 #include "vfasl.inc"
 
@@ -1045,133 +1044,10 @@ static void vfasl_relocate(vfasl_info *vfi, ptr *ppp) {
   }
 }
 
-static void sweep_ptrs(vfasl_info *vfi, ptr *pp, iptr n) {
-  ptr *end = pp + n;
-
-  while (pp != end) {
-    vfasl_relocate(vfi, pp);
-    pp += 1;
-  }
-}
-
-static uptr sweep(vfasl_info *vfi, ptr p) {
-  ptr tf; ITYPE t;
-
-  t = TYPEBITS(p);
-  if (t == type_closure) {
-    uptr len;
-    ptr code;
-
-    len = CLOSLEN(p);
-    sweep_ptrs(vfi, &CLOSIT(p, 0), len);
-
-    /* To code-entry pointer looks like an immediate to
-       sweep, so relocate the code directly, and also make it
-       relative to the base address. */
-    code = vfasl_relocate_help(vfi, CLOSCODE(p));
-    code = (ptr)ptr_diff(code, vfi->base_addr);
-    SETCLOSCODE(p,code);
-
-    return size_closure(len);
-  } else if (t == type_symbol) {
-    vfasl_relocate(vfi, &INITSYMNAME(p));
-      /* other parts are replaced on load */
-    return size_symbol;
-  } else if (t == type_flonum) {
-    /* nothing to sweep */;
-    return size_flonum;
- /* typed objects */
-  } else if (tf = TYPEFIELD(p), TYPEP(tf, mask_vector, type_vector)) {
-    uptr len = Svector_length(p);
-    sweep_ptrs(vfi, &INITVECTIT(p, 0), len);
-    return size_vector(len);
-  } else if (tf = TYPEFIELD(p), TYPEP(tf, mask_stencil_vector, type_stencil_vector)) {
-    uptr len = Sstencil_vector_length(p);
-    sweep_ptrs(vfi, &INITSTENVECTIT(p, 0), len);
-    return size_stencil_vector(len);
-  } else if (TYPEP(tf, mask_record, type_record)) {
-    return sweep_record(vfi, p);
-  } else if (TYPEP(tf, mask_box, type_box)) {
-    vfasl_relocate(vfi, &INITBOXREF(p));
-    return size_box;
-  } else if ((iptr)tf == type_ratnum) {
-    vfasl_relocate(vfi, &RATNUM(p));
-    vfasl_relocate(vfi, &RATDEN(p));
-    return size_ratnum;
-  } else if ((iptr)tf == type_exactnum) {
-    vfasl_relocate(vfi, &EXACTNUM_REAL_PART(p));
-    vfasl_relocate(vfi, &EXACTNUM_IMAG_PART(p));
-    return size_exactnum;
-  } else if (TYPEP(tf, mask_code, type_code)) {
-    return sweep_code_object(vfi, p);
-  } else {
-    S_error_abort("vfasl_sweep: illegal type");
-    return 0;
-  }
-}
-
-static uptr sweep_record(vfasl_info *vfi, ptr x)
-{
-    ptr *pp; ptr num; ptr rtd;
-
-    rtd = RECORDINSTTYPE(x);
-
-    if (x == vfi->base_rtd) {
-      /* Don't need to save fields of base-rtd */
-      ptr *pp = &RECORDINSTIT(x,0);
-      ptr *ppend = (ptr *)((uptr)pp + UNFIX(RECORDDESCSIZE(rtd))) - 1;
-      while (pp < ppend) {
-        *pp = Snil;
-        pp += 1;
-      }
-      return size_record_inst(UNFIX(RECORDDESCSIZE(rtd)));
-    }
-
-    vfasl_relocate(vfi, &RECORDINSTTYPE(x));
-
-    num = RECORDDESCPM(rtd);
-    pp = &RECORDINSTIT(x,0);
-
-    /* process cells for which bit in pm is set; quit when pm == 0. */
-    if (Sfixnump(num)) {
-      /* ignore bit for already forwarded rtd */
-        uptr mask = (uptr)UNFIX(num) >> 1;
-        if (mask == (uptr)-1 >> 1) {
-          ptr *ppend = (ptr *)((uptr)pp + UNFIX(RECORDDESCSIZE(rtd))) - 1;
-          while (pp < ppend) {
-            vfasl_relocate(vfi, pp);
-            pp += 1;
-          }
-        } else {
-          while (mask != 0) {
-            if (mask & 1) vfasl_relocate(vfi, pp);
-            mask >>= 1;
-            pp += 1;
-          }
-        }
-    } else {
-      iptr index; bigit mask; INT bits;
-
-      /* bignum pointer mask */
-      num = RECORDDESCPM(rtd);
-      vfasl_relocate(vfi, &RECORDDESCPM(rtd));
-      index = BIGLEN(num) - 1;
-      /* ignore bit for already forwarded rtd */
-      mask = BIGIT(num,index) >> 1;
-      bits = bigit_bits - 1;
-      for (;;) {
-        do {
-          if (mask & 1) vfasl_relocate(vfi, pp);
-          mask >>= 1;
-          pp += 1;
-        } while (--bits > 0);
-        if (index-- == 0) break;
-        mask = BIGIT(num,index);
-        bits = bigit_bits;
-      }
-    }
-
-    return size_record_inst(UNFIX(RECORDDESCSIZE(rtd)));
+static ptr vfasl_relocate_code(vfasl_info *vfi, ptr code) {
+  /* We don't want to register `code` as a pointer, since it is
+     treated more directly */
+  return vfasl_relocate_help(vfi, code);
 }
 
 static int is_rtd(ptr tf, vfasl_info *vfi)
@@ -1209,70 +1085,34 @@ static int is_rtd(ptr tf, vfasl_info *vfi)
 #define VFASL_RELOC_TAG(p) (UNFIX(p) & ((1 << VFASL_RELOC_TAG_BITS) - 1))
 #define VFASL_RELOC_POS(p) (UNFIX(p) >> VFASL_RELOC_TAG_BITS)
 
-static uptr sweep_code_object(vfasl_info *vfi, ptr co) {
-    ptr t, oldco, oldt; iptr a, m, n;
+static ptr vfasl_encode_relocation(vfasl_info *vfi, ptr obj) {
+  ptr pos;
+  int which_singleton;
+  
+  if ((which_singleton = detect_singleton(obj))) {
+    obj = FIX(VFASL_RELOC_SINGLETON(which_singleton));
+  } else if ((pos = vfasl_hash_table_ref(S_G.c_entries, obj))) {
+    if ((uptr)pos == CENTRY_install_library_entry)
+      vfi->installs_library_entry = 1;
+    obj = FIX(VFASL_RELOC_C_ENTRY(pos));
+  } else if ((pos = vfasl_hash_table_ref(S_G.library_entries, obj))) {
+    obj = FIX(VFASL_RELOC_LIBRARY_ENTRY(pos));
+  } else if ((pos = vfasl_hash_table_ref(S_G.library_entry_codes, obj))) {
+    obj = FIX(VFASL_RELOC_LIBRARY_ENTRY_CODE(pos));
+  } else if (Ssymbolp(obj)) {
+    obj = vfasl_relocate_help(vfi, obj);
+    obj = FIX(VFASL_RELOC_SYMBOL(UNFIX(SYMVAL(obj))));
+  } else if (IMMEDIATE(obj)) {
+    /* as-is */
+    if (Sfixnump(obj))
+      if (obj != FIX(0)) /* allow 0 for fcallable cookie */
+        S_error("vfasl", "unexpected fixnum in relocation");
+  } else {
+    obj = vfasl_relocate_help(vfi, obj);
+    obj = (ptr)ptr_diff(obj, vfi->base_addr);
+  }
 
-    vfasl_relocate(vfi, &CODENAME(co));
-    vfasl_relocate(vfi, &CODEARITYMASK(co));
-    vfasl_relocate(vfi, &CODEINFO(co));
-    vfasl_relocate(vfi, &CODEPINFOS(co));
-
-    oldt = CODERELOC(co);
-
-    n = size_reloc_table(RELOCSIZE(oldt));
-    t = vfasl_find_room(vfi, vspace_reloc, typemod, n);
-    copy_ptrs(typemod, t, oldt, n);
-
-    m = RELOCSIZE(t);
-    oldco = RELOCCODE(t);
-    a = 0;
-    n = 0;
-    while (n < m) {
-        uptr entry, item_off, code_off; ptr obj, pos;
-        int which_singleton;
- 
-        entry = RELOCIT(t, n); n += 1;
-        if (RELOC_EXTENDED_FORMAT(entry)) {
-            item_off = RELOCIT(t, n); n += 1;
-            code_off = RELOCIT(t, n); n += 1;
-        } else {
-            item_off = RELOC_ITEM_OFFSET(entry);
-            code_off = RELOC_CODE_OFFSET(entry);
-        }
-        a += code_off;
-        obj = S_get_code_obj(RELOC_TYPE(entry), oldco, a, item_off);
-
-        if ((which_singleton = detect_singleton(obj))) {
-          obj = FIX(VFASL_RELOC_SINGLETON(which_singleton));
-        } else if ((pos = vfasl_hash_table_ref(S_G.c_entries, obj))) {
-          if ((uptr)pos == CENTRY_install_library_entry)
-            vfi->installs_library_entry = 1;
-          obj = FIX(VFASL_RELOC_C_ENTRY(pos));
-        } else if ((pos = vfasl_hash_table_ref(S_G.library_entries, obj))) {
-          obj = FIX(VFASL_RELOC_LIBRARY_ENTRY(pos));
-        } else if ((pos = vfasl_hash_table_ref(S_G.library_entry_codes, obj))) {
-          obj = FIX(VFASL_RELOC_LIBRARY_ENTRY_CODE(pos));
-        } else if (Ssymbolp(obj)) {
-          obj = vfasl_relocate_help(vfi, obj);
-          obj = FIX(VFASL_RELOC_SYMBOL(UNFIX(SYMVAL(obj))));
-        } else if (IMMEDIATE(obj)) {
-          /* as-is */
-          if (Sfixnump(obj))
-            if (obj != FIX(0)) /* allow 0 for fcallable cookie */
-              S_error("vfasl", "unexpected fixnum in relocation");
-        } else {
-          obj = vfasl_relocate_help(vfi, obj);
-          obj = (ptr)ptr_diff(obj, vfi->base_addr);
-        }
-
-        S_set_code_obj("vfasl", reloc_abs, co, a, obj, item_off);
-    }
-
-    RELOCCODE(t) = (ptr)ptr_diff(co, vfi->base_addr);
-    CODERELOC(co) = (ptr)ptr_diff(t, vfi->base_addr);
-    /* no vfasl_register_pointer, since relink_code can handle it */
-
-    return size_code(CODELEN(co));
+  return obj;
 }
 
 static void relink_code(ptr co, ptr sym_base, ptr *vspaces, uptr *vspace_offsets, IBOOL to_static) {
