@@ -18,9 +18,9 @@
 ;; Currently supported traversal modes:
 ;;   - copy
 ;;   - sweep
-;;   - self-test : check immediate pointers only for self references
-;;   - size      : does not recur
-;;   - measure
+;;   - self-test   : check immediate pointers only for self references
+;;   - size        : immediate size, so does not recur
+;;   - measure     : recurs for reachable size
 ;;   - vfasl-copy
 ;;   - vfasl-sweep
 
@@ -700,8 +700,6 @@
             (set! mask (bignum-data num index))
             (set! bits bigit_bits)))]))]))
 
-
-
 (define-trace-macro (vfasl-check-parent-rtd rtd)
   (case-mode
    [(vfasl-copy)
@@ -1061,6 +1059,8 @@
 ;; Parenthe-C compiler
 ;; ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+;; Every compiler needs its own little implementation of `match`, right?
+;; Just pairs and literals, no ellipses.
 (define-syntax (match stx)
   (syntax-case stx (else)
     [(_ expr [pattern rhs ...] ... [else else-rhs ...])
@@ -2079,7 +2079,7 @@
                                   (loop (cdr l))))]
          [else (cons (car l) (loop (cdr l)))]))))
 
-  (define (gen ofn count? measure?)
+  (define (gen-gc ofn count? measure?)
     (guard
      (x [#t (raise x)])
      (parameterize ([current-output-port (open-output-file ofn 'replace)])
@@ -2136,6 +2136,6 @@
   (let-values ([(op get) (open-bytevector-output-port (native-transcoder))])
     (mkequates.h op))
   
-  (set! mkgc-ocd.inc (lambda (ofn) (gen ofn #f #f)))
-  (set! mkgc-oce.inc (lambda (ofn) (gen ofn #t #t)))
+  (set! mkgc-ocd.inc (lambda (ofn) (gen-gc ofn #f #f)))
+  (set! mkgc-oce.inc (lambda (ofn) (gen-gc ofn #t #t)))
   (set! mkvfasl.inc (lambda (ofn) (gen-vfasl ofn))))

@@ -284,17 +284,10 @@ FORCEINLINE void check_triggers(seginfo *si) {
   }
 }
 
-#if 0
-# include "gc-orig.inc"
-# ifdef ENABLE_OBJECT_COUNTS
-#  include "measure.inc"
-# endif
-#else
 #ifndef ENABLE_OBJECT_COUNTS
 # include "gc-ocd.inc"
 #else
 # include "gc-oce.inc"
-#endif
 #endif
 
 /* sweep_in_old() is like sweep(), but the goal is to sweep the

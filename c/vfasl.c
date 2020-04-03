@@ -993,15 +993,6 @@ static ptr vfasl_find_room(vfasl_info *vfi, int s, ITYPE t, iptr n) {
 
 #define FIND_ROOM(vfi, s, t, n, p) p = vfasl_find_room(vfi, s, t, n)
 
-#define copy_ptrs(ty, p1, p2, n) {\
-  ptr *Q1, *Q2, *Q1END;\
-  Q1 = (ptr *)UNTYPE((p1),ty);\
-  Q2 = (ptr *)UNTYPE((p2),ty);\
-  Q1END = (ptr *)((uptr)Q1 + n);\
-  while (Q1 != Q1END) *Q1++ = *Q2++;}
-
-// #include "vfasl-orig.inc"
-
 #include "vfasl.inc"
 
 static ptr vfasl_relocate_help(vfasl_info *vfi, ptr pp) {
