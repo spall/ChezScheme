@@ -408,7 +408,7 @@ ptr S_object_backreferences(void) {
 void Scompact_heap() {
   ptr tc = get_thread_context();
   S_pants_down += 1;
-  S_gc_oce(tc, S_G.max_nonstatic_generation, static_generation);
+  S_gc_oce(tc, S_G.max_nonstatic_generation, static_generation, Sfalse);
   S_pants_down -= 1;
 }
 
@@ -755,9 +755,9 @@ void S_fixup_counts(ptr counts) {
   RTDCOUNTSTIMESTAMP(counts) = S_G.gctimestamp[0];
 }
 
-void S_do_gc(IGEN mcg, IGEN tg) {
+ptr S_do_gc(IGEN mcg, IGEN tg, ptr count_roots) {
   ptr tc = get_thread_context();
-  ptr code;
+  ptr code, result;
 
   code = CP(tc);
   if (Sprocedurep(code)) code = CLOSCODE(code);
@@ -777,7 +777,7 @@ void S_do_gc(IGEN mcg, IGEN tg) {
     new_g = S_G.new_max_nonstatic_generation;
     old_g = S_G.max_nonstatic_generation;
    /* first, collect everything to old_g */
-    S_gc(tc, old_g, old_g);
+    result = S_gc(tc, old_g, old_g, count_roots);
    /* now transfer old_g info to new_g, and clear old_g info */
     for (s = 0; s <= max_real_space; s += 1) {
       S_G.first_loc[s][new_g] = S_G.first_loc[s][old_g]; S_G.first_loc[s][old_g] = FIX(0);
@@ -859,7 +859,7 @@ void S_do_gc(IGEN mcg, IGEN tg) {
     S_G.min_free_gen = S_G.new_min_free_gen;
     S_G.max_nonstatic_generation = new_g;
   } else {
-    S_gc(tc, mcg, tg);
+    result = S_gc(tc, mcg, tg, count_roots);
   }
   S_pants_down -= 1;
 
@@ -869,12 +869,16 @@ void S_do_gc(IGEN mcg, IGEN tg) {
   S_reset_allocation_pointer(tc);
 
   Sunlock_object(code);
+
+  return result;
 }
 
 
-void S_gc(ptr tc, IGEN mcg, IGEN tg) {
-  if (tg == static_generation || S_G.enable_object_counts || S_G.enable_object_backreferences)
-    S_gc_oce(tc, mcg, tg);
+ptr S_gc(ptr tc, IGEN mcg, IGEN tg, ptr count_roots) {
+  if (tg == static_generation
+      || S_G.enable_object_counts || S_G.enable_object_backreferences
+      || (count_roots != Sfalse))
+    return S_gc_oce(tc, mcg, tg, count_roots);
   else
-    S_gc_ocd(tc, mcg, tg);
+    return S_gc_ocd(tc, mcg, tg, Sfalse);
 }

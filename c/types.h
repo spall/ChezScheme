@@ -117,7 +117,7 @@ typedef int IFASLCODE;      /* fasl type codes */
 #define segment_bitmap_bytes    (bytes_per_segment >> (log2_ptr_bytes+3))
 #define segment_bitmap_index(p) ((((uptr)p + (typemod-1)) & (bytes_per_segment - 1)) >> log2_ptr_bytes)
 #define segment_bitmap_byte(p)  (segment_bitmap_index(p) >> 3)
-#define segment_bitmap_bit(p)   (segment_bitmap_index(p) & 0x7)
+#define segment_bitmap_bit(p)   ((uptr)1 << (segment_bitmap_index(p) & 0x7))
 
 #define SPACE(p) SegmentSpace(ptr_get_segment(p))
 #define GENERATION(p) SegmentGeneration(ptr_get_segment(p))
@@ -143,6 +143,7 @@ typedef struct _seginfo {
     octet *nonkey_mask;                     /* objects to not treat as reachable, yet */
   };
   ptr locked_objects;                       /* list of objects (including duplicates) for locked in this segment */
+  octet *locked_mask;
   ptr unlocked_objects;                     /* list of objects (no duplicates) for formerly locked */
   union {
 #ifdef PRESERVE_FLONUM_EQ

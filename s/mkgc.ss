@@ -526,7 +526,7 @@
                (&& (!= (set! qsi (MaybeSegInfo (ptr_get_segment cdr_p))) NULL)
                    (&& (== (-> qsi space) (-> si space))
                        (&& (!= (FWDMARKER cdr_p) forward_marker)
-                           (! (locked cdr_p)))))))
+                           (! (locked si cdr_p)))))))
        (check_triggers qsi)
        (size size-pair 2)
        (define new_cdr_p : ptr (cast ptr (+ (cast uptr _copy_) size_pair)))
@@ -1241,7 +1241,7 @@
        (case (lookup 'mode config)
          [(copy)
           (code-block
-           "if (locked(p)) return p;"
+           "if (locked(si, p)) return p;"
            "change = 1;"
            "check_triggers(si);"
            (code-block
