@@ -78,9 +78,9 @@
 ;;  - (copy-flonum <field>) : copy flonum and forward
 ;;  - (copy-flonum* <field>) : copy potentially forwaded flonum
 ;;  - (copy-type <field>) : copy type from `_` to `_copy_`
-;;  - (count <counter> [<size> [<scale> [<mode>]]]) :
+;;  - (count <counter> [<size> [<scale> [<modes>]]]) :
 ;;       : uses preceding `size` declaration unless <size>;
-;;         normally counts in copy mode, but <mode> can override
+;;         normally counts in copy mode, but <modes> can override
 ;;  - (skip-forwarding) : disable forward-pointer installation in copy mode
 ;;
 ;; In the above declarations, nonterminals like <space> can be
@@ -173,7 +173,9 @@
       [(or-assume-continuation
         (& (code-type code) (<< code-flag-continuation code-flags-offset)))
        ;; continuation
-       (space space-continuation)
+       (space (cond
+                [(and-counts (is_counting_root si _)) space-count-pure]
+                [else space-continuation]))
        (vfasl-fail "closure")
        (size size-continuation)
        (case-mode
@@ -195,6 +197,7 @@
                                   (& (continuation-stack-length _))
                                   (continuation-stack-clength _))))]
              [else])
+            (count countof-stack (continuation-stack-length _) 1 [sweep measure])
             (trace continuation-link)
             (trace-return continuation-return-address (continuation-return-address _))
             (case-mode
@@ -210,6 +213,7 @@
        ;; closure (not a continuation)
        (space
         (cond
+          [(and-counts (is_counting_root si _)) space-count-impure]
           [_backreferences?_
            space-closure]
           [else
@@ -266,7 +270,7 @@
       (space
        (cond
          [(and-counts (is_counting_root si _))
-          space-count-root]
+          space-count-impure]
          [(&& (== (record-type-pm rtd) (FIX 1))
               (== (record-type-mpm rtd) (FIX 0)))
           ;; No pointers except for type
@@ -307,7 +311,7 @@
       (vfasl-set-base-rtd)
       (pad (when (or-vfasl
                   (\|\| (== p_spc space-pure) (\|\| (== p_spc space-impure)
-                                               (and-counts (== p_spc space-count-root)))))
+                                               (and-counts (== p_spc space-count-impure)))))
              (let* ([ua_size : uptr (unaligned_size_record_inst len)])
                (when (!= p_sz ua_size)
                  (set! (* (cast ptr* (+ (cast uptr (UNTYPE _copy_ type_typed_object)) ua_size)))
@@ -473,7 +477,9 @@
       (count countof-code)]
 
      [thread
-      (space space-pure-typed-object)
+      (space (cond
+               [(and-counts (is_counting_root si _)) space-count-pure]
+               [else space-pure-typed-object]))
       (vfasl-fail "thread")
       (size size-thread)
       (case-mode
@@ -500,6 +506,7 @@
        [copy (set! (array-ref S_G.phantom_sizes tg)
                    +=
                    (phantom-length _))]
+       [measure (set! measure_total += (phantom-length _))]
        [else])])]))
 
 (define-trace-macro (trace-nonself field)
@@ -768,7 +775,7 @@
              (S_fixup_counts counts))])
         (set! (rtd-counts-data counts tg) (+ (rtd-counts-data counts tg) 1))
         ;; Copies size that we've already gathered, but needed for counting from roots:
-        (when (== p_spc space-count-root) (set! count_root_bytes += p_sz))
+        (when (== p_spc space-count-impure) (set! count_root_bytes += p_sz))
         (count countof-record))]
      [off])]
    [else]))
@@ -803,10 +810,13 @@
               (set! (tc-scheme-stack tc) (copy_stack old_stack
                                                      (& (tc-scheme-stack-size tc))
                                                      (+ clength (sizeof ptr))))
+              (count countof-stack (tc-scheme-stack-size tc) 1 sweep)
               (set! (tc-sfp tc) (cast ptr (+ (cast uptr (tc-scheme-stack tc)) clength)))
               (set! (tc-esp tc) (cast ptr (- (+ (cast uptr (tc-scheme-stack tc))
                                                 (tc-scheme-stack-size tc))
                                              stack_slop))))))]
+       [measure
+        (measure_add_stack_size (tc-scheme-stack tc) (tc-scheme-stack-size tc))]
        [else])
       (set! (tc-stack-cache tc) Snil)
       (trace (tc-cchain tc))
@@ -1508,8 +1518,8 @@
             (statements (cons `(count ,counter ,size 1 copy) (cdr l)) config)]
            [`(count ,counter ,size ,scale)
             (statements (cons `(count ,counter ,size ,scale copy) (cdr l)) config)]
-           [`(count ,counter ,size ,scale ,mode)
-            (code (count-statement counter size scale mode
+           [`(count ,counter ,size ,scale ,modes)
+            (code (count-statement counter size scale modes
                                    (cons `(constant-size? ,(symbol? size))
                                          config))
                   (statements (cdr l) config))]
@@ -1887,29 +1897,30 @@
           #f])]
       [else #f]))
 
-  (define (count-statement counter size scale mode config)
-    (cond
-      [(eq? mode (lookup 'mode config))
-       (cond
-         [(lookup 'counts? config #f)
-          (let ([tg (if (eq? mode 'copy)
-                        "tg"
-                        "target_generation")])
-            (code
-             (format "S_G.countof[~a][~a] += ~a;" tg (as-c counter) scale)
-             (if (lookup 'constant-size? config #f)
-                 #f
-                 (format "S_G.bytesof[~a][~a] += ~a;"
-                         tg
-                         (as-c counter)
-                         (let ([s (if size
-                                      (expression size config)
-                                      "p_sz")])
-                           (if (eqv? scale 1)
-                               s
-                               (format "~a * (~a)" scale s)))))))]
-         [else #f])]
-      [else #f]))
+  (define (count-statement counter size scale modes config)
+    (let ([mode (lookup 'mode config)])
+      (cond
+        [(or (eq? mode modes) (and (pair? modes) (memq mode modes)))
+         (cond
+           [(lookup 'counts? config #f)
+            (let ([tg (if (eq? mode 'copy)
+                          "tg"
+                          "target_generation")])
+              (code
+               (format "S_G.countof[~a][~a] += ~a;" tg (as-c counter) scale)
+               (if (lookup 'constant-size? config #f)
+                   #f
+                   (format "S_G.bytesof[~a][~a] += ~a;"
+                           tg
+                           (as-c counter)
+                           (let ([s (if size
+                                        (expression size config)
+                                        "p_sz")])
+                             (if (eqv? scale 1)
+                                 s
+                                 (format "~a * (~a)" scale s)))))))]
+           [else #f])]
+        [else #f])))
 
   (define (field-expression field config arg protect?)
     (if (symbol? field)

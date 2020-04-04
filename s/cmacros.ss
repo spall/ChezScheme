@@ -663,11 +663,12 @@
       (impure-record "ip-rec" #\s 10)    ;
       (impure-typed-object "ip-tobj" #\t 11) ; as needed (instead of impure) for backtraces
       (closure "closure" #\l 12)         ; as needed (instead of pure/impure) for backtraces
-      (count-root "count-root" #\z 13))  ; like impure-typed-object, but delayed for counting from roots
+      (count-pure "count-pure" #\y 13)     ; like pure, but delayed for counting from roots
+      (count-impure "count-impure" #\z 14)); like impure-typed-object, but delayed for counting from roots
     (unswept
-      (data "data" #\d 14)))             ; unswept objects allocated here
+      (data "data" #\d 15)))             ; unswept objects allocated here
   (unreal
-    (empty "empty" #\e 15)))             ; available segments
+    (empty "empty" #\e 16)))             ; available segments
 
 ;;; enumeration of types for which gc tracks object counts
 ;;; also update gc.c

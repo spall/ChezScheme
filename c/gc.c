@@ -75,6 +75,7 @@ static IBOOL flush_measure_stack();
 static void init_measure_mask(seginfo *si);
 static void init_counting_mask(seginfo *si);
 static void push_measure(ptr p);
+static void measure_add_stack_size(ptr stack, uptr size);
 static void add_ephemeron_to_pending_measure(ptr pe);
 static void add_trigger_ephemerons_to_pending_measure(ptr pe);
 static void check_ephemeron_measure(ptr pe);
@@ -541,7 +542,7 @@ ptr GCENTRY(ptr tc, IGEN mcg, IGEN tg, ptr count_roots_ls) {
 
              /* now count this object's size, if we have deferred it before */
              si = SegInfo(ptr_get_segment(p));
-             if (si->space == space_count_root)
+             if ((si->space == space_count_pure) || (si->space == space_count_impure))
                count_root_bytes -= size_object(p);
            }
          }
@@ -1199,7 +1200,7 @@ static void sweep_generation(tc, g) ptr tc; IGEN g; {
         pp = (ptr *)((uptr)pp + size_object(p));
     })
 
-    /* don't sweep from space_count_root */
+    /* don't sweep from space_count_pure or space_count_impure */
 
     /* Waiting until sweeping doesn't trigger a change reduces the
        chance that an ephemeron must be reigistered as a
@@ -1391,7 +1392,7 @@ static void sweep_dirty(void) {
                     }
                   }
                 } else if ((s == space_impure)
-                           || (s == space_impure_typed_object)  || (s == space_count_root)
+                           || (s == space_impure_typed_object) || (s == space_count_impure)
                            || (s == space_closure)) {
                   while (pp < ppend && *pp != forward_marker) {
                     /* handle two pointers at a time */
@@ -1846,6 +1847,7 @@ static uptr total_size_so_far() {
       if (bytes == 0) bytes = S_G.countof[g][i] * S_G.countof_size[i];
       total += bytes;
     }
+    total += S_G.phantom_sizes[g];
   }
 
   return total - count_root_bytes;
@@ -1953,6 +1955,14 @@ static void push_measure(ptr p)
   }
   
   *(measure_stack++) = p;
+}
+
+static void measure_add_stack_size(ptr stack, uptr size) {
+  seginfo *si = SegInfo(ptr_get_segment(stack));
+  if (!(si->space & space_old)
+      && (si->generation <= max_measure_generation)
+      && (si->generation >= min_measure_generation))
+    measure_total += size;
 }
 
 static void add_ephemeron_to_pending_measure(ptr pe) {
