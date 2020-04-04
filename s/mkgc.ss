@@ -306,7 +306,8 @@
       (trace-record rtd len)
       (vfasl-set-base-rtd)
       (pad (when (or-vfasl
-                  (\|\| (== p_spc space_pure) (== p_spc space_impure)))
+                  (\|\| (== p_spc space-pure) (\|\| (== p_spc space-impure)
+                                               (and-counts (== p_spc space-count-root)))))
              (let* ([ua_size : uptr (unaligned_size_record_inst len)])
                (when (!= p_sz ua_size)
                  (set! (* (cast ptr* (+ (cast uptr (UNTYPE _copy_ type_typed_object)) ua_size)))

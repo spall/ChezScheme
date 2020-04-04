@@ -1913,8 +1913,10 @@ static void push_measure(ptr p)
 
   if (si->space & space_old) {
     /* We must be in a GC--measure fusion, so switch back to GC */
-    relocate(&p)
-    return;
+    if (!locked(si, p)) {
+      relocate(&p)
+      return;
+    }
   }
 
   if (si->generation > max_measure_generation)
