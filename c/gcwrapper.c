@@ -128,7 +128,7 @@ void S_gc_init() {
   INITVECTIT(S_G.countof_names, countof_oblist) = S_intern((const unsigned char *)"oblist");
     S_G.countof_size[countof_guardian] = 0;
   INITVECTIT(S_G.countof_names, countof_ephemeron) = S_intern((const unsigned char *)"ephemeron");
-    S_G.countof_size[countof_ephemeron] = 0;
+    S_G.countof_size[countof_ephemeron] = size_ephemeron;
   INITVECTIT(S_G.countof_names, countof_stencil_vector) = S_intern((const unsigned char *)"stencil-vector");
     S_G.countof_size[countof_stencil_vector] = 0;
   INITVECTIT(S_G.countof_names, countof_record) = S_intern((const unsigned char *)"record");

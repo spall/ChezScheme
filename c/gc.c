@@ -510,7 +510,7 @@ ptr GCENTRY(ptr tc, IGEN mcg, IGEN tg, ptr count_roots_ls) {
 #ifdef ENABLE_OBJECT_COUNTS
   /* sweep count_roots in order and accumulate counts */
      if (count_roots_len > 0) {
-       ptr prev = NULL; uptr prev_total = 0;
+       ptr prev = NULL; uptr prev_total = total_size_so_far();
        iptr i;
 
 # ifdef ENABLE_MEASURE
@@ -531,7 +531,8 @@ ptr GCENTRY(ptr tc, IGEN mcg, IGEN tg, ptr count_roots_ls) {
                || !count_roots[i].weak) {
              /* reached or older; sweep transitively */
              relocate(&p)
-             sweep(tc, p);
+             if ((si->space & ~(space_old|space_locked)) != space_ephemeron) /* not ok to resweep ephemeron */
+               sweep(tc, p);
              ADD_BACKREFERENCE(p)
              sweep_generation(tc, tg);
 # ifdef ENABLE_MEASURE
