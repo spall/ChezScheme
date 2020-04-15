@@ -32,6 +32,8 @@ mainsrc = "main.c"
 
 mainobj = mainsrc -<.> "o"
 
+main = "../boot" </> m </> "main" <.> o
+
 -- doit: ${Scheme}
 
 source = kernelsrc ++ kernelhdr ++ mdsrc ++ mainsrc
