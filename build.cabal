@@ -1,0 +1,26 @@
+cabal-version: >= 1.18
+build-type:    Simple
+name:          build
+version:       0.1
+
+executable schemeBuild
+    default-language: Haskell2010
+    main-is: Build.hs
+    ghc-options: -main-is Build.main -threaded
+    build-depends:
+        base >= 4.10 && < 5,
+        shake >= 0.19,
+        filepattern,
+        filepath,          
+        extra,
+        rattle,
+        directory,
+        unix
+        
+    other-modules:
+        Ta6le,
+        S.Base,
+        C.Base,
+        C.Config,
+        C.Ta6le,
+        S.Ta6le

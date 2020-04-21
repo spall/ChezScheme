@@ -1,25 +1,29 @@
 
-module Build() where
+module Build(main) where
 
 import System.Environment
+import System.Directory
+import System.Exit
 
-mach = "ta6le"
+import Ta6le
 
 machs = let (*) = (,) in
-  ["ta6le" * 
+  ["ta6le" * Ta6le.build]
+
+main :: IO ()
+main = do
+  [mach] <- getArgs
+  case lookup mach machs of
+    Just act -> do
+      withCurrentDirectory mach act
+    _ -> do
+      putStrLn $ "Unknown machine type, expected one of\n " ++ unwords (map fst machs)
+      exitFailure
 
 -- default
-build :: IO ()
-build = do -- go into machine dir and do build
-  -- cd mach/c && make
-  withCurrentDirectory (mach "/" "c") $ do
-    -- run the appropraite mach build commands
-  
-  -- cd mach/s && make bootstrap
-  
-  -- cd mach && make build
-  --    cd c && make; cd s && make bootstrap
-  
+{-
+build :: String -> IO ()
+build = todo
   
 run :: IO ()
 run = todo
@@ -61,3 +65,4 @@ clean = todo
 
 distclean :: IO ()
 distclean = todo
+-}
