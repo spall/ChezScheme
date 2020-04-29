@@ -15,7 +15,8 @@ executable schemeBuild
         extra,
         rattle,
         directory,
-        unix
+        unix,
+        cmdargs
         
     other-modules:
         Ta6le,

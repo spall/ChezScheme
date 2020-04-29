@@ -6,6 +6,7 @@ import System.Directory
 import System.Exit
 
 import Ta6le
+import Configure
 
 machs = let (*) = (,) in
   ["ta6le" * Ta6le.build]
