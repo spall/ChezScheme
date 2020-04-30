@@ -1,12 +1,11 @@
 {-# LANGUAGE RecordWildCards, DeriveDataTypeable #-}
 
-module Configure() where
+module Configure(configure) where
 
 import System.Console.CmdArgs.Explicit
 import qualified System.Directory as S
 import Control.Monad.Extra
 import Control.Monad.IO.Class
-import qualified System.FilePattern.Directory as D
 import System.FilePath
 import System.Info.Extra
 import System.Exit
@@ -14,6 +13,7 @@ import Development.Shake
 import System.Environment
 import Data.Maybe
 import System.IO.Unsafe
+import Data.List.Extra
 
 type Variable = String
 
@@ -29,7 +29,9 @@ getMachs :: IO [String]
 getMachs = do
   ifM (S.doesDirectoryExist "boot")
     (do
-        dirs <- liftIO $ D.getDirectoryFiles "boot" ["//scheme.boot"]
+        putStrLn "here"
+        dirs <- getDirectoryFilesIO "boot" ["//scheme.boot"]
+        putStrLn $ show dirs
         return $ map takeDirectory dirs)
     $ return  []
 
@@ -98,19 +100,19 @@ initConfig = do
       lz4Dep_ = "../lz4/lib/liblz4.a"
       zlibLib_ = "../zlib//libz.a"
       lz4Lib_ = "../lz4/lib/liblz4.a"
-      zlibHeaderDep = ["../zlib/zconf.h", "../zlib/zlib.h"]
+      zLibHeaderDep_ = ["../zlib/zconf.h", "../zlib/zlib.h"]
       lz4HeaderDep_ = ["../lz4/lib/lz4.h", "../lz4/lib/lz4frame.h"]
-      kernel_ = Left "kernelLib"
+      kernel_ = "kernelLib"
       installKernelTarget = Left "installKernelLib"
-      installZLibTarget = Left "installZLib"
-      installz4Target = Left "installlz4"
+      installzLibTarget = Left "installZLib"
+      installlz4Target = Left "installlz4"
 
   bits <- f ["uname", "-a", "|", "egrep", "\'amd64|x86_64\'", ">", "/dev/null", "2>&1"]
           (return BITS64) (return BITS32)
 
   -- 3. call uname to get system info    
-  (m32, m64, tm32, tm64, installPrefix, installManSuffix, gzipmanpages) <-
-    case configUname of
+  (m32, m64, tm32, tm64, installPrefix, installManSuffix, gzipManPages) <-
+    case trim configUname of
       "Linux" -> f ["uname", "-a", "|", "egrep", "\'i386|i686|amd64|athlon|x86_64\'", ">", "/dev/null", "2>&1"]
                    (return ("i3le", "a6le", "ti3le", "ta6le", "/usr", "share/man", True))
                    $ f ["uname", "-a", "|", "grep", "-i", "power", ">", "/dev/null", "2>&1"]
@@ -238,9 +240,18 @@ initConfig = do
       arflags = words arFlags_
       ranlib = ranlib_
       windres = windres_
-      kernel = kernel_
+      kernel = Left kernel_
+      zlibInc = zlibInc_
+      lz4Inc = lz4Inc_
+      zlibDep = zlibDep_
+      lz4Dep = lz4Dep_
+      zlibLib = zlibLib_
+      lz4Lib = lz4Lib_
+      zLibHeaderDep = zLibHeaderDep_
+      lz4HeaderDep = lz4HeaderDep_
+      kernelLinkDeps = Left $ kernel_ ++ "LinkDeps"
+      kernelLinkLibs = Left $ kernel_ ++ "LinkLibs"
       
-
   
   return Config{..}
   {-
@@ -292,8 +303,8 @@ data Config = Config
   ,zLibHeaderDep :: [FilePath]
   ,lz4HeaderDep :: [FilePath]
   ,kernel :: Either Variable String
-  ,kernelLinkDeps :: [String]
-  ,kernelLinkLibs :: [String]
+  ,kernelLinkDeps :: Either Variable [String]
+  ,kernelLinkLibs :: Either Variable [String]
   } deriving (Show, Read)
   
 data BITS = BITS64 | BITS32 deriving Eq
@@ -303,7 +314,6 @@ data ConfigArgs = ConfigArgs
   ,workArea :: String -- x
   ,threads :: Bool -- x
   ,tempRoot :: String -- x
-  ,gzipmanpages :: Bool -- x
   ,installPrefix :: String -- x
   ,installOwner :: String -- x
   ,installGroup :: String -- x
@@ -313,12 +323,9 @@ data ConfigArgs = ConfigArgs
   ,installSchemeName :: String -- x
   ,installPetiteName :: String -- x
   ,installScriptName :: String -- x
-  ,toolPrefix :: String -- x
   ,gzipManPages :: Bool -- x
   ,disableX11 :: Bool -- x
   ,disableCurses :: Bool -- x
-  ,libkernel :: Bool -- x
-  ,kernelObj :: Bool -- x
   ,cc_ :: String -- x
   ,cppFlags_ :: String -- x
   ,cFlags_ :: String -- x
@@ -334,12 +341,12 @@ data ConfigArgs = ConfigArgs
   ,lz4Dep_ :: FilePath -- x
   ,zlibLib_ :: FilePath -- x
   ,lz4Lib_ :: FilePath -- x
-  ,zlibHeaderDep :: [FilePath] -- x
+  ,zLibHeaderDep_ :: [FilePath] -- x
   ,lz4HeaderDep_ :: [FilePath] -- x
-  ,kernel_ :: Either Variable String -- x
+  ,kernel_ :: String -- x
   ,installKernelTarget :: Either Variable String -- x
-  ,installzLibTarget :: String -- x
-  ,installlz4Target :: String -- x
+  ,installzLibTarget :: Either Variable String -- x
+  ,installlz4Target :: Either Variable String -- x
   ,bits :: BITS -- x
   }
 
@@ -426,18 +433,18 @@ disableCursesFlag = flagNone ["disable-curses"] update "disable [n]curses suppor
 libKernelFlag :: Flag ConfigArgs
 libKernelFlag = flagNone ["libkernel"] update "build libkernel.a (the default)"
   where update config@ConfigArgs{..} =
-          config{kernel_=Left "kernelLib", installKernelTarget= Left "installKernelLib"
+          config{kernel_="kernelLib", installKernelTarget= Left "installKernelLib"
                 ,installzLibTarget = if (zlibInc_ /= "")
-                                     then "installZLib"
+                                     then Left "installZLib"
                                      else installzLibTarget
                 ,installlz4Target = if (lz4Inc_ /= "")
-                                    then "installlz4"
+                                    then Left "installlz4"
                                     else installlz4Target}
 
 kernelObjFlag :: Flag ConfigArgs
 kernelObjFlag = flagNone ["kernelobj"] update "build kernel.o instead of libkernel.a"
-  where update config = config{kernel_=Left "kernelO", installKernelTarget=Left "installKernelObj"
-                              ,installzLibTarget="", installlz4Target=""}
+  where update config = config{kernel_="kernelO", installKernelTarget=Left "installKernelObj"
+                              ,installzLibTarget=Right "", installlz4Target=Right ""}
 
 ccFlag :: Flag ConfigArgs
 ccFlag = flagReq ["CC"] update "C compiler" "C compiler"
@@ -477,13 +484,13 @@ windresFlag = flagReq ["WINDRES"] update "resource compiler" "resource compiler"
 
 zLibFlag :: Flag ConfigArgs
 zLibFlag = flagReq ["ZLIB"] update "lib" "link to <lib> instead of own zlib"
-  where update v config = Right config{zlibLib_=v, zlibInc_="", zlibDep_="", zlibHeaderDep=[]
-                                      ,installzLibTarget=""}
+  where update v config = Right config{zlibLib_=v, zlibInc_="", zlibDep_="", zLibHeaderDep_=[]
+                                      ,installzLibTarget=Right ""}
 
 lz4Flag :: Flag ConfigArgs
 lz4Flag = flagReq ["LZ4"] update "lib" "link to <lib> instead of own LZ4"
   where update v config = Right config{lz4Lib_=v, lz4Inc_="", lz4Dep_="", lz4HeaderDep_=[]
-                                      ,installlz4Target=""}
+                                      ,installlz4Target=Right ""}
           
 cargs :: [String] -> ConfigArgs -> Mode ConfigArgs
 cargs machs ic = (modeEmpty ic)
@@ -506,7 +513,5 @@ f c success failure = do
     ExitSuccess -> success
     _ -> failure
 
-main :: IO ()
-main = do
-  configs <- initConfig
-  putStrLn "done for now"
+configure :: IO Config
+configure = initConfig
