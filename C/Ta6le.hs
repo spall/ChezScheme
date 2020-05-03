@@ -1,17 +1,22 @@
+{-# LANGUAGE RecordWildCards #-}
 
 module C.Ta6le(build) where
 
 import System.Directory
 import Development.Rattle
 import Development.Shake.Command
+import Data.Maybe
+import qualified Configure as C
 import qualified C.Base as B
+
+-- were in base but 
 
 m = "ta6le"
 cpu = "X86_64"
 
-mdclib = ["-lm", "-ldl", B.nCursesLib, "-lpthread", "-lrt", "-luuid"]
+mdclib ncurseslib = ["-lm", "-ldl", ncurseslib, "-lpthread", "-lrt", "-luuid"]
 cc = "cc" -- todo check what this really is
-ccFlags = B.cppflags ++ ["-m64", "-msse2", "-Wpointer-arith", "-Wall", "-Wextra", "-Werror", "-Wno-implicit-fallthrough", "-O2", "-D_REENTRANT", "-pthread"] ++ B.cflags
+ccFlags c@C.Config{..} = cppflags ++ ["-m64", "-msse2", "-Wpointer-arith", "-Wall", "-Wextra", "-Werror", "-Wno-implicit-fallthrough", "-O2", "-D_REENTRANT", "-pthread"] ++ cflags
 o = "o"
 mdsrc = "i3le.c"
 mdobj = "i3le.o"
@@ -28,22 +33,28 @@ kernel = B.kernel m
 .c.o:
 	$C -c -D${Cpu} -I${Include} ${zlibInc} ${LZ4Inc} $*.c
 -}
-buildObj :: FilePath -> IO ()
-buildObj c = cmd $ [cc] ++ ccFlags ++ ["-c", "-D" ++ cpu, "-I" ++ include , B.zLibInc, B.lz4Inc, c]
+buildObj :: C.Config -> FilePath -> IO ()
+buildObj config@C.Config{..} cf = cmd $ [cc] ++ ccFlags config ++ ["-c", "-D" ++ cpu, "-I" ++ include , zlibInc, lz4Inc, cf]
 
-build :: IO ()
-build = withCurrentDirectory "c" $ do
+build :: C.Config -> IO ()
+build config@C.Config{..} = withCurrentDirectory "c" $ do
+  -- were in base but rely on defs from config 
+  let kernelLibLinkDeps = [zlibDep, lz4Dep]
+      kernelLibLinkLibs = [zlibLib, lz4Lib]
+      kernelLinkLibs = kernelLibLinkLibs
+      kernel_ = fromJust $ either (`lookup` [("kernelLib", kernelLib), ("kernelO", B.kernelO m o)]) Just kernel
+  
   -- copy files
   fs <- listDirectory "../../c"
   mapM_ B.cpsrc fs -- for all files in ../../c
   -- build kernel object files
-  mapM_ buildObj $ mdsrc:B.kernelsrc -- build kernelobjs
-  cmd_ $ [B.ar, B.arFlags, kernelLib] ++ kernelObj -- run ar on those object files we just built
+  mapM_ (buildObj config) $ mdsrc:B.kernelsrc -- build kernelobjs
+  cmd_ $ [ar] ++ arflags ++ [kernelLib] ++ kernelObj -- run ar on those object files we just built
   
   -- kernellinkdeps = kernelliblinkdeps = [zlibdep, lz4dep]
   -- zlibdep = "../zlib/libz.a"
   -- ../zlib/configure.log
-  cmd_ [(Cwd "../zlib"),(AddEnv "CFLAGS" $ B.cflags ++ " -m64")] ["./configure", "--64"]
+  cmd_ [(Cwd "../zlib"),(AddEnv "CFLAGS" $ (unwords cflags) ++ " -m64")] ["./configure", "--64"]
   -- TODO ZLib.build  ; for now just call make since the info is generated from the above configure
   cmd_ (Cwd "../zlib") ["make"]
   -- lz4dep
@@ -54,10 +65,10 @@ build = withCurrentDirectory "c" $ do
 	cp -p ${mainobj} ${Main}
   -}
   -- build mainobj
-  buildObj B.mainsrc
+  buildObj config B.mainsrc
   -- copy main obj to Main
   cmd_ ["cp", "-p", mainObj, main]
-  cmd $ [cc] ++ ccFlags ++ ["-rdynamic", "-o", scheme, main, kernel] ++ mdclib ++ B.kernelLinkLibs ++ B.ldflags  
+  cmd $ [cc] ++ ccFlags config ++ ["-rdynamic", "-o", scheme, main, kernel_] ++ mdclib ncursesLib ++ kernelLinkLibs ++ ldflags  
 
 {-
 ${KernelO}: ${kernelobj} ${zlibDep} ${LZ4Dep}

@@ -4,6 +4,7 @@ module Build(main) where
 import System.Environment
 import System.Directory
 import System.Exit
+import Control.Monad.Extra
 
 import Ta6le
 import Configure
@@ -13,10 +14,29 @@ machs = let (*) = (,) in
 
 main :: IO ()
 main = do
-  [mach] <- getArgs
-  case lookup mach machs of
+  args <- getArgs
+  config <- case args of
+              "--configure":rest -> do
+                config <- withArgs rest configure
+                ifM (doesFileExist ".config")
+                  (do
+                      removeFile ".config"
+                      writeFile ".config" $ show config)
+                  (writeFile ".config" $ show config)
+                return config
+                  
+              _:rest -> ifM (doesFileExist ".config")
+                        (do
+                            str <- readFile ".config"
+                            return $ read str) -- read config from file
+                        (do
+                            putStrLn $ "Could not find configuration; please run with --configure"
+                            exitFailure)
+  putStrLn $ show config
+
+  case lookup (m config) machs of
     Just act -> do
-      withCurrentDirectory mach act
+      withCurrentDirectory (m config) $ act config
     _ -> do
       putStrLn $ "Unknown machine type, expected one of\n " ++ unwords (map fst machs)
       exitFailure

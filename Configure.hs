@@ -1,6 +1,6 @@
 {-# LANGUAGE RecordWildCards, DeriveDataTypeable #-}
 
-module Configure(configure) where
+module Configure(configure, Config(..)) where
 
 import System.Console.CmdArgs.Explicit
 import qualified System.Directory as S
@@ -214,20 +214,20 @@ initConfig = do
     
   -- 17. create makefiles; skipping
   -- 18. write to config.h
-  writeFile (w </> "c/config.h") $ "#define SCHEME_SCRIPT " ++ installScriptName
-    ++ "\n #ifndef WIN32 \n #define DEFAULT_HEAP_PATH " ++ installLib </> "csv%v/%m"
+  writeFile (w </> "c/config.h") $ "#define SCHEME_SCRIPT \"" ++ installScriptName ++ "\""
+    ++ "\n #ifndef WIN32 \n #define DEFAULT_HEAP_PATH \"" ++ nInstallLib </> "csv%v/%m\""
     ++ "\n #endif"                                                                
   
   -- 19. if disablex11 = yes then write something to config.h
-  return $ when disableX11
+  return $ when nDisableX11
     unsafePerformIO $ appendFile (w </> "c/config.h") "define DISABLE_X11"
 
   -- 20
   (cursesLib, ncursesLib) <- if disableCurses then do
     appendFile (workArea </> "c/config.h") "define DISABLE_CURSES"
-    return (Nothing, Nothing)
+    return ("", "")
                              else do
-    return (Just "-lcurses", Just "-lncurses")
+    return ("-lcurses", "-lncurses")
  
   -- 21. write to mf-config
   -- todo make sure variables are correct so we can pass our structure ....
@@ -292,8 +292,8 @@ data Config = Config
   ,arflags :: [String]
   ,ranlib :: String
   ,windres :: String
-  ,cursesLib :: Maybe String
-  ,ncursesLib :: Maybe String
+  ,cursesLib :: String
+  ,ncursesLib :: String
   ,zlibInc :: FilePath
   ,lz4Inc :: FilePath
   ,zlibDep :: FilePath

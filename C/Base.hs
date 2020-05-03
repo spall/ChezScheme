@@ -1,7 +1,7 @@
 
-module C.Base(nCursesLib, cppflags, cflags, include, zLibInc, lz4Inc, cpsrc
-             ,kernelsrc, ar, arFlags, kernelLib, kernelObj,mainsrc,mainObj
-             ,main, scheme, kernel, kernelLinkLibs, ldflags) where
+module C.Base(include, cpsrc
+             ,kernelsrc, kernelLib, kernelObj,mainsrc,mainObj
+             ,main, scheme, kernel, kernelO) where
 
 import System.Directory
 import System.FilePath
@@ -11,7 +11,6 @@ import System.Posix.Files
 import Control.Monad.Extra
 
 import Development.Rattle
-import C.Config
 
 {- todo fix srcfiles
 buildliblz4a :: IO ()
@@ -36,9 +35,6 @@ kernelOLinkLibs = ""
 
 kernel = kernelLib
 kernelLib m = "../boot" </> m </> "libkernel.a"
-kernelLibLinkDeps = [zLibDep, lz4Dep]
-kernelLibLinkLibs = [zLibLib, lz4Lib]
-kernelLinkLibs = kernelLibLinkLibs
 
 kernelsrc = ["statics.c", "segment.c", "alloc.c", "symbol.c", "intern.c", "gcwrapper.c", "gc-ocd.c"
             ,"gc-oce.c", "number.c", "schsig.c", "io.c", "new-io.c", "print.c", "fasl.c", "vfasl.c"
