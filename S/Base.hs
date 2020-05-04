@@ -41,12 +41,15 @@ allsrc archincludes = basesrc ++ compilersrc ++ ["cmacros.ss"] ++ archincludes
      ,"hashtable-types.ss", "np-languages.ss", "bitset.ss", "fxmap.ss"]
 
 build :: String -> [FilePath] -> IO ()
-build m aic = withCurrentDirectory "s" $ do
+build m aic = do
   mapM_ (\f -> if isWindows
                then cmd_ ["cp", "-p", "../../s" </> f, f]
                else ifM (doesPathExist f)
                     (return ())
-                    $ createSymbolicLink ("../../s" </> f) f) $ allsrc aic
+                    (do
+                        putStrLn $ "Creating link for " ++ f
+                        createSymbolicLink ("../../s" </> f) f)) $ (allsrc aic) ++ ["update-revision"]
+    
   -- revision
   cmd_ Shell ["./update-revision", ">", revision m]
   cmd ["make", "allx"]
