@@ -53,14 +53,9 @@ main = do
 
 -- default
 {-
-build :: String -> IO ()
-build = todo
   
 run :: IO ()
 run = todo
-
-install :: IO ()
-install = todo
 
 uninstall :: IO ()
 uninstall = todo
