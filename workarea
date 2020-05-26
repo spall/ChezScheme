@@ -170,6 +170,7 @@ for dir in `echo zlib` ; do
   if [ ! -e $W/$dir ] ; then
     /bin/cp -R $dir $W/$dir
   fi
+  /bin/cp -p Zlib/configure $W/$dir/configure
 done
 
 for dir in `echo lz4` ; do

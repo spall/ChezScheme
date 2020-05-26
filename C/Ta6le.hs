@@ -8,6 +8,8 @@ import Development.Shake.Command
 import Data.Maybe
 import qualified Configure as C
 import qualified C.Base as B
+import qualified Zlib.Build as Zlib
+import qualified Zlib.Configure as Zlib.Config
 
 -- were in base but 
 
@@ -54,9 +56,12 @@ build config@C.Config{..} = withCurrentDirectory "c" $ do
   -- kernellinkdeps = kernelliblinkdeps = [zlibdep, lz4dep]
   -- zlibdep = "../zlib/libz.a"
   -- ../zlib/configure.log
-  cmd_ [(Cwd "../zlib"),(AddEnv "CFLAGS" $ (unwords cflags) ++ " -m64")] ["./configure", "--64"]
+
+  -- cmd_ [(Cwd "../zlib"),(AddEnv "CFLAGS" $ (unwords cflags) ++ " -m64")] ["./configure", "--64"]
+  zlibConfig <- withCurrentDirectory "../zlib" $ Zlib.Config.config $ cflags ++ ["-m64"]
   -- TODO ZLib.build  ; for now just call make since the info is generated from the above configure
-  cmd_ (Cwd "../zlib") ["make"]
+
+  withCurrentDirectory "../zlib" $ Zlib.build zlibConfig
   -- lz4dep
   -- TODO when buildStatic buildliblz4a
 
