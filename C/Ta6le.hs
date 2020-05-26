@@ -5,7 +5,9 @@ module C.Ta6le(build) where
 import System.Directory
 import Development.Rattle
 import Development.Shake.Command
+import Development.Shake
 import Data.Maybe
+import Control.Monad.Extra
 import qualified Configure as C
 import qualified C.Base as B
 import qualified Zlib.Build as Zlib
@@ -38,6 +40,8 @@ kernel = B.kernel m
 buildObj :: C.Config -> FilePath -> IO ()
 buildObj config@C.Config{..} cf = cmd $ [cc] ++ ccFlags config ++ ["-c", "-D" ++ cpu, "-I" ++ include , zlibInc, lz4Inc, cf]
 
+buildStatic = True
+
 build :: C.Config -> IO ()
 build config@C.Config{..} = withCurrentDirectory "c" $ do
   -- were in base but rely on defs from config 
@@ -64,6 +68,11 @@ build config@C.Config{..} = withCurrentDirectory "c" $ do
   withCurrentDirectory "../zlib" $ Zlib.build zlibConfig
   -- lz4dep
   -- TODO when buildStatic buildliblz4a
+  whenM (return buildStatic) $ do
+    srcfiles <- getDirectoryFilesIO "../lz4/lib" ["*.c"]
+    cmd_ (Cwd "../lz4/lib") $ [cc] ++ cppflags ++ cflags ++ ["-c"] ++ srcfiles
+    ofiles <- getDirectoryFilesIO "../lz4/lib" ["*.o"]
+    cmd_ (Cwd "../lz4/lib") $ [ar, "rcs", "liblz4.a"] ++ ofiles
 
   -- main which is object file
   {- ${Main}: ${mainobj}
