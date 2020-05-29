@@ -37,13 +37,13 @@ kernel = B.kernel m
 .c.o:
 	$C -c -D${Cpu} -I${Include} ${zlibInc} ${LZ4Inc} $*.c
 -}
-buildObj :: C.Config -> FilePath -> IO ()
+buildObj :: C.Config -> FilePath -> Run ()
 buildObj config@C.Config{..} cf = cmd $ [cc] ++ ccFlags config ++ ["-c", "-D" ++ cpu, "-I" ++ include , zlibInc, lz4Inc, cf]
 
 buildStatic = True
 
-build :: C.Config -> IO ()
-build config@C.Config{..} = withCurrentDirectory "c" $ do
+build :: C.Config -> Run ()
+build config@C.Config{..} = withCmdOptions [Cwd "c"] $ do
   -- were in base but rely on defs from config 
   let kernelLibLinkDeps = [zlibDep, lz4Dep]
       kernelLibLinkLibs = [zlibLib, lz4Lib]
@@ -51,28 +51,28 @@ build config@C.Config{..} = withCurrentDirectory "c" $ do
       kernel_ = fromJust $ either (`lookup` [("kernelLib", kernelLib), ("kernelO", B.kernelO m o)]) Just kernel
   
   -- copy files
-  fs <- listDirectory "../../c"
-  mapM_ B.cpsrc fs -- for all files in ../../c
+  fs <- liftIO $ withCurrentDirectory "c" $ listDirectory "../../c"
+  liftIO $ mapM_ (\f -> withCurrentDirectory "c" $ B.cpsrc f) fs -- for all files in ../../c
   -- build kernel object files
   mapM_ (buildObj config) $ mdsrc:B.kernelsrc -- build kernelobjs
-  cmd_ $ [ar] ++ arflags ++ [kernelLib] ++ kernelObj -- run ar on those object files we just built
+  cmd $ [ar] ++ arflags ++ [kernelLib] ++ kernelObj -- run ar on those object files we just built
   
   -- kernellinkdeps = kernelliblinkdeps = [zlibdep, lz4dep]
   -- zlibdep = "../zlib/libz.a"
   -- ../zlib/configure.log
 
   -- cmd_ [(Cwd "../zlib"),(AddEnv "CFLAGS" $ (unwords cflags) ++ " -m64")] ["./configure", "--64"]
-  zlibConfig <- withCurrentDirectory "../zlib" $ Zlib.Config.config $ cflags ++ ["-m64"]
+  zlibConfig <- liftIO $ withCurrentDirectory "zlib" $ Zlib.Config.config $ cflags ++ ["-m64"]
   -- TODO ZLib.build  ; for now just call make since the info is generated from the above configure
 
-  withCurrentDirectory "../zlib" $ Zlib.build zlibConfig
+  Zlib.build zlibConfig
   -- lz4dep
   -- TODO when buildStatic buildliblz4a
   whenM (return buildStatic) $ do
-    srcfiles <- getDirectoryFilesIO "../lz4/lib" ["*.c"]
-    cmd_ (Cwd "../lz4/lib") $ [cc] ++ cppflags ++ cflags ++ ["-c"] ++ srcfiles
-    ofiles <- getDirectoryFilesIO "../lz4/lib" ["*.o"]
-    cmd_ (Cwd "../lz4/lib") $ [ar, "rcs", "liblz4.a"] ++ ofiles
+    srcfiles <- liftIO $ getDirectoryFilesIO "lz4/lib" ["*.c"]
+    cmd (Cwd "../lz4/lib") $ [cc] ++ cppflags ++ cflags ++ ["-c"] ++ srcfiles
+    ofiles <- liftIO $ getDirectoryFilesIO "lz4/lib" ["*.o"]
+    cmd (Cwd "../lz4/lib") $ [ar, "rcs", "liblz4.a"] ++ ofiles
 
   -- main which is object file
   {- ${Main}: ${mainobj}
@@ -81,7 +81,7 @@ build config@C.Config{..} = withCurrentDirectory "c" $ do
   -- build mainobj
   buildObj config B.mainsrc
   -- copy main obj to Main
-  cmd_ ["cp", "-p", mainObj, main]
+  cmd ["cp", "-p", mainObj, main]
   cmd $ [cc] ++ ccFlags config ++ ["-rdynamic", "-o", scheme, main, kernel_] ++ mdclib ncursesLib ++ kernelLinkLibs ++ ldflags  
 
 {-

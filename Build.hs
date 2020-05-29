@@ -5,9 +5,14 @@ import System.Environment
 import System.Directory
 import System.Exit
 import Control.Monad.Extra
+import Development.Rattle
 
 import Ta6le
 import Configure
+
+buildOptions = RattleOptions ".rattlebuild" (Just "build") "m1" False 0 [] [("PWD", ".")] Nothing False
+
+installOptions = RattleOptions ".rattleinstall" (Just "install") "m1" False 0 [] [("PWD", ".")] Nothing False
 
 machsBuild = let (*) = (,) in
   ["ta6le" * Ta6le.build]
@@ -39,14 +44,14 @@ main = do
 
   case lookup (m config) machsBuild of
     Just act -> do
-      withCurrentDirectory (m config) $ act config
+      withCurrentDirectory (m config) $ rattleRun buildOptions $ act config
     _ -> do
       putStrLn $ "Unknown machine type, expected one of\n " ++ unwords (map fst machsBuild)
       exitFailure
 
   case lookup (m config) machsInstall of
     Just act -> do
-      withCurrentDirectory (m config) $ act config
+      withCurrentDirectory (m config) $ rattleRun installOptions $ act config
     _ -> do
       putStrLn $ "Unknown machine type, expected one of\n " ++ unwords (map fst machsInstall)
       exitFailure
