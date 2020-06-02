@@ -54,6 +54,8 @@ build config@C.Config{..} = withCmdOptions [Cwd "c"] $ do
   fs <- liftIO $ withCurrentDirectory "c" $ listDirectory "../../c"
   liftIO $ mapM_ (\f -> withCurrentDirectory "c" $ B.cpsrc f) fs -- for all files in ../../c
   -- build kernel object files
+  cmd_ [(Cwd "../zlib"),(AddEnv "CFLAGS" $ (unwords cflags) ++ " -m64")] ["./configure", "--64"]
+
   mapM_ (buildObj config) $ mdsrc:B.kernelsrc -- build kernelobjs
   cmd $ [ar] ++ arflags ++ [kernelLib] ++ kernelObj -- run ar on those object files we just built
   
@@ -61,8 +63,7 @@ build config@C.Config{..} = withCmdOptions [Cwd "c"] $ do
   -- zlibdep = "../zlib/libz.a"
   -- ../zlib/configure.log
 
-  cmd_ [(Cwd "../zlib"),(AddEnv "CFLAGS" $ (unwords cflags) ++ " -m64")] ["./configure", "--64"]
-  -- zlibConfig <- liftIO $ withCurrentDirectory "zlib" $ Zlib.Config.config $ cflags ++ ["-m64"]
+    -- zlibConfig <- liftIO $ withCurrentDirectory "zlib" $ Zlib.Config.config $ cflags ++ ["-m64"]
   -- TODO ZLib.build  ; for now just call make since the info is generated from the above configure
   cmd (Cwd "../zlib") ["make"]
 
