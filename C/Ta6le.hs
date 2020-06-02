@@ -61,11 +61,12 @@ build config@C.Config{..} = withCmdOptions [Cwd "c"] $ do
   -- zlibdep = "../zlib/libz.a"
   -- ../zlib/configure.log
 
-  -- cmd_ [(Cwd "../zlib"),(AddEnv "CFLAGS" $ (unwords cflags) ++ " -m64")] ["./configure", "--64"]
-  zlibConfig <- liftIO $ withCurrentDirectory "zlib" $ Zlib.Config.config $ cflags ++ ["-m64"]
+  cmd_ [(Cwd "../zlib"),(AddEnv "CFLAGS" $ (unwords cflags) ++ " -m64")] ["./configure", "--64"]
+  -- zlibConfig <- liftIO $ withCurrentDirectory "zlib" $ Zlib.Config.config $ cflags ++ ["-m64"]
   -- TODO ZLib.build  ; for now just call make since the info is generated from the above configure
+  cmd (Cwd "../zlib") ["make"]
 
-  Zlib.build zlibConfig
+  --Zlib.build zlibConfig
   -- lz4dep
   -- TODO when buildStatic buildliblz4a
   whenM (return buildStatic) $ do
