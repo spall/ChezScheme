@@ -38,6 +38,7 @@ baseobj m = map (-<.> m) basesrc
 compilersrc = ["cpnanopass.ss", "compile.ss", "cback.ss"]
 compilerobj m = map (-<.> m) compilersrc
 
+source aic = allsrc aic ++ ["mkheader.ss"]
 allsrc :: [FilePath] -> [FilePath]
 allsrc archincludes = basesrc ++ compilersrc ++ ["cmacros.ss"] ++ archincludes
   ++ ["setup.ss", "debug.ss", "priminfo.ss", "primdata.ss", "layout.ss", "base-lang.ss"
@@ -50,6 +51,8 @@ patchfile = ""
 patch = "patch"
 petiteBoot_ m = "../boot" </> m </> "petite.boot"
 schemeBoot_ m = "../boot" </> m </> "scheme.boot"
+tmppetiteBoot_ m = "../boot" </> m </> "tmp" </> "petite.boot"
+tmpschemeBoot_ m = "../boot" </> m </> "tmp" </> "scheme.boot"
 cheader_ m = "../boot" </> m </> "scheme.h"
 cequates_ m = "../boot" </> m </> "equates.h"
 revision_ m = "../boot" </> m </> "revision"
@@ -85,6 +88,8 @@ build :: String -> [FilePath] -> Run ()
 build m aic = withCmdOptions [Cwd "s"] $ do
   let petiteBoot = petiteBoot_ m
       schemeBoot = schemeBoot_ m
+      tmppetiteBoot = tmppetiteBoot_ m
+      tmpschemeBoot = tmpschemeBoot_ m
       scheme = scheme_ m exeSuffix
       dirsep = if isWindows then ";" else ":"
       exeSuffix = if isWindows then ".exe" else ""
@@ -96,7 +101,7 @@ build m aic = withCmdOptions [Cwd "s"] $ do
                else liftIO $ D.withCurrentDirectory "s" $ ifM (D.doesPathExist f)
                     (return ())
                     (createSymbolicLink ("../../s" </> f) f)) $
-    (allsrc aic) ++ ["update-revision"]
+    (source aic) ++ ["update-revision"]
     
   -- revision 
   cmd Shell ["./update-revision", ">", revision]
@@ -110,12 +115,12 @@ build m aic = withCmdOptions [Cwd "s"] $ do
   cmd $ ["rm", "-f"] ++ ms ++ ["xpatch", patch] ++ patches ++ sos ++ asms ++ ["script.all", "header.tmp"] ++ htmls
   cmd ["rm", "-rf", "nanopass"]
   -- saveboot
-  cmd ["cp", "-p", "-f", petiteBoot, "../boot" </> m </> "sbb"]
-  cmd ["cp", "-p", "-f", schemeBoot, "../boot" </> m </> "scb"]
+  cmd ["cp", "-p", "-f", tmppetiteBoot, "../boot" </> m </> "sbb"]
+  cmd ["cp", "-p", "-f", tmpschemeBoot, "../boot" </> m </> "scb"]
   -- make all : bootall cheader cequates revision
   -- bootall: allsrc patchfile macroobj nanopass.so makescript
   --macroobj: cmacros.so priminfo.so primvars.so env.so setup.so
-  let f ls so = cmd (AddEnv "SCHEMEHEAPDIRS" ("../boot" </> m)) (AddEnv "CHEZSCHEMELIBDIRS" ".") Shell $ ["echo", "'(reset-handler abort)'"
+  let f d2 ls so = cmd (AddEnv "SCHEMEHEAPDIRS" d2) (AddEnv "CHEZSCHEMELIBDIRS" ".") Shell $ ["echo", "'(reset-handler abort)'"
                              ,"'(base-exception-handler (lambda (c) (fresh-line) (display-condition c) (newline) (reset)))'"
                              ,"'(keyboard-interrupt-handler (lambda () (display \"interrupted---aborting\\n\") (reset)))'"
                              ,"'(optimize-level " ++ o ++ ")'"
@@ -128,11 +133,11 @@ build m aic = withCmdOptions [Cwd "s"] $ do
                              ,"'(subset-mode (quote system))'"
                              ,"'(compile-file \""  ++ so-<.>"ss" ++ "\" \"" ++ so ++ "\")'"
                              ,"|", scheme, "-q"] ++ ls
-  f [] "cmacros.so" -- cmacros.so
-  f ["cmacros.so"] "priminfo.so" --priminfo.so
-  mapM_ (f ["cmacros.so", "priminfo.so"]) ["primvars.so", "env.so", "setup.so"]
+  f ("../boot" </> m </> "tmp")[] "cmacros.so" -- cmacros.so
+  f ("../boot" </> m </> "tmp")["cmacros.so"] "priminfo.so" --priminfo.so
+  mapM_ (f ("../boot" </> m </> "tmp") ["cmacros.so", "priminfo.so"]) ["primvars.so", "env.so", "setup.so"]
   -- nanopass.so
-  cmd (AddEnv "SCHEMEHEAPDIRS" ("../boot" </> m)) (AddEnv "CHEZSCHEMELIBDIRS" ".") Shell ["echo", "'(reset-handler abort)'"
+  cmd (AddEnv "SCHEMEHEAPDIRS" ("../boot" </> m </> "tmp")) (AddEnv "CHEZSCHEMELIBDIRS" ".") Shell ["echo", "'(reset-handler abort)'"
              ,"'(base-exception-handler (lambda (c) (fresh-line) (display-condition c) (newline) (reset)))'"
              ,"'(keyboard-interrupt-handler (lambda () (display \"interrupted---aborting\n\") (reset)))'"
              ,"'(optimize-level " ++ o ++ ")'"
@@ -180,16 +185,14 @@ build m aic = withCmdOptions [Cwd "s"] $ do
 
   cmd (AddEnv "SCHEMEHEAPDIRS" ("../boot" </> m)) (AddEnv "CHEZSCHEMELIBDIRS" ".") $ [scheme, "-q"] ++ macroobj ++ ["--script", "script.all"] -- patchfile goes before --script but its empty so omitted
   -- cheader
-  f ["cmacros.so", "priminfo.so", "primvars.so", "env.so"] "mkheader.so"
-  whenM (liftIO $ D.withCurrentDirectory "s" $ D.doesFileExist cheader) $ cmd ["mv", "-f", cheader, cheader <.> "bak"]
-  cmd (AddEnv "SCHEMEHEAPDIRS" ("../boot" </> m)) (AddEnv "CHEZSCHEMELIBDIRS" ".") Shell $ ["echo", "'(reset-handler abort) (mkscheme.h \"" ++ cheader ++ "\" (quote " ++ m ++ "))'"
-               ,"|", scheme, "-q"] ++ macroobj ++ ["mkheader.so"]
-  cmd Shell ["(if", "`cmp", "-s", cheader, cheader <.> "bak" ++ "`;", "then", "mv", "-f", cheader <.> "bak", cheader ++ ";", "else", "rm", "-f", cheader <.> "bak" ++ ";", "fi)"]
+  f ("../boot" </> m)["cmacros.so", "priminfo.so", "primvars.so", "env.so"] "mkheader.so"
+  cmd (AddEnv "SCHEMEHEAPDIRS" ("../boot" </> m)) (AddEnv "CHEZSCHEMELIBDIRS" ".") Shell $
+    ["(","if", "[", "-r", cheader, "];", "then", "mv", "-f", cheader, cheader <.> "bak", ";", "fi)", "&&","echo", "'(reset-handler abort) (mkscheme.h \"" ++ cheader ++ "\" (quote " ++ m ++ "))'"
+               ,"|", scheme, "-q"] ++ macroobj ++ ["mkheader.so", "&&", "(if", "`cmp", "-s", cheader, cheader <.> "bak" ++ "`;", "then", "mv", "-f", cheader <.> "bak", cheader ++ ";", "else", "rm", "-f", cheader <.> "bak" ++ ";", "fi)"]
   -- cequates
-  whenM (liftIO $ D.withCurrentDirectory "s" $ D.doesFileExist cequates) $ cmd ["mv", "-f", cequates, cequates <.> "bak"]
-  cmd (AddEnv "SCHEMEHEAPDIRS" ("../boot" </> m)) (AddEnv "CHEZSCHEMELIBDIRS" ".") Shell $ ["echo", "'(reset-handler abort) (mkequates.h \"" ++ cequates ++ "\")'"
-               ,"|", scheme, "-q"] ++ macroobj ++ ["mkheader.so"]
-  cmd Shell ["(if", "`cmp", "-s", cequates, cequates <.> "bak" ++ "`;", "then", "mv", "-f", cequates <.> "bak", cequates ++ ";", "else", "rm", "-f", cequates <.> "bak" ++ ";", "fi)"]
+  cmd (AddEnv "SCHEMEHEAPDIRS" ("../boot" </> m)) (AddEnv "CHEZSCHEMELIBDIRS" ".") Shell $
+    ["(", "if", "[", "-r", cequates, "];", "then", "mv", "-f", cequates, cequates <.> "bak", ";", "fi)", "&&", "echo", "'(reset-handler abort) (mkequates.h \"" ++ cequates ++ "\")'"
+               ,"|", scheme, "-q"] ++ macroobj ++ ["mkheader.so", "&&", "(if", "`cmp", "-s", cequates, cequates <.> "bak" ++ "`;", "then", "mv", "-f", cequates <.> "bak", cequates ++ ";", "else", "rm", "-f", cequates <.> "bak" ++ ";", "fi)"]
 
   -- if make checkboot > blah blah then fine
   cmd (AddEnv "SCHEMEHEAPDIRS" ("../boot" </> m)) (AddEnv "CHEZSCHEMELIBDIRS" ".") Shell ["echo", "'(reset-handler abort)'"
@@ -198,6 +201,6 @@ build m aic = withCmdOptions [Cwd "s"] $ do
                          ,"'(#%$fasl-file-equal? \"../boot" </> m </> "sbb\"", "\"../boot" </> m </> "petite.boot\"", "#t)'"
                          ,"'(#%$fasl-file-equal? \"../boot" </> m </> "scb\"", "\"../boot" </> m </> "scheme.boot\"", "#t)'"
                          ,"'(printf \"bootfile comparison succeeded\n\"))'"
-                         ,"|", "../bin" </> m </> "scheme" ++ exeSuffix, "-b", "../boot" </> m </> "sbb", "-q", ";", "if", "$?", "then", "echo 'bootstrap succeeded'", ";", "(exit $?)", ";", "else", "echo 'failed to bootstrap'", ";", "(exit $?)", ";", "fi"]
+                         ,"|", "../bin" </> m </> "scheme" ++ exeSuffix, "-b", "../boot" </> m </> "sbb", "-q", ";", "if", "$?", ";", "then", "echo 'bootstrap succeeded'", ";", "(exit $?)", ";", "else", "echo 'failed to bootstrap'", ";", "(exit $?)", ";", "fi"]
                          
   

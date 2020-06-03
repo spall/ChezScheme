@@ -181,10 +181,16 @@ done
 
 workdir $W/boot
 workdir $W/boot/$M
+workdir $W/boot/$M/tmp
 (cd $W/boot/$M; workln ../../../boot/$M/scheme.h scheme.h)
 (cd $W/boot/$M; workln ../../../boot/$M/equates.h equates.h)
 (cd $W/boot/$M; workln ../../../boot/$M/petite.boot petite.boot)
 (cd $W/boot/$M; workln ../../../boot/$M/scheme.boot scheme.boot)
+(cd $W/boot/$M/tmp; /bin/cp ../../../../boot/$M/scheme.h scheme.h)
+(cd $W/boot/$M/tmp; /bin/cp ../../../../boot/$M/equates.h equates.h)
+(cd $W/boot/$M/tmp; /bin/cp ../../../../boot/$M/petite.boot petite.boot)
+(cd $W/boot/$M/tmp; /bin/cp ../../../../boot/$M/scheme.boot scheme.boot)
+
 (cd $W/boot/$M; workln ../../../boot/$M/def.so def.so)
 (cd $W/boot/$M; workln ../../../boot/$M/edit.so edit.so)
 (cd $W/boot/$M; workln ../../../boot/$M/fact.so fact.so)

@@ -20,7 +20,7 @@ buildliblz4a = withCurrentDirectory "../lz4/lib" $ do
    cmd $ [ar, "rcs", "liblz4.a"] ++ ofiles
 -}
 
-include m = "../boot" </> m
+include m = "../boot" </> m </> "tmp"
 petiteBoot m = "../boot" </> m </> "petite.boot"
 schemeBoot m = "../boot" </> m </> "scheme.boot"
 main m o = "../boot" </> m </> "main" <.> o
