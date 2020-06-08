@@ -1,3 +1,4 @@
+{-# LANGUAGE RecordWildCards #-}
 
 module S.Base(build) where
 
@@ -11,7 +12,7 @@ import System.Exit
 import Development.Rattle
 import Development.Shake
 
-revision m = "../boot" </> m </> "revision"
+-- revision m = "../boot" </> m </> "revision"
 
 {- ordering constraints:
 first: library, prims, mathprims, front, 5_?
@@ -84,6 +85,19 @@ compile = "compile-file"
 src = basesrc ++ compilersrc
 obj m = baseobj m ++ compilerobj m
 
+data Config = Config {m :: String
+                     ,petiteBoot :: String
+                     ,schemeBoot :: String
+                     ,tmppetiteBoot :: String
+                     ,tmpschemeBoot :: String
+                     ,scheme :: String
+                     ,dirsep :: String
+                     ,exeSuffix :: String
+                     ,cheader :: String
+                     ,cequates :: String
+                     ,revision :: String}
+
+
 build :: String -> [FilePath] -> Run ()
 build m aic = withCmdOptions [Cwd "s"] $ do
   let petiteBoot = petiteBoot_ m
@@ -96,6 +110,7 @@ build m aic = withCmdOptions [Cwd "s"] $ do
       cheader = cheader_ m
       cequates = cequates_ m
       revision = revision_ m
+      config = Config{..}
   mapM_ (\f -> if isWindows
                then cmd ["cp", "-p", "../../s" </> f, f]
                else liftIO $ D.withCurrentDirectory "s" $ ifM (D.doesPathExist f)
@@ -112,15 +127,47 @@ build m aic = withCmdOptions [Cwd "s"] $ do
   sos <- liftIO $ getDirectoryFilesIO "s" ["*.so"]
   asms <- liftIO $ getDirectoryFilesIO "s" ["*.asm"]
   htmls <- liftIO $ getDirectoryFilesIO "s" ["*.html"]
-  cmd $ ["rm", "-f"] ++ ms ++ ["xpatch", patch] ++ patches ++ sos ++ asms ++ ["script.all", "header.tmp"] ++ htmls
+  -- cmd $ ["rm", "-f"] ++ ms ++ ["xpatch", patch] ++ patches ++ sos ++ asms ++ ["script.all", "header.tmp"] ++ htmls
   cmd ["rm", "-rf", "nanopass"]
   -- saveboot
   cmd ["cp", "-p", "-f", tmppetiteBoot, "../boot" </> m </> "sbb"]
   cmd ["cp", "-p", "-f", tmpschemeBoot, "../boot" </> m </> "scb"]
+
+  -- BEGIN attempt 1
+
+  liftIO $ D.withCurrentDirectory "s" $ D.createDirectoryIfMissing False "a1"
+  e <- attempt1 config
+  if e then do
+    doCopy
+    else do
+    liftIO $ D.withCurrentDirectory "s" $ D.createDirectoryIfMissing False "a2"
+    e2 <- attempt2 config
+    if e2 then do
+      doCopy
+      else liftIO $ die "fail"
+
+{-
+  if e then do
+    liftIO $ die "fail"
+    liftIO $ D.withCurrentDirectory "s" $ D.createDirectoryIfMissing False "a2"
+    e2 <- attempt2 config
+    if e2 then do
+      liftIO $ D.withCurrentDirectory "s" $ D.createDirectoryIfMissing False "a3"
+      e3 <- attempt3 config
+      if e3 then do liftIO $ putStrLn "bootstrap succeeded"
+                    doCopy
+        else liftIO $ putStrLn "bootstrapping failed"
+      else doCopy
+    else doCopy
+-}
+attempt1 :: Config -> Run Bool
+attempt1 Config{..} = do
+  
+  let scheme_ = scheme
   -- make all : bootall cheader cequates revision
   -- bootall: allsrc patchfile macroobj nanopass.so makescript
   --macroobj: cmacros.so priminfo.so primvars.so env.so setup.so
-  let f d2 ls so = cmd (AddEnv "SCHEMEHEAPDIRS" d2) (AddEnv "CHEZSCHEMELIBDIRS" ".") Shell $ ["echo", "'(reset-handler abort)'"
+  let f d2 ls so = cmd (AddEnv "SCHEMEHEAPDIRS" d2) (AddEnv "CHEZSCHEMELIBDIRS" "..") Shell $ ["echo", "'(reset-handler abort)'"
                              ,"'(base-exception-handler (lambda (c) (fresh-line) (display-condition c) (newline) (reset)))'"
                              ,"'(keyboard-interrupt-handler (lambda () (display \"interrupted---aborting\\n\") (reset)))'"
                              ,"'(optimize-level " ++ o ++ ")'"
@@ -131,11 +178,11 @@ build m aic = withCmdOptions [Cwd "s"] $ do
                              ,"'(compress-level " ++ xl ++ ")'"
                              ,"'(generate-inspector-information #" ++ i ++ ")'"
                              ,"'(subset-mode (quote system))'"
-                             ,"'(compile-file \""  ++ so-<.>"ss" ++ "\" \"" ++ so ++ "\")'"
-                             ,"|", scheme, "-q"] ++ ls
+                             ,"'(compile-file \""  ++ so-<.>"ss" ++ "\" \"" ++ "a1" </> so ++ "\")'"
+                             ,"|", scheme_, "-q"] ++ ls
   f ("../boot" </> m </> "tmp")[] "cmacros.so" -- cmacros.so
-  f ("../boot" </> m </> "tmp")["cmacros.so"] "priminfo.so" --priminfo.so
-  mapM_ (f ("../boot" </> m </> "tmp") ["cmacros.so", "priminfo.so"]) ["primvars.so", "env.so", "setup.so"]
+  f ("../boot" </> m </> "tmp")["a1/cmacros.so"] "priminfo.so" --priminfo.so
+  mapM_ (f ("../boot" </> m </> "tmp") ["a1/cmacros.so", "a1/priminfo.so"]) ["primvars.so", "env.so", "setup.so"]
   -- nanopass.so
   cmd (AddEnv "SCHEMEHEAPDIRS" ("../boot" </> m </> "tmp")) (AddEnv "CHEZSCHEMELIBDIRS" ".") Shell ["echo", "'(reset-handler abort)'"
              ,"'(base-exception-handler (lambda (c) (fresh-line) (display-condition c) (newline) (reset)))'"
@@ -150,8 +197,8 @@ build m aic = withCmdOptions [Cwd "s"] $ do
              ,"'(collect-trip-bytes (expt 2 24))'"
              ,"'(collect-request-handler (lambda () (collect 0 1)))'"
              ,"'(collect 1 2)'"
-             ,"'(compile-library \"../nanopass/nanopass.ss\" \"nanopass.so\")'"
-             ,"|", scheme, "-q", "--libdirs", "\"../nanopass" ++ dirsep ++ dirsep ++ ".\""
+             ,"'(compile-library \"../../nanopass/nanopass.ss\" \"nanopass.so\")'"
+             ,"|", scheme_, "-q", "--libdirs", "\"../nanopass" ++ dirsep ++ dirsep ++ ".\""
              ,"--compile-imported-libraries"]
   -- makescript
   cmd (AddEnv "SCHEMEHEAPDIRS" ("../boot" </> m)) (AddEnv "CHEZSCHEMELIBDIRS" ".") Shell
@@ -183,24 +230,121 @@ build m aic = withCmdOptions [Cwd "s"] $ do
     ,"'(when #" ++ dumpbpd ++ " (profile-dump-data \"" ++ profileDumpBlock ++ "\"))'"
     ,">", "script.all"]
 
-  cmd (AddEnv "SCHEMEHEAPDIRS" ("../boot" </> m)) (AddEnv "CHEZSCHEMELIBDIRS" ".") $ [scheme, "-q"] ++ macroobj ++ ["--script", "script.all"] -- patchfile goes before --script but its empty so omitted
+  cmd (AddEnv "SCHEMEHEAPDIRS" ("../boot" </> m)) (AddEnv "CHEZSCHEMELIBDIRS" ".") $ [scheme_, "-q"] ++ map ("a1" </>) macroobj ++ ["--script", "script.all"] -- patchfile goes before --script but its empty so omitted
   -- cheader
-  f ("../boot" </> m)["cmacros.so", "priminfo.so", "primvars.so", "env.so"] "mkheader.so"
+  f ("../boot" </> m)["a1/cmacros.so", "a1/priminfo.so", "a1/primvars.so", "a1/env.so"] "mkheader.so"
   cmd (AddEnv "SCHEMEHEAPDIRS" ("../boot" </> m)) (AddEnv "CHEZSCHEMELIBDIRS" ".") Shell $
     ["(","if", "[", "-r", cheader, "];", "then", "mv", "-f", cheader, cheader <.> "bak", ";", "fi)", "&&","echo", "'(reset-handler abort) (mkscheme.h \"" ++ cheader ++ "\" (quote " ++ m ++ "))'"
-               ,"|", scheme, "-q"] ++ macroobj ++ ["mkheader.so", "&&", "(if", "`cmp", "-s", cheader, cheader <.> "bak" ++ "`;", "then", "mv", "-f", cheader <.> "bak", cheader ++ ";", "else", "rm", "-f", cheader <.> "bak" ++ ";", "fi)"]
+               ,"|", scheme_, "-q"] ++ map (\f -> "a1" </> f) macroobj ++ ["a1/mkheader.so", "&&", "(if", "`cmp", "-s", cheader, cheader <.> "bak" ++ "`;", "then", "mv", "-f", cheader <.> "bak", cheader ++ ";", "else", "rm", "-f", cheader <.> "bak" ++ ";", "fi)"]
   -- cequates
   cmd (AddEnv "SCHEMEHEAPDIRS" ("../boot" </> m)) (AddEnv "CHEZSCHEMELIBDIRS" ".") Shell $
     ["(", "if", "[", "-r", cequates, "];", "then", "mv", "-f", cequates, cequates <.> "bak", ";", "fi)", "&&", "echo", "'(reset-handler abort) (mkequates.h \"" ++ cequates ++ "\")'"
-               ,"|", scheme, "-q"] ++ macroobj ++ ["mkheader.so", "&&", "(if", "`cmp", "-s", cequates, cequates <.> "bak" ++ "`;", "then", "mv", "-f", cequates <.> "bak", cequates ++ ";", "else", "rm", "-f", cequates <.> "bak" ++ ";", "fi)"]
+               ,"|", scheme_, "-q"] ++ map (\f -> "a1" </> f) macroobj ++ ["a1/mkheader.so", "&&", "(if", "`cmp", "-s", cequates, cequates <.> "bak" ++ "`;", "then", "mv", "-f", cequates <.> "bak", cequates ++ ";", "else", "rm", "-f", cequates <.> "bak" ++ ";", "fi)"]
 
   -- if make checkboot > blah blah then fine
-  cmd (AddEnv "SCHEMEHEAPDIRS" ("../boot" </> m)) (AddEnv "CHEZSCHEMELIBDIRS" ".") Shell ["echo", "'(reset-handler abort)'"
+  cmd (AddEnv "SCHEMEHEAPDIRS" ("../boot" </> m)) (AddEnv "CHEZSCHEMELIBDIRS" ".") Shell ["(", "echo", "'(reset-handler abort)'"
                          ,"'(base-exception-handler (lambda (c) (fresh-line) (display-condition c) (newline) (reset)))'"
                          ,"'(begin'"
                          ,"'(#%$fasl-file-equal? \"../boot" </> m </> "sbb\"", "\"../boot" </> m </> "petite.boot\"", "#t)'"
                          ,"'(#%$fasl-file-equal? \"../boot" </> m </> "scb\"", "\"../boot" </> m </> "scheme.boot\"", "#t)'"
                          ,"'(printf \"bootfile comparison succeeded\n\"))'"
-                         ,"|", "../bin" </> m </> "scheme" ++ exeSuffix, "-b", "../boot" </> m </> "sbb", "-q", ";", "if", "$?", ";", "then", "echo 'bootstrap succeeded'", ";", "(exit $?)", ";", "else", "echo 'failed to bootstrap'", ";", "(exit $?)", ";", "fi"]
-                         
+                         ,"|", "../bin" </> m </> "scheme" ++ exeSuffix, "-b", "../boot" </> m </> "sbb", "-q", ")", ";", "echo", "$?", ">", "a1/attempt1.ec"]
+
+  e1 <- liftIO $ D.withCurrentDirectory "s" $ readFile "a1/attempt1.ec"
+  return $ e1 == "0"
+
+attempt2 :: Config -> Run Bool
+attempt2 Config{..} = do
+  let scheme_ = scheme
+  -- make all : bootall cheader cequates revision
+  -- bootall: allsrc patchfile macroobj nanopass.so makescript
+  --macroobj: cmacros.so priminfo.so primvars.so env.so setup.so
+  let f d2 ls so = cmd (AddEnv "SCHEMEHEAPDIRS" d2) (AddEnv "CHEZSCHEMELIBDIRS" "..") Shell $ ["echo", "'(reset-handler abort)'"
+                             ,"'(base-exception-handler (lambda (c) (fresh-line) (display-condition c) (newline) (reset)))'"
+                             ,"'(keyboard-interrupt-handler (lambda () (display \"interrupted---aborting\\n\") (reset)))'"
+                             ,"'(optimize-level " ++ o ++ ")'"
+                             ,"'(debug-level " ++ d ++ ")'"
+                             ,"'(commonization-level " ++ cl ++ ")'"
+                             ,"'(compile-compressed #" ++ cc ++ ")'"
+                             ,"'(compress-format " ++ xf ++ ")'"
+                             ,"'(compress-level " ++ xl ++ ")'"
+                             ,"'(generate-inspector-information #" ++ i ++ ")'"
+                             ,"'(subset-mode (quote system))'"
+                             ,"'(compile-file \""  ++ so-<.>"ss" ++ "\" \"" ++ "a2" </> so ++ "\")'"
+                             ,"|", scheme_, "-q"] ++ ls
+  f ("../boot" </> m </> "tmp")[] "cmacros.so" -- cmacros.so
+  f ("../boot" </> m </> "tmp")["a2/cmacros.so"] "priminfo.so" --priminfo.so
+  mapM_ (f ("../boot" </> m </> "tmp") ["a2/cmacros.so", "a2/priminfo.so"]) ["primvars.so", "env.so", "setup.so"]
+  -- nanopass.so
+  cmd (AddEnv "SCHEMEHEAPDIRS" ("../boot" </> m </> "tmp")) (AddEnv "CHEZSCHEMELIBDIRS" ".") Shell ["echo", "'(reset-handler abort)'"
+             ,"'(base-exception-handler (lambda (c) (fresh-line) (display-condition c) (newline) (reset)))'"
+             ,"'(keyboard-interrupt-handler (lambda () (display \"interrupted---aborting\n\") (reset)))'"
+             ,"'(optimize-level " ++ o ++ ")'"
+             ,"'(debug-level " ++ d ++ ")'"
+             ,"'(commonization-level " ++ cl ++ ")'"
+             ,"'(compile-compressed #" ++ cc ++ ")'"
+             ,"'(compress-format " ++ xf ++ ")'"
+             ,"'(compress-level " ++ xl ++ ")'"
+             ,"'(generate-inspector-information #" ++ i ++ ")'"
+             ,"'(collect-trip-bytes (expt 2 24))'"
+             ,"'(collect-request-handler (lambda () (collect 0 1)))'"
+             ,"'(collect 1 2)'"
+             ,"'(compile-library \"../../nanopass/nanopass.ss\" \"nanopass.so\")'"
+             ,"|", scheme_, "-q", "--libdirs", "\"../nanopass" ++ dirsep ++ dirsep ++ ".\""
+             ,"--compile-imported-libraries"]
+  -- makescript
+  cmd (AddEnv "SCHEMEHEAPDIRS" ("../boot" </> m)) (AddEnv "CHEZSCHEMELIBDIRS" ".") Shell
+    ["echo", "'(reset-handler abort)'"
+    ,"'(for-each load (command-line-arguments))'"
+    ,"'(optimize-level " ++ o ++ ")'"
+    ,"'(debug-level " ++ d ++ ")'"
+    ,"'(commonization-level " ++ cl ++ ")'"
+    ,"'(compile-compressed #" ++ cc ++ ")'"
+    ,"'(compress-format " ++ xf ++ ")'"
+    ,"'(compress-level " ++ xl ++ ")'"
+    ,"'(when #" ++ p ++ " (compile-profile (quote source)))'"
+    ,"'(when #" ++ bp ++ " (compile-profile (quote block)))'"
+    ,"'(when #" ++ loadspd ++ " (profile-load-data \"" ++ profileDumpSource ++ "\"))'"
+    ,"'(when #" ++ loadbpd ++ " (profile-load-data \"" ++ profileDumpBlock ++ "\"))'"
+    ,"'(generate-inspector-information #" ++ i ++ ")'"
+    ,"'(generate-allocation-counts #" ++ gac ++ ")'"
+    ,"'(generate-instruction-counts #" ++ gic ++ ")'"
+    ,"'(#%$enable-pass-timing  #" ++ pps ++ ")'"
+    ,"'(run-cp0 (lambda (cp0 x) (do ([i " ++ cp0 ++ " (fx- i 1)] [x x (cp0 x)]) ((fx= i 0) x))))'"
+    ,"'(collect-trip-bytes (expt 2 24))'"
+    ,"'(collect-request-handler (lambda () (collect 0 1)))'"
+    ,"'(time (for-each (lambda (x y) (collect 1 2) (" ++ compile ++ " (symbol->string x) (symbol->string y) (quote " ++ m ++ "))) (quote (" ++ unwords src ++ ")) (quote (" ++ unwords (obj m) ++ "))))'"
+    ,"'(when #" ++ pps ++ " (#%$print-pass-stats))'"
+    ,"'(apply #%$make-boot-file \"" ++ petiteBoot ++ "\" (quote " ++ m ++ ") (quote ()) (map symbol->string (quote (" ++ unwords (baseobj m) ++ "))))'"
+    ,"'(apply #%$make-boot-file \"" ++ schemeBoot ++ "\" (quote " ++ m ++ ") (quote (\"petite\")) (map symbol->string (quote (" ++ unwords (compilerobj m) ++ "))))'"
+    ,"'(when #" ++ pdhtml ++ " (profile-dump-html))'"
+    ,"'(when #" ++ dumpspd ++ " (profile-dump-data \"" ++ profileDumpSource ++ "\"))'"
+    ,"'(when #" ++ dumpbpd ++ " (profile-dump-data \"" ++ profileDumpBlock ++ "\"))'"
+    ,">", "script.all"]
+
+  cmd (AddEnv "SCHEMEHEAPDIRS" ("../boot" </> m)) (AddEnv "CHEZSCHEMELIBDIRS" ".") $ [scheme_, "-q"] ++ map (\f -> "a2" </> f) macroobj ++ ["--script", "script.all"] -- patchfile goes before --script but its empty so omitted
+  -- cheader
+  f ("../boot" </> m)["a2/cmacros.so", "a2/priminfo.so", "a2/primvars.so", "a2/env.so"] "mkheader.so"
+  cmd (AddEnv "SCHEMEHEAPDIRS" ("../../boot" </> m)) (AddEnv "CHEZSCHEMELIBDIRS" ".") Shell $
+    ["(","if", "[", "-r", cheader, "];", "then", "mv", "-f", cheader, cheader <.> "bak", ";", "fi)", "&&","echo", "'(reset-handler abort) (mkscheme.h \"" ++ cheader ++ "\" (quote " ++ m ++ "))'"
+               ,"|", scheme_, "-q"] ++ map (\f -> "a2" </> f) macroobj ++ ["a2/mkheader.so", "&&", "(if", "`cmp", "-s", cheader, cheader <.> "bak" ++ "`;", "then", "mv", "-f", cheader <.> "bak", cheader ++ ";", "else", "rm", "-f", cheader <.> "bak" ++ ";", "fi)"]
+  -- cequates
+  cmd (AddEnv "SCHEMEHEAPDIRS" ("../boot" </> m)) (AddEnv "CHEZSCHEMELIBDIRS" ".") Shell $
+    ["(", "if", "[", "-r", cequates, "];", "then", "mv", "-f", cequates, cequates <.> "bak", ";", "fi)", "&&", "echo", "'(reset-handler abort) (mkequates.h \"" ++ cequates ++ "\")'"
+               ,"|", scheme_, "-q"] ++ map (\f -> "a2" </> f) macroobj ++ ["a2/mkheader.so", "&&", "(if", "`cmp", "-s", cequates, cequates <.> "bak" ++ "`;", "then", "mv", "-f", cequates <.> "bak", cequates ++ ";", "else", "rm", "-f", cequates <.> "bak" ++ ";", "fi)"]
+
+  -- if make checkboot > blah blah then fine
+  cmd (AddEnv "SCHEMEHEAPDIRS" ("../boot" </> m)) (AddEnv "CHEZSCHEMELIBDIRS" ".") Shell ["(", "echo", "'(reset-handler abort)'"
+                         ,"'(base-exception-handler (lambda (c) (fresh-line) (display-condition c) (newline) (reset)))'"
+                         ,"'(begin'"
+                         ,"'(#%$fasl-file-equal? \"../boot" </> m </> "sbb\"", "\"../boot" </> m </> "petite.boot\"", "#t)'"
+                         ,"'(#%$fasl-file-equal? \"../boot" </> m </> "scb\"", "\"../boot" </> m </> "scheme.boot\"", "#t)'"
+                         ,"'(printf \"bootfile comparison succeeded\n\"))'"
+                         ,"|", "../bin" </> m </> "scheme" ++ exeSuffix, "-b", "../boot" </> m </> "sbb", "-q", ")", ";", "echo", "$?", ">", "a2/attempt2.ec"]
+
+  e1 <- liftIO $ D.withCurrentDirectory "s" $ readFile "a2/attempt2.ec"
+  return $ e1 == "0"
   
+
+doCopy :: Run ()
+doCopy = liftIO $ putStrLn "todo"
