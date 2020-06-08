@@ -164,6 +164,8 @@ attempt1 :: Config -> Run Bool
 attempt1 Config{..} = do
   
   let scheme_ = scheme
+      schemeBoot_ = "a1" </> "scheme.boot"
+      petiteBoot_ = "a1" </> "petite.boot"
   -- make all : bootall cheader cequates revision
   -- bootall: allsrc patchfile macroobj nanopass.so makescript
   --macroobj: cmacros.so priminfo.so primvars.so env.so setup.so
@@ -221,16 +223,16 @@ attempt1 Config{..} = do
     ,"'(run-cp0 (lambda (cp0 x) (do ([i " ++ cp0 ++ " (fx- i 1)] [x x (cp0 x)]) ((fx= i 0) x))))'"
     ,"'(collect-trip-bytes (expt 2 24))'"
     ,"'(collect-request-handler (lambda () (collect 0 1)))'"
-    ,"'(time (for-each (lambda (x y) (collect 1 2) (" ++ compile ++ " (symbol->string x) (symbol->string y) (quote " ++ m ++ "))) (quote (" ++ unwords src ++ ")) (quote (" ++ unwords (obj m) ++ "))))'"
+    ,"'(time (for-each (lambda (x y) (collect 1 2) (" ++ compile ++ " (symbol->string x) (symbol->string y) (quote " ++ m ++ "))) (quote (" ++ unwords src ++ ")) (quote (" ++ (unwords $ map ("a1" </>) (obj m)) ++ "))))'"
     ,"'(when #" ++ pps ++ " (#%$print-pass-stats))'"
-    ,"'(apply #%$make-boot-file \"" ++ petiteBoot ++ "\" (quote " ++ m ++ ") (quote ()) (map symbol->string (quote (" ++ unwords (baseobj m) ++ "))))'"
-    ,"'(apply #%$make-boot-file \"" ++ schemeBoot ++ "\" (quote " ++ m ++ ") (quote (\"petite\")) (map symbol->string (quote (" ++ unwords (compilerobj m) ++ "))))'"
+    ,"'(apply #%$make-boot-file \"" ++ petiteBoot ++ "\" (quote " ++ m ++ ") (quote ()) (map symbol->string (quote (" ++ (unwords $ map ("a1" </>) (baseobj m)) ++ "))))'"
+    ,"'(apply #%$make-boot-file \"" ++ schemeBoot_ ++ "\" (quote " ++ m ++ ") (quote (\"petite\")) (map symbol->string (quote (" ++ (unwords $ map ("a1" </>) (compilerobj m)) ++ "))))'"
     ,"'(when #" ++ pdhtml ++ " (profile-dump-html))'"
     ,"'(when #" ++ dumpspd ++ " (profile-dump-data \"" ++ profileDumpSource ++ "\"))'"
     ,"'(when #" ++ dumpbpd ++ " (profile-dump-data \"" ++ profileDumpBlock ++ "\"))'"
-    ,">", "script.all"]
+    ,">", "a1/script.all"]
 
-  cmd (AddEnv "SCHEMEHEAPDIRS" ("../boot" </> m)) (AddEnv "CHEZSCHEMELIBDIRS" ".") $ [scheme_, "-q"] ++ map ("a1" </>) macroobj ++ ["--script", "script.all"] -- patchfile goes before --script but its empty so omitted
+  cmd (AddEnv "SCHEMEHEAPDIRS" ("../boot" </> m)) (AddEnv "CHEZSCHEMELIBDIRS" ".") $ [scheme_, "-q"] ++ map ("a1" </>) macroobj ++ ["--script", "a1/script.all"] -- patchfile goes before --script but its empty so omitted
   -- cheader
   f ("../boot" </> m)["a1/cmacros.so", "a1/priminfo.so", "a1/primvars.so", "a1/env.so"] "mkheader.so"
   cmd (AddEnv "SCHEMEHEAPDIRS" ("../boot" </> m)) (AddEnv "CHEZSCHEMELIBDIRS" ".") Shell $
@@ -253,9 +255,14 @@ attempt1 Config{..} = do
   e1 <- liftIO $ D.withCurrentDirectory "s" $ readFile "a1/attempt1.ec"
   return $ e1 == "0"
 
+
+--  attempt2
 attempt2 :: Config -> Run Bool
 attempt2 Config{..} = do
+  
   let scheme_ = scheme
+      schemeBoot_ = "a2" </> "scheme.boot"
+      petiteBoot_ = "a2" </> "petite.boot"
   -- make all : bootall cheader cequates revision
   -- bootall: allsrc patchfile macroobj nanopass.so makescript
   --macroobj: cmacros.so priminfo.so primvars.so env.so setup.so
@@ -313,19 +320,19 @@ attempt2 Config{..} = do
     ,"'(run-cp0 (lambda (cp0 x) (do ([i " ++ cp0 ++ " (fx- i 1)] [x x (cp0 x)]) ((fx= i 0) x))))'"
     ,"'(collect-trip-bytes (expt 2 24))'"
     ,"'(collect-request-handler (lambda () (collect 0 1)))'"
-    ,"'(time (for-each (lambda (x y) (collect 1 2) (" ++ compile ++ " (symbol->string x) (symbol->string y) (quote " ++ m ++ "))) (quote (" ++ unwords src ++ ")) (quote (" ++ unwords (obj m) ++ "))))'"
+    ,"'(time (for-each (lambda (x y) (collect 1 2) (" ++ compile ++ " (symbol->string x) (symbol->string y) (quote " ++ m ++ "))) (quote (" ++ unwords src ++ ")) (quote (" ++ (unwords $ map ("a2" </>) (obj m)) ++ "))))'"
     ,"'(when #" ++ pps ++ " (#%$print-pass-stats))'"
-    ,"'(apply #%$make-boot-file \"" ++ petiteBoot ++ "\" (quote " ++ m ++ ") (quote ()) (map symbol->string (quote (" ++ unwords (baseobj m) ++ "))))'"
-    ,"'(apply #%$make-boot-file \"" ++ schemeBoot ++ "\" (quote " ++ m ++ ") (quote (\"petite\")) (map symbol->string (quote (" ++ unwords (compilerobj m) ++ "))))'"
+    ,"'(apply #%$make-boot-file \"" ++ petiteBoot_ ++ "\" (quote " ++ m ++ ") (quote ()) (map symbol->string (quote (" ++ (unwords $ map ("a2" </>) (baseobj m)) ++ "))))'"
+    ,"'(apply #%$make-boot-file \"" ++ schemeBoot_ ++ "\" (quote " ++ m ++ ") (quote (\"petite\")) (map symbol->string (quote (" ++ (unwords $ map ("a2" </>) (compilerobj m)) ++ "))))'"
     ,"'(when #" ++ pdhtml ++ " (profile-dump-html))'"
     ,"'(when #" ++ dumpspd ++ " (profile-dump-data \"" ++ profileDumpSource ++ "\"))'"
     ,"'(when #" ++ dumpbpd ++ " (profile-dump-data \"" ++ profileDumpBlock ++ "\"))'"
-    ,">", "script.all"]
+    ,">", "a2/script.all"]
 
-  cmd (AddEnv "SCHEMEHEAPDIRS" ("../boot" </> m)) (AddEnv "CHEZSCHEMELIBDIRS" ".") $ [scheme_, "-q"] ++ map (\f -> "a2" </> f) macroobj ++ ["--script", "script.all"] -- patchfile goes before --script but its empty so omitted
+  cmd (AddEnv "SCHEMEHEAPDIRS" ("../boot" </> m)) (AddEnv "CHEZSCHEMELIBDIRS" ".") $ [scheme_, "-q"] ++ map ("a2" </>) macroobj ++ ["--script", "a2/script.all"] -- patchfile goes before --script but its empty so omitted
   -- cheader
   f ("../boot" </> m)["a2/cmacros.so", "a2/priminfo.so", "a2/primvars.so", "a2/env.so"] "mkheader.so"
-  cmd (AddEnv "SCHEMEHEAPDIRS" ("../../boot" </> m)) (AddEnv "CHEZSCHEMELIBDIRS" ".") Shell $
+  cmd (AddEnv "SCHEMEHEAPDIRS" ("../boot" </> m)) (AddEnv "CHEZSCHEMELIBDIRS" ".") Shell $
     ["(","if", "[", "-r", cheader, "];", "then", "mv", "-f", cheader, cheader <.> "bak", ";", "fi)", "&&","echo", "'(reset-handler abort) (mkscheme.h \"" ++ cheader ++ "\" (quote " ++ m ++ "))'"
                ,"|", scheme_, "-q"] ++ map (\f -> "a2" </> f) macroobj ++ ["a2/mkheader.so", "&&", "(if", "`cmp", "-s", cheader, cheader <.> "bak" ++ "`;", "then", "mv", "-f", cheader <.> "bak", cheader ++ ";", "else", "rm", "-f", cheader <.> "bak" ++ ";", "fi)"]
   -- cequates
@@ -344,7 +351,7 @@ attempt2 Config{..} = do
 
   e1 <- liftIO $ D.withCurrentDirectory "s" $ readFile "a2/attempt2.ec"
   return $ e1 == "0"
-  
+
 
 doCopy :: Run ()
 doCopy = liftIO $ putStrLn "todo"
