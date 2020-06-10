@@ -83,7 +83,7 @@ build config@C.Config{..} = withCmdOptions [Cwd "c"] $ do
   -- build mainobj
   buildObj config B.mainsrc
   -- copy main obj to Main
-  cmd ["cp", "-p", mainObj, main]
+  cmd ["/bin/cp", "-p", mainObj, main]
   cmd $ [cc] ++ ccFlags config ++ ["-rdynamic", "-o", scheme, main, kernel_] ++ mdclib ncursesLib ++ kernelLinkLibs ++ ldflags  
 
 {-
