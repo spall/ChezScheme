@@ -131,25 +131,23 @@ build m aic = withCmdOptions [Cwd "s"] $ do
   -- cmd $ ["rm", "-f"] ++ ms ++ ["xpatch", patch] ++ patches ++ sos ++ asms ++ ["script.all", "header.tmp"] ++ htmls
   cmd ["rm", "-rf", "nanopass"]
   -- saveboot
-  cmd ["cp", "-p", "-f", tmppetiteBoot, "../boot" </> m </> "sbb"]
-  cmd ["cp", "-p", "-f", tmpschemeBoot, "../boot" </> m </> "scb"]
 
   -- BEGIN attempt 1
 
   liftIO $ D.withCurrentDirectory "s" $ D.createDirectoryIfMissing False "a1"
-  e <- bootstrap ("../boot" </> m) "a1" config
+  e <- bootstrap ("../boot" </> m </> "tmp") "a1" config
   if e then do
-    doCopy
+    doCopy m "a1/scheme.boot" "a1/petite.boot" "a1/scheme.h" "a1/equates.h"
     else do
     liftIO $ D.withCurrentDirectory "s" $ D.createDirectoryIfMissing False "a2"
     e2 <- bootstrap "a1" "a2" config
     if e2 then do
-      doCopy
+      doCopy m "a2/scheme.boot" "a2/petite.boot" "a2/scheme.h" "a2/equates.h"
       else do
       liftIO $ D.withCurrentDirectory "s" $ D.createDirectoryIfMissing False "a3"
       e3 <- bootstrap "a2" "a3" config
       if e3 then do
-        doCopy
+        doCopy m "a3/scheme.boot" "a3/petite.boot" "a3/scheme.h" "a3/equates.h"
         else do
         liftIO $ die "fail"
 
@@ -176,7 +174,7 @@ bootstrap pd dir Config{..} = do
       schemeBoot = dir </> "scheme.boot"
       petiteBoot = dir </> "petite.boot"
       cheader = dir </> "scheme.h"
-      cequates = dir <> "equates.h"
+      cequates = dir </> "equates.h"
   -- make all : bootall cheader cequates revision
   -- bootall: allsrc patchfile macroobj nanopass.so makescript
   --macroobj: cmacros.so priminfo.so primvars.so env.so setup.so
@@ -266,5 +264,9 @@ bootstrap pd dir Config{..} = do
   e1 <- liftIO $ D.withCurrentDirectory "s" $ readFile $ dir </> "attempt1.ec"
   return $ (trim e1) == "0"
 
-doCopy :: Run ()
-doCopy = liftIO $ putStrLn "todo"
+doCopy :: String -> FilePath -> FilePath -> FilePath -> FilePath -> Run ()
+doCopy m sb pb ch ce = do
+  cmd ["cp", "-p", sb, "../boot" </> m </> "scheme.boot"]
+  cmd ["cp", "-p", pb, "../boot" </> m </> "petite.boot"]
+  cmd ["cp", "-p", ch, "../boot" </> m </> "scheme.h"]
+  cmd ["cp", "-p", ce, "../boot" </> m </> "equates.h"]
